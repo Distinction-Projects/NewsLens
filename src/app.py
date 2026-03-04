@@ -1,9 +1,14 @@
+import sys
 from pathlib import Path
 from dash import Dash, dcc
 import dash
 import dash_bootstrap_components as dbc
 
 BASE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BASE_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 ASSETS_DIR = BASE_DIR / "assets"
 PAGES_DIR = BASE_DIR / "pages"
 
@@ -17,6 +22,9 @@ app = Dash(
     prevent_initial_callbacks=True,
 )
 server = app.server
+
+from src.api.news_endpoints import register_news_endpoints
+register_news_endpoints(server)
 
 ############################################################################################
 # Import shared components

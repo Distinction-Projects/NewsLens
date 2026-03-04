@@ -25,3 +25,15 @@ services:
       - key: WORKER_TMP_DIR
         value: "/dev/shm"
         type: GENERAL
+      - key: RSS_DAILY_JSON_URL
+        value: "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json"
+        type: GENERAL
+      - key: RSS_CACHE_TTL_SECONDS
+        value: "86400"
+        type: GENERAL
+      - key: RSS_HTTP_TIMEOUT_SECONDS
+        value: "20"
+        type: GENERAL
+      - key: RSS_MAX_AGE_SECONDS
+        value: "129600"
+        type: GENERAL

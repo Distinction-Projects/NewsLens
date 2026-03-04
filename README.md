@@ -57,6 +57,40 @@ If you want to mirror the DigitalOcean command locally, run:
 gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:${PORT:-8050} --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}
 ```
 
+### RSS Digest API (read-only consumer)
+This app consumes the app-facing precomputed contract JSON from RSS_Feeds and exposes runtime APIs without rebuilding the image for each data update.
+
+Set these environment variables:
+- `RSS_DAILY_JSON_URL` (optional): upstream JSON URL. Default:
+  `https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json`
+- `RSS_CACHE_TTL_SECONDS` (optional, default `86400`): in-memory TTL cache duration.
+- `RSS_HTTP_TIMEOUT_SECONDS` (optional, default `20`): HTTP timeout for upstream fetches.
+- `RSS_MAX_AGE_SECONDS` (optional, default `129600`): freshness SLO for `generated_at` (36 hours).
+
+Available endpoints:
+- `GET /api/news/digest/latest`: latest item from the digest feed.
+- `GET /api/news/digest`: full/filtered digest list.
+- `GET /api/news/stats`: derived source/tag/score/time stats from normalized articles.
+- `GET /health/news-freshness`: health check based on payload `generated_at`.
+
+Dash pages for this data:
+- `/news/digest`: filterable digest view and latest-card view.
+- `/news/stats`: charts/cards for source, tags, score distribution, and daily counts.
+
+Optional query params on digest endpoints:
+- `date=YYYY-MM-DD`
+- `tag=<tag>`
+- `source=<source>`
+- `limit=<positive-int>` (`/api/news/digest` only)
+- `refresh=true` (forces a cache refresh)
+
+Filter semantics:
+- `date` uses UTC date from parsed `articles[].published`.
+- `tag` matches `ai_tags` and `topic_tags` (case-insensitive exact match).
+- `source` matches `source.name`, `source.id`, and `feed.name` (case-insensitive contains).
+
+If upstream fetch fails, the app serves the last successful payload (last-good fallback) and reports the fetch error in response metadata. The client also supports ETag conditional requests (`If-None-Match`) to avoid re-downloading unchanged artifacts.
+
 ### Working with data
 - The default AirPassengers sample lives in `src/data/AirPassengers.csv`. Replace that file (keep the `Time` and `Values` headers) to experiment with your own series.
 - Restart the app after swapping data to ensure the in-memory dataset refreshes.
