@@ -326,14 +326,76 @@ def sort_records_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(records, key=lambda row: _record_datetime(row) or epoch, reverse=True)
 
 
+_SCORE_DISTRIBUTION_BINS = (
+    {"label": "0-20", "min": 0, "max": 20},
+    {"label": "20-40", "min": 20, "max": 40},
+    {"label": "40-60", "min": 40, "max": 60},
+    {"label": "60-80", "min": 60, "max": 80},
+    {"label": "80-100", "min": 80, "max": 100},
+)
+_SCORE_HISTOGRAM_BIN_LABELS = tuple(f"{start}-{start + 10}" for start in range(0, 100, 10))
+_TAG_COUNT_DISTRIBUTION_LABELS = ("0", "1", "2", "3", "4", "5+")
+_TAG_COUNT_HEATMAP_LABELS = ("0", "1", "2", "3", "4+")
+_SCORE_HEATMAP_LABELS = tuple(bin_def["label"] for bin_def in _SCORE_DISTRIBUTION_BINS)
+
+
+def _score_distribution_bin_index(score_percent: float) -> int:
+    if score_percent < 20:
+        return 0
+    if score_percent < 40:
+        return 1
+    if score_percent < 60:
+        return 2
+    if score_percent < 80:
+        return 3
+    return 4
+
+
+def _score_histogram_label(score_percent: float) -> str:
+    bounded = min(max(score_percent, 0.0), 100.0)
+    if bounded >= 100.0:
+        return "90-100"
+    lower = int(bounded // 10) * 10
+    upper = lower + 10
+    return f"{lower}-{upper}"
+
+
+def _tag_count_distribution_label(tag_count: int) -> str:
+    if tag_count <= 0:
+        return "0"
+    if tag_count >= 5:
+        return "5+"
+    return str(tag_count)
+
+
+def _tag_count_heatmap_label(tag_count: int) -> str:
+    if tag_count <= 0:
+        return "0"
+    if tag_count >= 4:
+        return "4+"
+    return str(tag_count)
+
+
+def _score_heatmap_label(score_percent: float) -> str:
+    return _SCORE_DISTRIBUTION_BINS[_score_distribution_bin_index(score_percent)]["label"]
+
+
 def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     source_counter: Counter[str] = Counter()
     tag_counter: Counter[str] = Counter()
     daily_counter: Counter[str] = Counter()
+    publish_hour_counter: Counter[int] = Counter()
+    tag_count_distribution_counter: Counter[str] = Counter()
+    score_histogram_counter: Counter[str] = Counter()
+    source_tag_counter: Counter[tuple[str, str]] = Counter()
+    score_tag_heatmap_counter: Counter[tuple[str, str]] = Counter()
+    high_score_source_counter: Counter[str] = Counter()
+    source_score_values: dict[str, list[float]] = {}
 
     score_percents: list[float] = []
     scored_articles = 0
     high_scoring_articles = 0
+    score_bins = [{**bin_def, "count": 0} for bin_def in _SCORE_DISTRIBUTION_BINS]
 
     for record in records:
         source = record.get("source")
@@ -346,10 +408,15 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         unique_tags = {tag.strip() for tag in _tag_values_for_record(record) if tag.strip()}
         for tag in unique_tags:
             tag_counter[tag] += 1
+            source_tag_counter[(source_label, tag)] += 1
+
+        tag_count = len(unique_tags)
+        tag_count_distribution_counter[_tag_count_distribution_label(tag_count)] += 1
 
         published_dt = _record_datetime(record)
         if published_dt is not None:
             daily_counter[published_dt.date().isoformat()] += 1
+            publish_hour_counter[published_dt.hour] += 1
 
         score = record.get("score")
         score_obj = score if isinstance(score, dict) else {}
@@ -364,35 +431,87 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
             percent = (value / max_value) * 100
 
         if percent is not None:
-            score_percents.append(percent)
+            bounded_percent = min(max(percent, 0.0), 100.0)
+            score_percents.append(bounded_percent)
+            source_score_values.setdefault(source_label, []).append(bounded_percent)
+            score_bins[_score_distribution_bin_index(bounded_percent)]["count"] += 1
+            score_histogram_counter[_score_histogram_label(bounded_percent)] += 1
+            score_tag_heatmap_counter[(_score_heatmap_label(bounded_percent), _tag_count_heatmap_label(tag_count))] += 1
 
         high_score = record.get("high_score")
         if isinstance(high_score, dict):
             high_scoring_articles += 1
-
-    score_bins = [
-        {"label": "0-20", "min": 0, "max": 20, "count": 0},
-        {"label": "20-40", "min": 20, "max": 40, "count": 0},
-        {"label": "40-60", "min": 40, "max": 60, "count": 0},
-        {"label": "60-80", "min": 60, "max": 80, "count": 0},
-        {"label": "80-100", "min": 80, "max": 100, "count": 0},
-    ]
-    for score_percent in score_percents:
-        bounded = min(max(score_percent, 0.0), 100.0)
-        if bounded < 20:
-            score_bins[0]["count"] += 1
-        elif bounded < 40:
-            score_bins[1]["count"] += 1
-        elif bounded < 60:
-            score_bins[2]["count"] += 1
-        elif bounded < 80:
-            score_bins[3]["count"] += 1
-        else:
-            score_bins[4]["count"] += 1
+            high_score_source_counter[source_label] += 1
 
     source_counts = [{"source": source, "count": count} for source, count in source_counter.most_common()]
     tag_counts = [{"tag": tag, "count": count} for tag, count in tag_counter.most_common()]
     daily_counts = [{"date": day, "count": daily_counter[day]} for day in sorted(daily_counter.keys())]
+    publish_hour_counts = [{"hour": hour, "count": publish_hour_counter.get(hour, 0)} for hour in range(24)]
+
+    source_score_summary: list[dict[str, Any]] = []
+    for source_name, source_count in source_counter.most_common():
+        values = source_score_values.get(source_name, [])
+        source_score_summary.append(
+            {
+                "source": source_name,
+                "count": source_count,
+                "scored_count": len(values),
+                "avg_percent": (sum(values) / len(values)) if values else None,
+                "min_percent": min(values) if values else None,
+                "max_percent": max(values) if values else None,
+            }
+        )
+
+    score_histogram_bins = []
+    for label in _SCORE_HISTOGRAM_BIN_LABELS:
+        lower, upper = label.split("-", 1)
+        score_histogram_bins.append(
+            {
+                "label": label,
+                "min": int(lower),
+                "max": int(upper),
+                "count": score_histogram_counter.get(label, 0),
+            }
+        )
+
+    tag_count_distribution = []
+    for label in _TAG_COUNT_DISTRIBUTION_LABELS:
+        if label == "5+":
+            min_value, max_value = 5, None
+        else:
+            value = int(label)
+            min_value, max_value = value, value
+        tag_count_distribution.append(
+            {
+                "label": label,
+                "min": min_value,
+                "max": max_value,
+                "count": tag_count_distribution_counter.get(label, 0),
+            }
+        )
+
+    source_tag_matrix = [
+        {"source": source_name, "tag": tag_name, "count": count}
+        for (source_name, tag_name), count in sorted(
+            source_tag_counter.items(),
+            key=lambda item: (-item[1], item[0][0].lower(), item[0][1].lower()),
+        )
+    ]
+
+    score_tag_count_heatmap = [
+        {
+            "score_bin": score_bin,
+            "tag_count_bin": tag_count_bin,
+            "count": score_tag_heatmap_counter.get((score_bin, tag_count_bin), 0),
+        }
+        for tag_count_bin in _TAG_COUNT_HEATMAP_LABELS
+        for score_bin in _SCORE_HEATMAP_LABELS
+    ]
+
+    high_score_by_source = [
+        {"source": source_name, "count": count}
+        for source_name, count in high_score_source_counter.most_common()
+    ]
 
     summary = payload.get("summary") if isinstance(payload, dict) else None
     analysis = payload.get("analysis") if isinstance(payload, dict) else None
@@ -415,6 +534,15 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
             "min_percent": min(score_percents) if score_percents else None,
             "max_percent": max(score_percents) if score_percents else None,
             "count": len(score_percents),
+        },
+        "chart_aggregates": {
+            "score_histogram_bins": score_histogram_bins,
+            "tag_count_distribution": tag_count_distribution,
+            "publish_hour_counts_utc": publish_hour_counts,
+            "source_score_summary": source_score_summary,
+            "source_tag_matrix": source_tag_matrix,
+            "score_tag_count_heatmap": score_tag_count_heatmap,
+            "high_score_by_source": high_score_by_source,
         },
         "upstream_summary": summary if isinstance(summary, dict) else {},
         "upstream_analysis": analysis if isinstance(analysis, dict) else {},

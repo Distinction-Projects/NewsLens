@@ -66,6 +66,9 @@ Set these environment variables:
 - `RSS_CACHE_TTL_SECONDS` (optional, default `86400`): in-memory TTL cache duration.
 - `RSS_HTTP_TIMEOUT_SECONDS` (optional, default `20`): HTTP timeout for upstream fetches.
 - `RSS_MAX_AGE_SECONDS` (optional, default `129600`): freshness SLO for `generated_at` (36 hours).
+- `NEWS_FIGURE_CACHE_TTL_SECONDS` (optional, default `21600`): in-memory TTL for rendered chart images.
+- `NEWS_FIGURE_CACHE_MAX_ITEMS` (optional, default `128`): max cached rendered chart images.
+- `NEWS_FIGURE_OUTPUT_FORMAT` (optional, `png` or `svg`, default `png`): output format for rendered cached charts.
 
 Available endpoints:
 - `GET /api/news/digest/latest`: latest item from the digest feed.
@@ -77,6 +80,8 @@ Dash pages for this data:
 - `/news/digest`: filterable digest view and latest-card view.
 - `/news/stats`: charts/cards for source, tags, score distribution, and daily counts.
 - `/news/integration`: CI-oriented runtime checks for endpoint reachability, payload presence, and freshness state.
+- `/news/scraped`: grouped-by-source view of raw `articles[].scraped` payloads from the digest.
+- `/news/seaborn`: a Seaborn chart playground built from precomputed `/api/news/stats` aggregates with cached PNG/SVG renders.
 
 Optional query params on digest endpoints:
 - `date=YYYY-MM-DD`

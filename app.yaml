@@ -37,3 +37,12 @@ services:
       - key: RSS_MAX_AGE_SECONDS
         value: "129600"
         type: GENERAL
+      - key: NEWS_FIGURE_CACHE_TTL_SECONDS
+        value: "21600"
+        type: GENERAL
+      - key: NEWS_FIGURE_CACHE_MAX_ITEMS
+        value: "128"
+        type: GENERAL
+      - key: NEWS_FIGURE_OUTPUT_FORMAT
+        value: "png"
+        type: GENERAL

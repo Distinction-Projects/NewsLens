@@ -109,6 +109,11 @@ class NewsEndpointTests(unittest.TestCase):
         stats_payload = stats.get_json()
         self.assertEqual(stats_payload["status"], "ok")
         self.assertIn("derived", stats_payload["data"])
+        chart_aggregates = stats_payload["data"]["derived"]["chart_aggregates"]
+        self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
+        self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
+        self.assertEqual(len(chart_aggregates["publish_hour_counts_utc"]), 24)
+        self.assertEqual(len(chart_aggregates["score_tag_count_heatmap"]), 25)
 
         health = self.client.get("/health/news-freshness")
         self.assertEqual(health.status_code, 200)

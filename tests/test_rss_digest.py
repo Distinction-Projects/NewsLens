@@ -107,6 +107,29 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertTrue(stats["tag_counts"])
         self.assertEqual(stats["score_distribution"]["count"], 2)
 
+        chart_aggregates = stats["chart_aggregates"]
+        self.assertIn("score_histogram_bins", chart_aggregates)
+        self.assertIn("tag_count_distribution", chart_aggregates)
+        self.assertIn("publish_hour_counts_utc", chart_aggregates)
+        self.assertIn("source_score_summary", chart_aggregates)
+        self.assertIn("source_tag_matrix", chart_aggregates)
+        self.assertIn("score_tag_count_heatmap", chart_aggregates)
+        self.assertIn("high_score_by_source", chart_aggregates)
+
+        self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
+        self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
+        self.assertEqual(len(chart_aggregates["publish_hour_counts_utc"]), 24)
+        self.assertEqual(len(chart_aggregates["score_tag_count_heatmap"]), 25)
+
+        self.assertEqual(
+            sum(item["count"] for item in chart_aggregates["score_histogram_bins"]),
+            stats["score_distribution"]["count"],
+        )
+        self.assertEqual(
+            sum(item["count"] for item in chart_aggregates["tag_count_distribution"]),
+            stats["total_articles"],
+        )
+
     def test_last_good_fallback(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp:
             json.dump(SAMPLE_PAYLOAD, temp)
