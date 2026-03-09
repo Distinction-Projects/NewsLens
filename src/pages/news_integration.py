@@ -35,7 +35,7 @@ def _status_row(label: str, ok: bool, details: str) -> dbc.ListGroupItem:
     return dbc.ListGroupItem(
         [
             html.Div([html.Strong(label), _status_badge(ok)]),
-            html.Div(details, className="text-muted small"),
+            html.Div(details, className="me-3"),
         ]
     )
 

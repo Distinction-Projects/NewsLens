@@ -31,7 +31,8 @@ def _render_latest_card(payload: dict | None) -> dbc.Card:
     if not payload:
         return dbc.Card(dbc.CardBody(html.P("No matching article found.")), className="mb-3")
 
-    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    source_raw = payload.get("source")
+    source = source_raw if isinstance(source_raw, dict) else {}
     source_name = source.get("name") or source.get("id") or "Unknown source"
     published_at = payload.get("published_at") or payload.get("published") or "Unknown date"
 
@@ -44,7 +45,7 @@ def _render_latest_card(payload: dict | None) -> dbc.Card:
             [
                 html.H5(payload.get("title") or "Untitled", className="mb-2"),
                 html.P(f"Source: {source_name}", className="mb-1"),
-                html.P(f"Published (UTC): {published_at}", className="text-muted mb-2"),
+                html.P(f"Published (UTC): {published_at}", className="mb-1"),
                 html.P(payload.get("ai_summary") or payload.get("summary") or "No summary available.", className="mb-2"),
                 html.Div(badges, className="mb-2"),
                 dbc.Button("Open Article", href=payload.get("link"), target="_blank", color="primary", size="sm")
@@ -62,10 +63,12 @@ def _render_digest_rows(records: list[dict]) -> list:
 
     rows = []
     for row in records:
-        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        source_raw = row.get("source")
+        source = source_raw if isinstance(source_raw, dict) else {}
         source_name = source.get("name") or source.get("id") or "Unknown source"
         published_at = row.get("published_at") or row.get("published") or "Unknown date"
-        score = row.get("score") if isinstance(row.get("score"), dict) else {}
+        score_raw = row.get("score")
+        score = score_raw if isinstance(score_raw, dict) else {}
         percent = score.get("percent")
         percent_text = f"{percent:.1f}%" if isinstance(percent, (int, float)) else "n/a"
 
@@ -75,7 +78,7 @@ def _render_digest_rows(records: list[dict]) -> list:
                     html.Div(
                         [
                             html.Strong(row.get("title") or "Untitled"),
-                            html.Span(f" ({source_name})", className="text-muted"),
+                            html.Span(f" ({source_name})", className="me-3"),
                         ],
                         className="mb-1",
                     ),
