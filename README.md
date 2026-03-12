@@ -63,6 +63,9 @@ This app consumes the app-facing precomputed contract JSON from RSS_Feeds and ex
 Set these environment variables:
 - `RSS_DAILY_JSON_URL` (optional): upstream JSON URL. Default:
   `https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json`
+- `RSS_HISTORY_JSON_URL_TEMPLATE` (optional): snapshot URL template. Default:
+  `https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json`
+  (`{date}` is replaced with `YYYY-MM-DD`)
 - `RSS_CACHE_TTL_SECONDS` (optional, default `86400`): in-memory TTL cache duration.
 - `RSS_HTTP_TIMEOUT_SECONDS` (optional, default `20`): HTTP timeout for upstream fetches.
 - `RSS_MAX_AGE_SECONDS` (optional, default `129600`): freshness SLO for `generated_at` (36 hours).
@@ -78,12 +81,18 @@ Dash pages for this data:
 - `/news/stats`: charts/cards for source, tags, score distribution, and daily counts.
 - `/news/integration`: CI-oriented runtime checks for endpoint reachability, payload presence, and freshness state.
 - `/news/scraped`: grouped-by-source view of raw `articles[].scraped` payloads from the digest.
+- `/news/trends`: time-focused trend views (daily counts + publish-hour distribution).
+- `/news/sources`: source leaderboard + source score summary table.
+- `/news/tags`: top tags + tag density + source-tag heatmap.
+- `/news/score-lab`: score histogram + high-score-by-source + score/tag heatmap.
+- `/news/raw-json`: raw endpoint payload explorer for debugging and QA.
 
 Optional query params on digest endpoints:
 - `date=YYYY-MM-DD`
 - `tag=<tag>`
 - `source=<source>`
 - `limit=<positive-int>` (`/api/news/digest` only)
+- `snapshot_date=YYYY-MM-DD` (supported on `/api/news/digest`, `/api/news/digest/latest`, and `/api/news/stats`)
 - `refresh=true` (forces a cache refresh)
 
 Filter semantics:
@@ -91,7 +100,11 @@ Filter semantics:
 - `tag` matches `ai_tags` and `topic_tags` (case-insensitive exact match).
 - `source` matches `source.name`, `source.id`, and `feed.name` (case-insensitive contains).
 
-If upstream fetch fails, the app serves the last successful payload (last-good fallback) and reports the fetch error in response metadata. The client also supports ETag conditional requests (`If-None-Match`) to avoid re-downloading unchanged artifacts.
+Response metadata includes `source_mode` (`current` or `snapshot`), `snapshot_date` (when set), and resolved `source_url`.
+
+Current mode (`RSS_DAILY_JSON_URL`) uses last-good fallback on upstream failures and reports the fetch error in metadata. Snapshot mode does not fall back to current data; missing snapshot files return `404`.
+
+The client also supports ETag conditional requests (`If-None-Match`) to avoid re-downloading unchanged artifacts.
 
 ### Working with data
 - The default AirPassengers sample lives in `src/data/AirPassengers.csv`. Replace that file (keep the `Time` and `Values` headers) to experiment with your own series.

@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 import dash
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-from dash import Input, Output, callback, ctx, dcc, html
+from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
 
@@ -138,11 +138,42 @@ layout = dbc.Container(
             [
                 dbc.Col(
                     [
-                        dbc.Button("Refresh Stats", id="news-stats-refresh", color="secondary", className="mb-3"),
-                        html.Div(id="news-stats-status"),
+                        dbc.Label("Data mode"),
+                        dcc.Dropdown(
+                            id="news-stats-data-mode",
+                            options=[
+                                {"label": "Current", "value": "current"},
+                                {"label": "Snapshot", "value": "snapshot"},
+                            ],
+                            value="current",
+                            clearable=False,
+                        ),
                     ],
-                    width=12,
+                    md=3,
+                    className="mb-3",
                 ),
+                dbc.Col(
+                    [
+                        dbc.Label("Snapshot date (UTC)"),
+                        dcc.Input(
+                            id="news-stats-snapshot-date",
+                            type="date",
+                            className="form-control",
+                            disabled=True,
+                        ),
+                    ],
+                    md=3,
+                    className="mb-3",
+                ),
+                dbc.Col(
+                    [
+                        dbc.Label("Actions"),
+                        dbc.Button("Refresh Stats", id="news-stats-refresh", color="secondary", className="mb-3"),
+                    ],
+                    md=2,
+                    className="mb-3",
+                ),
+                dbc.Col(html.Div(id="news-stats-status"), md=4, className="mb-3"),
             ]
         ),
         dbc.Row(id="news-stats-cards"),
@@ -173,10 +204,19 @@ layout = dbc.Container(
     Output("news-daily-graph", "figure"),
     Input("news-stats-load", "n_intervals"),
     Input("news-stats-refresh", "n_clicks"),
+    State("news-stats-data-mode", "value"),
+    State("news-stats-snapshot-date", "value"),
 )
-def load_news_stats(_load_tick, _refresh_clicks):
+def load_news_stats(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     force_refresh = ctx.triggered_id == "news-stats-refresh"
-    status_code, payload = _api_get("/api/news/stats", {"refresh": "true" if force_refresh else None})
+    snapshot_date_param = snapshot_date if data_mode == "snapshot" else None
+    status_code, payload = _api_get(
+        "/api/news/stats",
+        {
+            "refresh": "true" if force_refresh else None,
+            "snapshot_date": snapshot_date_param,
+        },
+    )
 
     if status_code != 200:
         error_text = payload.get("error", "Unknown error")
@@ -187,8 +227,12 @@ def load_news_stats(_load_tick, _refresh_clicks):
     meta = payload.get("meta", {})
     data = payload.get("data", {})
     derived = data.get("derived", {})
+    source_mode = meta.get("source_mode") or "current"
+    snapshot_active = meta.get("snapshot_date")
+    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
 
     status_line = (
+        f"Mode: {mode_label} | "
         f"Generated at: {meta.get('generated_at')} | "
         f"Cache: {'hit' if meta.get('from_cache') else 'miss'} | "
         f"Schema: {meta.get('schema_version')}"
@@ -210,3 +254,11 @@ def load_news_stats(_load_tick, _refresh_clicks):
         _score_figure(score_distribution),
         _daily_figure(daily_counts),
     )
+
+
+@callback(
+    Output("news-stats-snapshot-date", "disabled"),
+    Input("news-stats-data-mode", "value"),
+)
+def toggle_stats_snapshot_input(data_mode):
+    return data_mode != "snapshot"

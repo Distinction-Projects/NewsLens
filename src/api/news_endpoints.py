@@ -7,7 +7,9 @@ from flask import jsonify, request
 
 from src.services.rss_digest import (
     RssDigestClient,
+    RssDigestNotFoundError,
     filter_records,
+    parse_snapshot_date,
     sort_records_desc,
 )
 
@@ -29,6 +31,8 @@ def _parse_limit(raw_limit: str | None) -> int | None:
 def _common_meta(bundle: dict[str, Any], filtered_count: int, returned_count: int) -> dict:
     return {
         "source_url": bundle["source_url"],
+        "source_mode": bundle.get("source_mode"),
+        "snapshot_date": bundle.get("snapshot_date"),
         "etag": bundle.get("etag"),
         "schema_version": bundle.get("schema_version"),
         "contract": bundle.get("contract"),
@@ -55,10 +59,12 @@ def register_news_endpoints(server) -> None:
         tag_filter = request.args.get("tag")
         source_filter = request.args.get("source")
         raw_limit = request.args.get("limit")
+        snapshot_date: str | None = None
 
         try:
             limit = _parse_limit(raw_limit)
-            bundle = client.get_payload(force_refresh=force_refresh)
+            snapshot_date = parse_snapshot_date(request.args.get("snapshot_date"))
+            bundle = client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date)
             records = bundle["articles_normalized"]
             filtered = filter_records(records, date_filter=date_filter, tag_filter=tag_filter, source_filter=source_filter)
             ordered = sort_records_desc(filtered)
@@ -66,6 +72,10 @@ def register_news_endpoints(server) -> None:
                 ordered = ordered[:limit]
         except ValueError as exc:
             return jsonify({"status": "bad_request", "error": str(exc)}), 400
+        except RssDigestNotFoundError as exc:
+            if snapshot_date:
+                return jsonify({"status": "not_found", "error": str(exc)}), 404
+            return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
         except Exception as exc:  # noqa: BLE001
             return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
 
@@ -78,6 +88,7 @@ def register_news_endpoints(server) -> None:
                         "tag": tag_filter,
                         "source": source_filter,
                         "limit": limit,
+                        "snapshot_date": snapshot_date,
                     },
                     "meta": _common_meta(bundle, filtered_count=len(filtered), returned_count=len(ordered)),
                     "data": ordered,
@@ -92,14 +103,20 @@ def register_news_endpoints(server) -> None:
         date_filter = request.args.get("date")
         tag_filter = request.args.get("tag")
         source_filter = request.args.get("source")
+        snapshot_date: str | None = None
 
         try:
-            bundle = client.get_payload(force_refresh=force_refresh)
+            snapshot_date = parse_snapshot_date(request.args.get("snapshot_date"))
+            bundle = client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date)
             records = bundle["articles_normalized"]
             filtered = filter_records(records, date_filter=date_filter, tag_filter=tag_filter, source_filter=source_filter)
             ordered = sort_records_desc(filtered)
         except ValueError as exc:
             return jsonify({"status": "bad_request", "error": str(exc)}), 400
+        except RssDigestNotFoundError as exc:
+            if snapshot_date:
+                return jsonify({"status": "not_found", "error": str(exc)}), 404
+            return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
         except Exception as exc:  # noqa: BLE001
             return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
 
@@ -112,6 +129,7 @@ def register_news_endpoints(server) -> None:
                             "date": date_filter,
                             "tag": tag_filter,
                             "source": source_filter,
+                            "snapshot_date": snapshot_date,
                         },
                         "meta": _common_meta(bundle, filtered_count=0, returned_count=0),
                         "data": None,
@@ -128,6 +146,7 @@ def register_news_endpoints(server) -> None:
                         "date": date_filter,
                         "tag": tag_filter,
                         "source": source_filter,
+                        "snapshot_date": snapshot_date,
                     },
                     "meta": _common_meta(bundle, filtered_count=len(filtered), returned_count=1),
                     "data": ordered[0],
@@ -139,9 +158,17 @@ def register_news_endpoints(server) -> None:
     @server.get("/api/news/stats")
     def get_news_stats():
         force_refresh = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+        snapshot_date: str | None = None
 
         try:
-            bundle = client.get_payload(force_refresh=force_refresh)
+            snapshot_date = parse_snapshot_date(request.args.get("snapshot_date"))
+            bundle = client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date)
+        except ValueError as exc:
+            return jsonify({"status": "bad_request", "error": str(exc)}), 400
+        except RssDigestNotFoundError as exc:
+            if snapshot_date:
+                return jsonify({"status": "not_found", "error": str(exc)}), 404
+            return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
         except Exception as exc:  # noqa: BLE001
             return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
 

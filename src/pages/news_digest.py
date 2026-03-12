@@ -116,24 +116,51 @@ layout = dbc.Container(
             [
                 dbc.Col(
                     [
+                        dbc.Label("Data mode"),
+                        dcc.Dropdown(
+                            id="news-filter-data-mode",
+                            options=[
+                                {"label": "Current", "value": "current"},
+                                {"label": "Snapshot", "value": "snapshot"},
+                            ],
+                            value="current",
+                            clearable=False,
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Label("Snapshot date (UTC)"),
+                        dcc.Input(
+                            id="news-filter-snapshot-date",
+                            type="date",
+                            className="form-control",
+                            disabled=True,
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
                         dbc.Label("Date (UTC YYYY-MM-DD)"),
                         dcc.Input(id="news-filter-date", type="text", placeholder="2026-03-02", className="form-control"),
                     ],
-                    md=3,
+                    md=2,
                 ),
                 dbc.Col(
                     [
                         dbc.Label("Tag"),
                         dcc.Input(id="news-filter-tag", type="text", placeholder="OpenAI", className="form-control"),
                     ],
-                    md=3,
+                    md=2,
                 ),
                 dbc.Col(
                     [
                         dbc.Label("Source"),
                         dcc.Input(id="news-filter-source", type="text", placeholder="PBS", className="form-control"),
                     ],
-                    md=3,
+                    md=2,
                 ),
                 dbc.Col(
                     [
@@ -152,7 +179,7 @@ layout = dbc.Container(
                             ]
                         ),
                     ],
-                    md=2,
+                    md=1,
                 ),
             ],
             className="mb-3",
@@ -181,14 +208,28 @@ layout = dbc.Container(
     State("news-filter-tag", "value"),
     State("news-filter-source", "value"),
     State("news-filter-limit", "value"),
+    State("news-filter-data-mode", "value"),
+    State("news-filter-snapshot-date", "value"),
 )
-def load_news_digest(_interval, _apply_clicks, _refresh_clicks, date_filter, tag_filter, source_filter, limit_value):
+def load_news_digest(
+    _interval,
+    _apply_clicks,
+    _refresh_clicks,
+    date_filter,
+    tag_filter,
+    source_filter,
+    limit_value,
+    data_mode,
+    snapshot_date,
+):
     force_refresh = ctx.triggered_id == "news-refresh"
+    snapshot_date_param = snapshot_date if data_mode == "snapshot" else None
     params = {
         "date": date_filter,
         "tag": tag_filter,
         "source": source_filter,
         "limit": limit_value or 20,
+        "snapshot_date": snapshot_date_param,
         "refresh": "true" if force_refresh else None,
     }
 
@@ -199,6 +240,7 @@ def load_news_digest(_interval, _apply_clicks, _refresh_clicks, date_filter, tag
             "date": date_filter,
             "tag": tag_filter,
             "source": source_filter,
+            "snapshot_date": snapshot_date_param,
             "refresh": "true" if force_refresh else None,
         },
     )
@@ -214,8 +256,12 @@ def load_news_digest(_interval, _apply_clicks, _refresh_clicks, date_filter, tag
     digest_meta = digest_payload.get("meta", {})
     latest_record = latest_payload.get("data") if latest_status == 200 else None
     records = digest_payload.get("data", [])
+    source_mode = digest_meta.get("source_mode") or "current"
+    snapshot_active = digest_meta.get("snapshot_date")
+    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
 
     status_line = (
+        f"Mode: {mode_label} | "
         f"Items returned: {digest_meta.get('returned_count', len(records))} | "
         f"Generated at: {digest_meta.get('generated_at')} | "
         f"Cache: {'hit' if digest_meta.get('from_cache') else 'miss'}"
@@ -225,3 +271,11 @@ def load_news_digest(_interval, _apply_clicks, _refresh_clicks, date_filter, tag
 
     status_component = dbc.Alert(status_line, color="info", className="mb-3")
     return status_component, _render_latest_card(latest_record), _render_digest_rows(records)
+
+
+@callback(
+    Output("news-filter-snapshot-date", "disabled"),
+    Input("news-filter-data-mode", "value"),
+)
+def toggle_snapshot_date_input(data_mode):
+    return data_mode != "snapshot"

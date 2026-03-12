@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -61,13 +62,16 @@ SAMPLE_PAYLOAD = {
 class NewsEndpointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        json.dump(SAMPLE_PAYLOAD, cls.temp_file)
-        cls.temp_file.flush()
-        cls.temp_path = Path(cls.temp_file.name)
-        cls.temp_file.close()
+        cls.temp_dir = Path(tempfile.mkdtemp(prefix="rss-news-endpoints-"))
+        cls.current_payload_path = cls.temp_dir / "rss_openai_precomputed.json"
+        cls.current_payload_path.write_text(json.dumps(SAMPLE_PAYLOAD), encoding="utf-8")
 
-        os.environ["RSS_DAILY_JSON_URL"] = f"file://{cls.temp_path}"
+        cls.snapshot_date = "2026-03-10"
+        cls.snapshot_payload_path = cls.temp_dir / f"rss_openai_daily_{cls.snapshot_date}.json"
+        cls.snapshot_payload_path.write_text(json.dumps(SAMPLE_PAYLOAD), encoding="utf-8")
+
+        os.environ["RSS_DAILY_JSON_URL"] = f"file://{cls.current_payload_path}"
+        os.environ["RSS_HISTORY_JSON_URL_TEMPLATE"] = f"file://{cls.temp_dir}/rss_openai_daily_{{date}}.json"
         os.environ["RSS_CACHE_TTL_SECONDS"] = "60"
         os.environ["RSS_HTTP_TIMEOUT_SECONDS"] = "5"
         os.environ["RSS_MAX_AGE_SECONDS"] = "172800"
@@ -78,7 +82,7 @@ class NewsEndpointTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.temp_path.unlink(missing_ok=True)
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def test_digest_and_filters(self):
         response = self.client.get("/api/news/digest")
@@ -102,6 +106,37 @@ class NewsEndpointTests(unittest.TestCase):
 
         bad_limit = self.client.get("/api/news/digest?limit=0")
         self.assertEqual(bad_limit.status_code, 400)
+
+    def test_snapshot_date_routing_and_meta(self):
+        response = self.client.get(f"/api/news/digest?snapshot_date={self.snapshot_date}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["filters"]["snapshot_date"], self.snapshot_date)
+        self.assertEqual(payload["meta"]["source_mode"], "snapshot")
+        self.assertEqual(payload["meta"]["snapshot_date"], self.snapshot_date)
+        self.assertIn(f"rss_openai_daily_{self.snapshot_date}.json", payload["meta"]["source_url"])
+
+        latest = self.client.get(f"/api/news/digest/latest?snapshot_date={self.snapshot_date}")
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.get_json()["meta"]["source_mode"], "snapshot")
+
+        stats = self.client.get(f"/api/news/stats?snapshot_date={self.snapshot_date}")
+        self.assertEqual(stats.status_code, 200)
+        self.assertEqual(stats.get_json()["meta"]["source_mode"], "snapshot")
+
+    def test_snapshot_date_validation_and_missing_file(self):
+        bad_date = self.client.get("/api/news/digest?snapshot_date=2026/03/10")
+        self.assertEqual(bad_date.status_code, 400)
+        self.assertEqual(bad_date.get_json()["status"], "bad_request")
+
+        missing_snapshot = self.client.get("/api/news/digest?snapshot_date=2026-03-09")
+        self.assertEqual(missing_snapshot.status_code, 404)
+        self.assertEqual(missing_snapshot.get_json()["status"], "not_found")
+
+        missing_stats = self.client.get("/api/news/stats?snapshot_date=2026-03-09")
+        self.assertEqual(missing_stats.status_code, 404)
+        self.assertEqual(missing_stats.get_json()["status"], "not_found")
 
     def test_stats_and_freshness(self):
         stats = self.client.get("/api/news/stats")

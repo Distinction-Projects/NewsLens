@@ -8,12 +8,15 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
 DEFAULT_RSS_DAILY_JSON_URL = (
     "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json"
+)
+DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE = (
+    "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json"
 )
 
 RECORD_LIST_KEYS = (
@@ -44,6 +47,18 @@ TIMESTAMP_KEYS = (
 
 TAG_KEYS = ("tags", "tag", "topics", "topic", "keywords")
 SOURCE_KEYS = ("source", "source_name", "sourceName", "publisher", "feed", "domain")
+
+
+class RssDigestError(RuntimeError):
+    pass
+
+
+class RssDigestNotFoundError(RssDigestError):
+    pass
+
+
+class RssDigestUpstreamError(RssDigestError):
+    pass
 
 
 def _coerce_int(value: Any, default: int, minimum: int = 1) -> int:
@@ -104,6 +119,19 @@ def parse_datetime(value: Any) -> datetime | None:
     if dt_value.tzinfo is None:
         dt_value = dt_value.replace(tzinfo=timezone.utc)
     return dt_value.astimezone(timezone.utc)
+
+
+def parse_snapshot_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("snapshot_date must be YYYY-MM-DD") from exc
+    return parsed.isoformat()
 
 
 def _clean_text(value: Any) -> str | None:
@@ -556,10 +584,15 @@ class RssDigestClient:
         ttl_seconds: int | None = None,
         timeout_seconds: int | None = None,
     ) -> None:
-        self.source_url = (
+        self.current_source_url = (
             source_url
             or os.getenv("RSS_DAILY_JSON_URL")
             or DEFAULT_RSS_DAILY_JSON_URL
+        ).strip()
+        self.source_url = self.current_source_url
+        self.history_url_template = (
+            os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE")
+            or DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE
         ).strip()
         self.ttl_seconds = _coerce_int(
             ttl_seconds if ttl_seconds is not None else os.getenv("RSS_CACHE_TTL_SECONDS"),
@@ -572,41 +605,71 @@ class RssDigestClient:
         self.max_age_seconds = _coerce_int(os.getenv("RSS_MAX_AGE_SECONDS"), default=36 * 3600)
 
         self._lock = threading.Lock()
-        self._cache_bundle: dict[str, Any] | None = None
-        self._cache_fetched_at: datetime | None = None
-        self._cache_until_epoch: float = 0.0
-        self._cache_is_last_good = False
-        self._last_fetch_error: str | None = None
+        self._cache_states: dict[str, dict[str, Any]] = {}
 
-        self._last_good_bundle: dict[str, Any] | None = None
-        self._last_good_fetched_at: datetime | None = None
+    def _empty_cache_state(self) -> dict[str, Any]:
+        return {
+            "bundle": None,
+            "fetched_at": None,
+            "cache_until_epoch": 0.0,
+            "is_last_good": False,
+            "last_fetch_error": None,
+            "last_good_bundle": None,
+            "last_good_fetched_at": None,
+            "etag": None,
+        }
 
-        self._etag: str | None = None
+    def _cache_key(self, snapshot_date: str | None) -> str:
+        if snapshot_date:
+            return f"snapshot:{snapshot_date}"
+        return "current"
 
-    def _fetch_json(self) -> tuple[Any | None, str | None, bool]:
-        if not self.source_url:
-            raise RuntimeError("RSS_DAILY_JSON_URL is not set")
+    def _resolve_source_url(self, snapshot_date: str | None) -> str:
+        if snapshot_date:
+            if "{date}" not in self.history_url_template:
+                raise RuntimeError("RSS_HISTORY_JSON_URL_TEMPLATE must include {date}")
+            return self.history_url_template.format(date=snapshot_date)
+        return self.current_source_url
+
+    def _fetch_json(self, source_url: str, etag: str | None) -> tuple[Any | None, str | None, bool]:
+        if not source_url:
+            raise RuntimeError("RSS source URL is not set")
 
         headers = {
             "Accept": "application/json",
             "User-Agent": "ml-sentiment-rss-consumer/1.0",
         }
-        if self._etag:
-            headers["If-None-Match"] = self._etag
+        if etag:
+            headers["If-None-Match"] = etag
 
         request = Request(
-            self.source_url,
+            source_url,
             headers=headers,
         )
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 content = response.read().decode("utf-8")
-                etag = response.headers.get("ETag")
-            return json.loads(content), etag, False
+                response_etag = response.headers.get("ETag")
+            return json.loads(content), response_etag, False
         except HTTPError as exc:
             if exc.code == 304:
-                return None, self._etag, True
-            raise
+                return None, etag, True
+            if exc.code == 404:
+                raise RssDigestNotFoundError(f"Upstream JSON not found at {source_url}") from exc
+            raise RssDigestUpstreamError(
+                f"HTTP {exc.code} while fetching upstream JSON from {source_url}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise RssDigestNotFoundError(f"Upstream JSON not found at {source_url}") from exc
+        except URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, FileNotFoundError):
+                raise RssDigestNotFoundError(f"Upstream JSON not found at {source_url}") from exc
+            if isinstance(reason, OSError) and getattr(reason, "errno", None) == 2:
+                raise RssDigestNotFoundError(f"Upstream JSON not found at {source_url}") from exc
+            raise RssDigestUpstreamError(
+                f"Network error while fetching upstream JSON from {source_url}: {reason}"
+            ) from exc
 
     def _build_bundle_from_payload(self, payload: Any) -> dict[str, Any]:
         generated_at = extract_generated_at(payload)
@@ -636,80 +699,106 @@ class RssDigestClient:
         self,
         bundle: dict[str, Any],
         fetched_at: datetime | None,
+        source_url: str,
+        source_mode: str,
+        snapshot_date: str | None,
         from_cache: bool,
         using_last_good: bool,
         error: str | None,
+        etag: str | None,
     ) -> dict[str, Any]:
         return {
             **bundle,
             "fetched_at": _as_iso_utc(fetched_at),
-            "source_url": self.source_url,
+            "source_url": source_url,
+            "source_mode": source_mode,
+            "snapshot_date": snapshot_date,
             "ttl_seconds": self.ttl_seconds,
             "from_cache": from_cache,
             "using_last_good": using_last_good,
             "error": error,
-            "etag": self._etag,
+            "etag": etag,
         }
 
-    def get_payload(self, force_refresh: bool = False) -> dict[str, Any]:
+    def get_payload(self, force_refresh: bool = False, snapshot_date: str | None = None) -> dict[str, Any]:
+        snapshot_date_value = parse_snapshot_date(snapshot_date)
+        source_mode = "snapshot" if snapshot_date_value else "current"
+        source_url = self._resolve_source_url(snapshot_date_value)
+        cache_key = self._cache_key(snapshot_date_value)
         now_epoch = time.time()
         with self._lock:
-            cache_valid = self._cache_bundle is not None and now_epoch < self._cache_until_epoch
+            cache_state = self._cache_states.setdefault(cache_key, self._empty_cache_state())
+            cache_valid = cache_state["bundle"] is not None and now_epoch < cache_state["cache_until_epoch"]
             if cache_valid and not force_refresh:
                 return self._format_bundle(
-                    bundle=self._cache_bundle,
-                    fetched_at=self._cache_fetched_at,
+                    bundle=cache_state["bundle"],
+                    fetched_at=cache_state["fetched_at"],
+                    source_url=source_url,
+                    source_mode=source_mode,
+                    snapshot_date=snapshot_date_value,
                     from_cache=True,
-                    using_last_good=self._cache_is_last_good,
-                    error=self._last_fetch_error,
+                    using_last_good=bool(cache_state["is_last_good"]),
+                    error=cache_state["last_fetch_error"],
+                    etag=cache_state["etag"],
                 )
 
             try:
-                payload, etag, not_modified = self._fetch_json()
+                payload, etag, not_modified = self._fetch_json(source_url=source_url, etag=cache_state["etag"])
                 fetched_at = datetime.now(timezone.utc)
                 if etag:
-                    self._etag = etag
+                    cache_state["etag"] = etag
 
                 if not_modified:
-                    if self._cache_bundle is not None:
-                        bundle = self._cache_bundle
-                    elif self._last_good_bundle is not None:
-                        bundle = self._last_good_bundle
+                    if cache_state["bundle"] is not None:
+                        bundle = cache_state["bundle"]
+                    elif source_mode == "current" and cache_state["last_good_bundle"] is not None:
+                        bundle = cache_state["last_good_bundle"]
                     else:
-                        raise RuntimeError("Received 304 but no cached payload is available")
+                        raise RssDigestUpstreamError("Received 304 but no cached payload is available")
                 else:
                     bundle = self._build_bundle_from_payload(payload)
 
-                self._cache_bundle = bundle
-                self._cache_fetched_at = fetched_at
-                self._cache_until_epoch = now_epoch + self.ttl_seconds
-                self._cache_is_last_good = False
-                self._last_fetch_error = None
-
-                self._last_good_bundle = bundle
-                self._last_good_fetched_at = fetched_at
+                cache_state["bundle"] = bundle
+                cache_state["fetched_at"] = fetched_at
+                cache_state["cache_until_epoch"] = now_epoch + self.ttl_seconds
+                cache_state["is_last_good"] = False
+                cache_state["last_fetch_error"] = None
+                if source_mode == "current":
+                    cache_state["last_good_bundle"] = bundle
+                    cache_state["last_good_fetched_at"] = fetched_at
 
                 return self._format_bundle(
                     bundle=bundle,
                     fetched_at=fetched_at,
+                    source_url=source_url,
+                    source_mode=source_mode,
+                    snapshot_date=snapshot_date_value,
                     from_cache=False,
                     using_last_good=False,
                     error=None,
+                    etag=cache_state["etag"],
                 )
             except Exception as exc:  # noqa: BLE001
-                if self._last_good_bundle is None:
+                if source_mode != "current":
                     raise
 
-                self._last_fetch_error = f"{type(exc).__name__}: {exc}"
-                self._cache_bundle = self._last_good_bundle
-                self._cache_fetched_at = self._last_good_fetched_at
-                self._cache_until_epoch = now_epoch + self.ttl_seconds
-                self._cache_is_last_good = True
+                if cache_state["last_good_bundle"] is None:
+                    raise
+
+                cache_state["last_fetch_error"] = f"{type(exc).__name__}: {exc}"
+                cache_state["bundle"] = cache_state["last_good_bundle"]
+                cache_state["fetched_at"] = cache_state["last_good_fetched_at"]
+                cache_state["cache_until_epoch"] = now_epoch + self.ttl_seconds
+                cache_state["is_last_good"] = True
 
                 return self._format_bundle(
-                    bundle=self._last_good_bundle,
-                    fetched_at=self._last_good_fetched_at,
+                    bundle=cache_state["last_good_bundle"],
+                    fetched_at=cache_state["last_good_fetched_at"],
+                    source_url=source_url,
+                    source_mode=source_mode,
+                    snapshot_date=snapshot_date_value,
                     from_cache=False,
                     using_last_good=True,
-                    error=self._last_fetch_error,
+                    error=cache_state["last_fetch_error"],
+                    etag=cache_state["etag"],
                 )

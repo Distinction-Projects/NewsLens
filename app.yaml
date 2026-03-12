@@ -29,7 +29,10 @@ services:
         value: "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json"
         type: GENERAL
       - key: RSS_CACHE_TTL_SECONDS
-        value: "900"
+        value: "86400"
+        type: GENERAL
+      - key: RSS_HISTORY_JSON_URL_TEMPLATE
+        value: "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json"
         type: GENERAL
       - key: RSS_HTTP_TIMEOUT_SECONDS
         value: "20"

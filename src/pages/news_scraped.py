@@ -114,17 +114,44 @@ layout = dbc.Container(
             [
                 dbc.Col(
                     [
+                        dbc.Label("Data mode"),
+                        dcc.Dropdown(
+                            id="news-scraped-data-mode",
+                            options=[
+                                {"label": "Current", "value": "current"},
+                                {"label": "Snapshot", "value": "snapshot"},
+                            ],
+                            value="current",
+                            clearable=False,
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Label("Snapshot date (UTC)"),
+                        dcc.Input(
+                            id="news-scraped-snapshot-date",
+                            type="date",
+                            className="form-control",
+                            disabled=True,
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
                         dbc.Label("Source filter"),
                         dcc.Input(id="news-scraped-source", type="text", placeholder="Fox, PBS, NPR...", className="form-control"),
                     ],
-                    md=4,
+                    md=3,
                 ),
                 dbc.Col(
                     [
                         dbc.Label("Limit"),
                         dcc.Input(id="news-scraped-limit", type="number", min=1, max=500, step=1, value=100, className="form-control"),
                     ],
-                    md=2,
+                    md=1,
                 ),
                 dbc.Col(
                     [
@@ -136,7 +163,7 @@ layout = dbc.Container(
                             switch=True,
                         ),
                     ],
-                    md=3,
+                    md=2,
                 ),
                 dbc.Col(
                     [
@@ -148,7 +175,7 @@ layout = dbc.Container(
                             ]
                         ),
                     ],
-                    md=3,
+                    md=2,
                 ),
             ],
             className="mb-3",
@@ -170,14 +197,27 @@ layout = dbc.Container(
     State("news-scraped-source", "value"),
     State("news-scraped-limit", "value"),
     State("news-scraped-only", "value"),
+    State("news-scraped-data-mode", "value"),
+    State("news-scraped-snapshot-date", "value"),
 )
-def load_scraped_news(_load_tick, _apply_clicks, _refresh_clicks, source_filter, limit_value, only_scraped_values):
+def load_scraped_news(
+    _load_tick,
+    _apply_clicks,
+    _refresh_clicks,
+    source_filter,
+    limit_value,
+    only_scraped_values,
+    data_mode,
+    snapshot_date,
+):
     force_refresh = ctx.triggered_id == "news-scraped-refresh"
     only_scraped = isinstance(only_scraped_values, list) and "yes" in only_scraped_values
+    snapshot_date_param = snapshot_date if data_mode == "snapshot" else None
 
     params = {
         "source": source_filter,
         "limit": limit_value or 100,
+        "snapshot_date": snapshot_date_param,
         "refresh": "true" if force_refresh else None,
     }
     status_code, payload = _api_get("/api/news/digest", params)
@@ -191,7 +231,11 @@ def load_scraped_news(_load_tick, _apply_clicks, _refresh_clicks, source_filter,
 
     meta = payload.get("meta", {})
     records = payload.get("data", [])
+    source_mode = meta.get("source_mode") or "current"
+    snapshot_active = meta.get("snapshot_date")
+    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
     status_line = (
+        f"Mode: {mode_label} | "
         f"Records loaded: {len(records)} | "
         f"Generated at: {meta.get('generated_at')} | "
         f"Cache: {'hit' if meta.get('from_cache') else 'miss'}"
@@ -202,3 +246,11 @@ def load_scraped_news(_load_tick, _apply_clicks, _refresh_clicks, source_filter,
         status_line += " | filtered to records with scraped payload"
 
     return dbc.Alert(status_line, color="info", className="mb-3"), _render_by_source(records, only_scraped=only_scraped)
+
+
+@callback(
+    Output("news-scraped-snapshot-date", "disabled"),
+    Input("news-scraped-data-mode", "value"),
+)
+def toggle_scraped_snapshot_input(data_mode):
+    return data_mode != "snapshot"
