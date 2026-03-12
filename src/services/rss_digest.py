@@ -4,7 +4,7 @@ import json
 import os
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -616,10 +616,20 @@ class RssDigestClient:
             os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE")
             or DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE
         ).strip()
-        self.ttl_seconds = _coerce_int(
+        self.current_ttl_seconds = _coerce_int(
             ttl_seconds if ttl_seconds is not None else os.getenv("RSS_CACHE_TTL_SECONDS"),
             default=86400,
         )
+        self.snapshot_ttl_seconds = _coerce_int(
+            os.getenv("RSS_SNAPSHOT_CACHE_TTL_SECONDS"),
+            default=self.current_ttl_seconds,
+        )
+        self.snapshot_cache_max_entries = _coerce_int(
+            os.getenv("RSS_SNAPSHOT_CACHE_MAX_ENTRIES"),
+            default=30,
+        )
+        # Backward-compatible alias used by some callers/tests for current-mode TTL.
+        self.ttl_seconds = self.current_ttl_seconds
         self.timeout_seconds = _coerce_int(
             timeout_seconds if timeout_seconds is not None else os.getenv("RSS_HTTP_TIMEOUT_SECONDS"),
             default=20,
@@ -628,6 +638,7 @@ class RssDigestClient:
 
         self._lock = threading.Lock()
         self._cache_states: dict[str, dict[str, Any]] = {}
+        self._snapshot_lru: OrderedDict[str, None] = OrderedDict()
 
     def _empty_cache_state(self) -> dict[str, Any]:
         return {
@@ -645,6 +656,24 @@ class RssDigestClient:
         if snapshot_date:
             return f"snapshot:{snapshot_date}"
         return "current"
+
+    def _cache_ttl_seconds(self, source_mode: str) -> int:
+        if source_mode == "snapshot":
+            return self.snapshot_ttl_seconds
+        return self.current_ttl_seconds
+
+    def _touch_snapshot_cache_key(self, cache_key: str) -> None:
+        self._snapshot_lru.pop(cache_key, None)
+        self._snapshot_lru[cache_key] = None
+
+    def _evict_snapshot_cache_if_needed(self, keep_key: str | None = None) -> None:
+        while len(self._snapshot_lru) > self.snapshot_cache_max_entries:
+            evict_key = next(iter(self._snapshot_lru))
+            if keep_key is not None and evict_key == keep_key:
+                self._snapshot_lru.move_to_end(evict_key)
+                continue
+            self._snapshot_lru.pop(evict_key, None)
+            self._cache_states.pop(evict_key, None)
 
     def _resolve_source_url(self, snapshot_date: str | None) -> str:
         if snapshot_date:
@@ -706,7 +735,6 @@ class RssDigestClient:
         excluded_unscraped_articles = len(input_records) - len(ordered_records)
 
         return {
-            "payload": payload,
             "articles_normalized": ordered_records,
             "stats": stats,
             "input_articles_count": len(input_records),
@@ -732,6 +760,7 @@ class RssDigestClient:
         using_last_good: bool,
         error: str | None,
         etag: str | None,
+        ttl_seconds: int,
     ) -> dict[str, Any]:
         return {
             **bundle,
@@ -739,7 +768,7 @@ class RssDigestClient:
             "source_url": source_url,
             "source_mode": source_mode,
             "snapshot_date": snapshot_date,
-            "ttl_seconds": self.ttl_seconds,
+            "ttl_seconds": ttl_seconds,
             "from_cache": from_cache,
             "using_last_good": using_last_good,
             "error": error,
@@ -751,9 +780,13 @@ class RssDigestClient:
         source_mode = "snapshot" if snapshot_date_value else "current"
         source_url = self._resolve_source_url(snapshot_date_value)
         cache_key = self._cache_key(snapshot_date_value)
+        cache_ttl_seconds = self._cache_ttl_seconds(source_mode)
         now_epoch = time.time()
         with self._lock:
             cache_state = self._cache_states.setdefault(cache_key, self._empty_cache_state())
+            if source_mode == "snapshot":
+                self._touch_snapshot_cache_key(cache_key)
+                self._evict_snapshot_cache_if_needed(keep_key=cache_key)
             cache_valid = cache_state["bundle"] is not None and now_epoch < cache_state["cache_until_epoch"]
             if cache_valid and not force_refresh:
                 return self._format_bundle(
@@ -766,6 +799,7 @@ class RssDigestClient:
                     using_last_good=bool(cache_state["is_last_good"]),
                     error=cache_state["last_fetch_error"],
                     etag=cache_state["etag"],
+                    ttl_seconds=cache_ttl_seconds,
                 )
 
             try:
@@ -786,7 +820,7 @@ class RssDigestClient:
 
                 cache_state["bundle"] = bundle
                 cache_state["fetched_at"] = fetched_at
-                cache_state["cache_until_epoch"] = now_epoch + self.ttl_seconds
+                cache_state["cache_until_epoch"] = now_epoch + cache_ttl_seconds
                 cache_state["is_last_good"] = False
                 cache_state["last_fetch_error"] = None
                 if source_mode == "current":
@@ -803,6 +837,7 @@ class RssDigestClient:
                     using_last_good=False,
                     error=None,
                     etag=cache_state["etag"],
+                    ttl_seconds=cache_ttl_seconds,
                 )
             except Exception as exc:  # noqa: BLE001
                 if source_mode != "current":
@@ -814,7 +849,7 @@ class RssDigestClient:
                 cache_state["last_fetch_error"] = f"{type(exc).__name__}: {exc}"
                 cache_state["bundle"] = cache_state["last_good_bundle"]
                 cache_state["fetched_at"] = cache_state["last_good_fetched_at"]
-                cache_state["cache_until_epoch"] = now_epoch + self.ttl_seconds
+                cache_state["cache_until_epoch"] = now_epoch + cache_ttl_seconds
                 cache_state["is_last_good"] = True
 
                 return self._format_bundle(
@@ -827,4 +862,5 @@ class RssDigestClient:
                     using_last_good=True,
                     error=cache_state["last_fetch_error"],
                     etag=cache_state["etag"],
+                    ttl_seconds=cache_ttl_seconds,
                 )
