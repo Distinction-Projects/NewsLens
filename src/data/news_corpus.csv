@@ -1,0 +1,16 @@
+Sentiment,Text,Score,OpenAI_Sentiment
+positive,"OpenAI announced a multiyear partnership with a national university system to provide students with free access to tutoring tools and research credits, a move educators described as a major boost for classroom innovation.",0.84,positive
+positive,"A regional hospital reported shorter emergency room wait times after deploying an AI scheduling assistant, and patient advocates said the rollout noticeably improved care coordination.",0.73,positive
+positive,"The city approved a clean energy grant program that will help small manufacturers replace aging equipment, with business owners calling the decision a welcome relief after months of rising costs.",0.78,positive
+positive,"Researchers published promising trial results for a low-cost malaria vaccine, and global health groups said the findings could save thousands of lives if production scales quickly.",0.91,positive
+positive,"After weeks of negotiations, transit workers reached a new labor agreement that raises pay and preserves health benefits, prompting union leaders to cancel a planned strike.",0.69,positive
+neutral,"Federal regulators opened a routine review of a large semiconductor merger and said they would collect additional public comments before deciding whether to approve the deal.",0.02,neutral
+neutral,"NASA delayed the launch of its weather satellite by twenty-four hours because of high winds at the Cape, but officials said the spacecraft and mission timeline remain in good condition.",0.07,neutral
+neutral,"A technology company released its quarterly earnings on Tuesday, matching analyst expectations while keeping its full-year revenue forecast unchanged.",0.01,neutral
+neutral,"Parliament began debate on a new digital privacy bill, with lawmakers from multiple parties proposing amendments ahead of a committee vote next month.",-0.03,neutral
+neutral,"International observers said turnout appeared steady in the first round of the presidential election, though final participation figures will not be released until later this week.",0.04,neutral
+negative,"A cybersecurity breach exposed customer data at a major retailer, and investigators warned that millions of shoppers may need to reset passwords and monitor bank activity.",-0.88,negative
+negative,"Flooding forced the evacuation of several neighborhoods overnight, leaving hundreds of families displaced as emergency crews searched damaged homes for survivors.",-0.93,negative
+negative,"The manufacturer announced another round of layoffs after reporting weaker demand and closing two plants, drawing criticism from local officials who fear lasting economic harm.",-0.81,negative
+negative,"Peace talks collapsed after renewed shelling near the border, and aid groups said the escalating violence had cut off food deliveries to several villages.",-0.9,negative
+negative,"The state's largest insurer plans to raise premiums again next year, a decision consumer groups say will make coverage unaffordable for many low-income families.",-0.76,negative

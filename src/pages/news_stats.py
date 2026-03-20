@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
+from src.pages.news_page_utils import build_status_alert
+
 
 dash.register_page(
     __name__,
@@ -227,19 +229,7 @@ def load_news_stats(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     meta = payload.get("meta", {})
     data = payload.get("data", {})
     derived = data.get("derived", {})
-    source_mode = meta.get("source_mode") or "current"
-    snapshot_active = meta.get("snapshot_date")
-    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
-
-    status_line = (
-        f"Mode: {mode_label} | "
-        f"Generated at: {meta.get('generated_at')} | "
-        f"Cache: {'hit' if meta.get('from_cache') else 'miss'} | "
-        f"Schema: {meta.get('schema_version')}"
-    )
-    if meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-    status_component = dbc.Alert(status_line, color="info", className="mb-3")
+    status_component = build_status_alert(meta, leading_parts=[f"Schema: {meta.get('schema_version')}"])
 
     source_counts = derived.get("source_counts", [])
     tag_counts = derived.get("tag_counts", [])

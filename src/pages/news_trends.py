@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, mode_label, snapshot_param
+from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -161,17 +161,8 @@ def load_news_trends(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     daily_counts = derived.get("daily_counts_utc", [])
     hour_counts = chart_aggregates.get("publish_hour_counts_utc", [])
 
-    status_line = (
-        f"Mode: {mode_label(meta)} | "
-        f"Generated at: {meta.get('generated_at')} | "
-        f"Articles: {derived.get('total_articles', 0)} | "
-        f"Cache: {'hit' if meta.get('from_cache') else 'miss'}"
-    )
-    if meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-
     return (
-        dbc.Alert(status_line, color="info", className="mb-3"),
+        build_status_alert(meta, leading_parts=[f"Articles: {derived.get('total_articles', 0)}"]),
         _summary_cards(derived),
         _daily_trend_figure(daily_counts),
         _publish_hour_figure(hour_counts),

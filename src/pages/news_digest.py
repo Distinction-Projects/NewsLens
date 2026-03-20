@@ -3,8 +3,15 @@ from urllib.parse import urlencode
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, callback, ctx, dcc, html
+from dash import Input, Output, State, callback, ctx, dcc, html, MATCH
 from flask import current_app
+
+from src.pages.news_page_utils import build_status_alert
+
+try:
+    from src.ml_sentiment import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
+except ModuleNotFoundError:
+    from ml_sentiment import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
 
 
 dash.register_page(
@@ -25,6 +32,119 @@ def _api_get(path: str, params: dict[str, str | int | None]) -> tuple[int, dict]
     if isinstance(parsed, dict):
         return response.status_code, parsed
     return response.status_code, {"status": "error", "error": response.get_data(as_text=True)}
+
+
+def _article_component_id(kind: str, article_id: str, scope: str) -> dict[str, str]:
+    return {"type": kind, "article_id": article_id, "scope": scope}
+
+
+def _article_analysis_payload(payload: dict) -> dict[str, str | None]:
+    scraped_raw = payload.get("scraped")
+    scraped = scraped_raw if isinstance(scraped_raw, dict) else {}
+    return {
+        "title": payload.get("title") or "Untitled",
+        "ai_summary": payload.get("ai_summary") or payload.get("summary"),
+        "body_text": scraped.get("body_text"),
+    }
+
+
+def _analysis_controls(payload: dict, scope: str) -> html.Div:
+    article_id = str(payload.get("id") or payload.get("link") or payload.get("title") or "article")
+    source_options = [
+        {"label": "AI Summary", "value": "summary"},
+        {"label": "Full Article Text", "value": "body"},
+    ]
+
+    return html.Div(
+        [
+            html.Hr(className="my-3"),
+            html.Div("Compare ML sentiment with the OpenAI article score:", className="fw-semibold mb-2"),
+            dcc.Store(id=_article_component_id("news-analysis-data", article_id, scope), data=_article_analysis_payload(payload)),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dbc.Label("Text source", className="small"),
+                            dcc.Dropdown(
+                                id=_article_component_id("news-analysis-source", article_id, scope),
+                                options=source_options,
+                                value="summary",
+                                clearable=False,
+                            ),
+                        ],
+                        md=5,
+                        className="mb-2",
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Label("Model", className="small"),
+                            dcc.Dropdown(
+                                id=_article_component_id("news-analysis-model", article_id, scope),
+                                options=[
+                                    {"label": "Naive Bayes", "value": "Naive Bayes"},
+                                    {"label": "SVM", "value": "SVM"},
+                                    {"label": "VADER", "value": "VADER"},
+                                ],
+                                value="Naive Bayes",
+                                clearable=False,
+                            ),
+                        ],
+                        md=4,
+                        className="mb-2",
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Label("Action", className="small"),
+                            dbc.Button(
+                                "Run sentiment analysis",
+                                id=_article_component_id("news-analysis-button", article_id, scope),
+                                color="success",
+                                className="w-100",
+                            ),
+                        ],
+                        md=3,
+                        className="mb-2",
+                    ),
+                ],
+                className="g-2",
+            ),
+            html.Div(id=_article_component_id("news-analysis-result", article_id, scope), className="mt-2"),
+        ]
+    )
+
+
+def _selected_article_text(data: dict | None, text_source: str | None) -> tuple[str | None, str]:
+    payload = data if isinstance(data, dict) else {}
+    summary_text = str(payload.get("ai_summary") or "").strip()
+    body_text = str(payload.get("body_text") or "").strip()
+
+    if text_source == "body":
+        if body_text:
+            return body_text, "Full Article Text"
+        return None, "Full Article Text"
+
+    if summary_text:
+        return summary_text, "AI Summary"
+    if body_text:
+        return body_text, "Full Article Text"
+    return None, "AI Summary"
+
+
+def _run_article_sentiment(model_choice: str | None, text: str) -> tuple[str, float]:
+    processed = preprocess(text)
+    if not processed.strip():
+        raise ValueError("The selected article text is empty after preprocessing.")
+
+    if model_choice == "VADER":
+        prediction = prebuilt_model([processed])[0]
+        score = float(vader_score(processed))
+    else:
+        prediction = predict_cached([processed], model_choice or "Naive Bayes")[0]
+        score = float(predict_score_cached([processed])[0])
+
+    sentiment_map = {"positive": "Positive", "neutral": "Neutral", "negative": "Negative"}
+    sentiment = sentiment_map.get(str(prediction).lower(), str(prediction))
+    return sentiment, score
 
 
 def _render_latest_card(payload: dict | None) -> dbc.Card:
@@ -51,6 +171,7 @@ def _render_latest_card(payload: dict | None) -> dbc.Card:
                 dbc.Button("Open Article", href=payload.get("link"), target="_blank", color="primary", size="sm")
                 if payload.get("link")
                 else html.Small("No link provided.", className="text-muted"),
+                _analysis_controls(payload, scope="latest"),
             ]
         ),
         className="mb-3 shadow-sm",
@@ -98,6 +219,7 @@ def _render_digest_rows(records: list[dict]) -> list:
                         if row.get("link")
                         else html.Small("No link", className="text-muted")
                     ),
+                    _analysis_controls(row, scope="list"),
                 ]
             )
         )
@@ -256,20 +378,11 @@ def load_news_digest(
     digest_meta = digest_payload.get("meta", {})
     latest_record = latest_payload.get("data") if latest_status == 200 else None
     records = digest_payload.get("data", [])
-    source_mode = digest_meta.get("source_mode") or "current"
-    snapshot_active = digest_meta.get("snapshot_date")
-    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
 
-    status_line = (
-        f"Mode: {mode_label} | "
-        f"Items returned: {digest_meta.get('returned_count', len(records))} | "
-        f"Generated at: {digest_meta.get('generated_at')} | "
-        f"Cache: {'hit' if digest_meta.get('from_cache') else 'miss'}"
+    status_component = build_status_alert(
+        digest_meta,
+        leading_parts=[f"Items returned: {digest_meta.get('returned_count', len(records))}"],
     )
-    if digest_meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-
-    status_component = dbc.Alert(status_line, color="info", className="mb-3")
     return status_component, _render_latest_card(latest_record), _render_digest_rows(records)
 
 
@@ -279,3 +392,41 @@ def load_news_digest(
 )
 def toggle_snapshot_date_input(data_mode):
     return data_mode != "snapshot"
+
+
+@callback(
+    Output({"type": "news-analysis-result", "article_id": MATCH, "scope": MATCH}, "children"),
+    Input({"type": "news-analysis-button", "article_id": MATCH, "scope": MATCH}, "n_clicks"),
+    State({"type": "news-analysis-source", "article_id": MATCH, "scope": MATCH}, "value"),
+    State({"type": "news-analysis-model", "article_id": MATCH, "scope": MATCH}, "value"),
+    State({"type": "news-analysis-data", "article_id": MATCH, "scope": MATCH}, "data"),
+    prevent_initial_call=True,
+)
+def analyze_news_article(_n_clicks, text_source, model_choice, article_data):
+    article_title = (article_data or {}).get("title") or "this article"
+    selected_text, source_label = _selected_article_text(article_data, text_source)
+    if not selected_text:
+        return dbc.Alert(
+            f"{source_label} is not available for {article_title}. Try the other text source.",
+            color="warning",
+            className="mb-0",
+        )
+
+    try:
+        sentiment, score = _run_article_sentiment(model_choice, selected_text)
+    except Exception as exc:  # noqa: BLE001
+        return dbc.Alert(f"Sentiment analysis failed: {type(exc).__name__}: {exc}", color="danger", className="mb-0")
+
+    card_color = "success" if sentiment == "Positive" else ("danger" if sentiment == "Negative" else "warning")
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.Div(f"Source analyzed: {source_label}", className="small text-muted mb-2"),
+                html.P([html.Strong("Sentiment: "), sentiment], className="mb-1"),
+                html.P([html.Strong("Emotional intensity score: "), f"{score:.3f}"], className="mb-1"),
+                html.Small(f"Model: {model_choice}", className="text-muted"),
+            ]
+        ),
+        color=card_color,
+        outline=True,
+    )

@@ -10,8 +10,27 @@ except ModuleNotFoundError:
 dash.register_page(__name__, name='Model Evaluation', title='Sentiment Analyzer | Model Evaluation')
 
 METRICS_CACHE = load_cached_metrics()
-LABELS = METRICS_CACHE.get("labels", ["negative", "neutral", "positive"])
-LABELS_DISPLAY = [label.title() for label in LABELS]
+DEFAULT_DATASET = METRICS_CACHE.get("default_dataset", "train5")
+DATASET_OPTIONS = [
+    {'label': html.Span('Train5 Corpus', style={'margin-right': '30px'}), 'value': 'train5'},
+    {'label': html.Span('News Corpus', style={'margin-right': '30px'}), 'value': 'news'},
+]
+MODEL_OPTIONS = [
+    {'label': html.Span('Naive Bayes', style={'margin-right': '30px'}), 'value': 'Naive Bayes'},
+    {'label': html.Span('SVM', style={'margin-right': '30px'}), 'value': 'SVM'},
+    {'label': html.Span('VADER', style={'margin-right': '30px'}), 'value': 'VADER'},
+    {'label': html.Span('OpenAI', style={'margin-right': '30px'}), 'value': 'OpenAI'},
+]
+
+
+def _dataset_metrics(dataset_key):
+    datasets = METRICS_CACHE.get("datasets", {})
+    return datasets.get(dataset_key) or datasets.get(DEFAULT_DATASET, {})
+
+
+def _dataset_labels(dataset_key):
+    labels = _dataset_metrics(dataset_key).get("labels", ["negative", "neutral", "positive"])
+    return labels, [label.title() for label in labels]
 ### PAGE LAYOUT ###############################################################################################################
 layout = dbc.Container([
     # title
@@ -21,22 +40,38 @@ layout = dbc.Container([
     # data input
     dbc.Row([
         dbc.Col([], width=3),
-        dbc.Col([html.P(['Select a model:'], className='par')]),
+        dbc.Col([html.P(['Select an evaluation corpus:'], className='par')]),
         dbc.Col([
             dcc.RadioItems(
-                options=[
-                    {'label': html.Span('Naive Bayes', style={'margin-right': '30px'}), 'value': 'Naive Bayes'},
-                    {'label': html.Span('SVM', style={'margin-right': '30px'}), 'value': 'SVM'},
-                    {'label': html.Span('VADER', style={'margin-right': '30px'}), 'value': 'VADER'}
-                ],
-                value='Naive Bayes',
+                options=DATASET_OPTIONS,
+                value=DEFAULT_DATASET,
                 persistence=True,
                 persistence_type='session',
-                id='radio-dataset',
+                id='radio-corpus',
                 inline=True
             )
         ], width=6),
         dbc.Col([], width=1)
+    ], className='row-content'),
+    dbc.Row([
+        dbc.Col([], width=3),
+        dbc.Col([html.P(['Select a model:'], className='par')]),
+        dbc.Col([
+            dcc.RadioItems(
+                options=MODEL_OPTIONS,
+                value='Naive Bayes',
+                persistence=True,
+                persistence_type='session',
+                id='radio-model',
+                inline=True
+            )
+        ], width=6),
+        dbc.Col([], width=1)
+    ], className='row-content'),
+    dbc.Row([
+        dbc.Col([], width=2),
+        dbc.Col([html.Div(id='evaluation-context', className='text-center text-muted')], width=8),
+        dbc.Col([], width=2)
     ], className='row-content'),
     # Accuracy, Precision, Recall, F1 metrics
     dbc.Row([
@@ -146,26 +181,36 @@ def _model_key(model_type):
         return "svm"
     if name == "vader":
         return "vader"
+    if name == "openai":
+        return "openai"
     return name
 # Update fig and accuracy
 @callback(
+    Output(component_id='evaluation-context', component_property='children'),
     Output(component_id='fig-pg1', component_property='figure'),
     Output(component_id='accuracy-display', component_property='children'),
     Output(component_id='precision-display', component_property='children'),
     Output(component_id='recall-display', component_property='children'),
     Output(component_id='f1-display', component_property='children'),
     Output(component_id='metrics-bar', component_property='figure'),
-    Input(component_id='radio-dataset', component_property='value')
+    Input(component_id='radio-corpus', component_property='value'),
+    Input(component_id='radio-model', component_property='value')
 )
-def update_evaluation(model_type):
+def update_evaluation(dataset_key, model_type):
     """Run the model evaluation and return the confusion matrix, accuracy, and metrics bar chart."""
+    labels, labels_display = _dataset_labels(dataset_key)
+    dataset_metrics = _dataset_metrics(dataset_key)
     model_key = _model_key(model_type)
-    model_metrics = METRICS_CACHE.get("models", {}).get(model_key)
+    model_metrics = dataset_metrics.get("models", {}).get(model_key)
+    context_text = (
+        f"Showing {dataset_metrics.get('display_name', 'selected corpus')} metrics. "
+        "OpenAI is available on the news corpus using precomputed article sentiment labels."
+    )
     if not model_metrics:
-        empty = np.zeros((len(LABELS_DISPLAY), len(LABELS_DISPLAY)))
-        fig = create_confusion_matrix_figure(empty, LABELS_DISPLAY)
-        metrics_bar = create_metrics_bar_chart([0, 0, 0], [0, 0, 0], [0, 0, 0], LABELS_DISPLAY)
-        return fig, "N/A", "N/A", "N/A", "N/A", metrics_bar
+        empty = np.zeros((len(labels_display), len(labels_display)))
+        fig = create_confusion_matrix_figure(empty, labels_display)
+        metrics_bar = create_metrics_bar_chart([0] * len(labels_display), [0] * len(labels_display), [0] * len(labels_display), labels_display)
+        return context_text, fig, "N/A", "N/A", "N/A", "N/A", metrics_bar
 
     confusion = np.asarray(model_metrics.get("confusion", []), dtype=float)
     precision = np.asarray(model_metrics.get("precision", []), dtype=float)
@@ -173,11 +218,11 @@ def update_evaluation(model_type):
     f1 = np.asarray(model_metrics.get("f1", []), dtype=float)
     accuracy = float(model_metrics.get("accuracy", 0.0))
 
-    fig = create_confusion_matrix_figure(confusion, LABELS_DISPLAY)
+    fig = create_confusion_matrix_figure(confusion, labels_display)
     accuracy_text = f"{accuracy:.2%}"
     # Calculate macro-averaged metrics for display
     precision_avg = f"{np.mean(precision):.2%}" if hasattr(precision, '__iter__') else f"{precision:.2%}"
     recall_avg = f"{np.mean(recall):.2%}" if hasattr(recall, '__iter__') else f"{recall:.2%}"
     f1_avg = f"{np.mean(f1):.2%}" if hasattr(f1, '__iter__') else f"{f1:.2%}"
-    metrics_bar = create_metrics_bar_chart(precision, recall, f1, LABELS_DISPLAY)
-    return fig, accuracy_text, precision_avg, recall_avg, f1_avg, metrics_bar
+    metrics_bar = create_metrics_bar_chart(precision, recall, f1, labels_display)
+    return context_text, fig, accuracy_text, precision_avg, recall_avg, f1_avg, metrics_bar

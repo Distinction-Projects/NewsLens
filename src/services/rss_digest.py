@@ -618,7 +618,7 @@ class RssDigestClient:
         ).strip()
         self.current_ttl_seconds = _coerce_int(
             ttl_seconds if ttl_seconds is not None else os.getenv("RSS_CACHE_TTL_SECONDS"),
-            default=86400,
+            default=3600,
         )
         self.snapshot_ttl_seconds = _coerce_int(
             os.getenv("RSS_SNAPSHOT_CACHE_TTL_SECONDS"),

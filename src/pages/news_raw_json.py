@@ -6,7 +6,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, mode_label, snapshot_param
+from src.pages.news_page_utils import api_get, build_status_alert, mode_label, snapshot_param
 
 
 dash.register_page(
@@ -181,15 +181,16 @@ def load_news_raw_json(
         mode = data_mode or "current"
         generated_at = None
 
-    status_line = (
-        f"Endpoint: {path} | "
-        f"HTTP: {status_code} | "
-        f"Mode: {mode} | "
-        f"Generated at: {generated_at or 'n/a'}"
-    )
     status_color = "info" if status_code == 200 else "warning"
-
-    return dbc.Alert(status_line, color=status_color, className="mb-0"), payload_text
+    return (
+        build_status_alert(
+            meta,
+            leading_parts=[f"Endpoint: {path}", f"HTTP: {status_code}", f"Mode: {mode}"],
+            color=status_color,
+            class_name="mb-0",
+        ),
+        payload_text,
+    )
 
 
 @callback(

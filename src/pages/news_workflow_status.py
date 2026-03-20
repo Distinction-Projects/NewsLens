@@ -4,7 +4,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, mode_label, snapshot_param
+from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -240,19 +240,20 @@ def load_workflow_status(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     )
 
     mode_meta = digest_meta if digest_meta else stats_meta
-    status_line = (
-        f"Mode: {mode_label(mode_meta)} | "
-        f"Generated at: {mode_meta.get('generated_at') or 'n/a'} | "
-        f"Digest HTTP: {digest_status} | Stats HTTP: {stats_status} | Latest HTTP: {latest_status}"
-    )
-    if mode_meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-
     alert_color = "info" if ingest_ok and stats_status == 200 else "warning"
     latest_record = latest_payload.get("data") if latest_status == 200 and isinstance(latest_payload, dict) else None
 
     return (
-        dbc.Alert(status_line, color=alert_color, className="mb-0"),
+        build_status_alert(
+            mode_meta,
+            leading_parts=[
+                f"Digest HTTP: {digest_status}",
+                f"Stats HTTP: {stats_status}",
+                f"Latest HTTP: {latest_status}",
+            ],
+            color=alert_color,
+            class_name="mb-0",
+        ),
         _summary_cards(input_articles, excluded_unscraped, included_articles, scored_articles, high_scoring_articles),
         checks,
         _latest_card(latest_record),

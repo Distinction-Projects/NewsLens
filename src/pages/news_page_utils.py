@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
+import dash_bootstrap_components as dbc
+from dash import html
 from flask import current_app
 
 
@@ -29,3 +31,30 @@ def mode_label(meta: dict) -> str:
         return "current"
     snapshot_date = meta.get("snapshot_date") if isinstance(meta, dict) else None
     return f"snapshot ({snapshot_date or 'missing-date'})"
+
+
+def build_status_alert(
+    meta: dict | None,
+    *,
+    leading_parts: list[str] | None = None,
+    trailing_parts: list[str] | None = None,
+    color: str = "info",
+    class_name: str = "mb-3",
+):
+    meta = meta if isinstance(meta, dict) else {}
+    details: list[str] = []
+    details.extend(leading_parts or [])
+    details.append(f"Mode: {mode_label(meta)}")
+    details.append(f"Cache: {'hit' if meta.get('from_cache') else 'miss'}")
+    if meta.get("using_last_good"):
+        details.append("using last-good fallback")
+    details.extend(trailing_parts or [])
+
+    return dbc.Alert(
+        [
+            html.Div([html.Strong("Last updated: "), meta.get("generated_at") or "n/a"], className="mb-1"),
+            html.Div(" | ".join(details), className="small mb-0"),
+        ],
+        color=color,
+        className=class_name,
+    )

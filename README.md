@@ -66,7 +66,7 @@ Set these environment variables:
 - `RSS_HISTORY_JSON_URL_TEMPLATE` (optional): snapshot URL template. Default:
   `https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json`
   (`{date}` is replaced with `YYYY-MM-DD`)
-- `RSS_CACHE_TTL_SECONDS` (optional, default `86400`): in-memory TTL cache duration.
+- `RSS_CACHE_TTL_SECONDS` (optional, default `3600`): in-memory TTL cache duration.
 - `RSS_HTTP_TIMEOUT_SECONDS` (optional, default `20`): HTTP timeout for upstream fetches.
 - `RSS_MAX_AGE_SECONDS` (optional, default `129600`): freshness SLO for `generated_at` (36 hours).
 

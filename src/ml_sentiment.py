@@ -43,6 +43,7 @@ lemmatizer = WordNetLemmatizer()
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "train5.csv"
+NEWS_DATA_PATH = BASE_DIR / "data" / "news_corpus.csv"
 MODEL_DIR = BASE_DIR / "models"
 VECTORIZER_PATH = MODEL_DIR / "count_vectorizer.joblib"
 MODEL_PATHS = {
@@ -56,6 +57,7 @@ _VECTORIZER_CACHE = None
 _MODEL_CACHE = {}
 _SCORE_MODEL_CACHE = None
 _METRICS_CACHE = None
+DEFAULT_LABELS = ["negative", "neutral", "positive"]
 
 
 def _normalize_model_name(model_name):
@@ -81,6 +83,10 @@ def read_file(filename):
     df = pd.read_csv(filename)
     df.columns = ['Sentiment','Text','Score']
     return df 
+
+
+def read_evaluation_file(filename):
+    return pd.read_csv(filename)
 
 
 def train_and_cache_models(data_path=None, force=False):
@@ -174,39 +180,92 @@ def predict_score_cached(X_test, train_if_missing=True, data_path=None):
     return model.predict(X_vec)
 
 
+def evaluate_predictions(y_true, y_pred, labels=None):
+    labels = list(labels or np.unique(y_true))
+    accuracy = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+    recall = recall_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+    confusion = confusion_matrix(y_true, y_pred, labels=labels)
+    f1 = f1_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+    return accuracy, precision, recall, confusion, f1
+
+
+def _load_evaluation_dataset(dataset_key):
+    normalized = str(dataset_key).strip().lower()
+    if normalized in ("train5", "train", "default"):
+        path = DATA_PATH
+        df = read_file(path)
+    elif normalized in ("news", "news corpus", "news_corpus", "news-corpus"):
+        path = NEWS_DATA_PATH
+        df = read_evaluation_file(path)
+    else:
+        raise ValueError(f"Unknown dataset_key: {dataset_key}")
+
+    if not path.exists():
+        raise FileNotFoundError(f"Evaluation data not found: {path}")
+
+    required_columns = {"Sentiment", "Text"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"Missing required columns in {path.name}: {missing_list}")
+
+    df = df.copy()
+    df["Text"] = df["Text"].astype(str).apply(preprocess)
+    df["Sentiment"] = df["Sentiment"].astype(str).str.strip().str.lower()
+    return df
+
+
+def _metrics_dict(accuracy, precision, recall, confusion, f1):
+    return {
+        "accuracy": float(accuracy),
+        "precision": np.asarray(precision).tolist(),
+        "recall": np.asarray(recall).tolist(),
+        "f1": np.asarray(f1).tolist(),
+        "confusion": np.asarray(confusion).tolist(),
+    }
+
+
+def _build_dataset_metrics(dataset_key, k=5):
+    df = _load_evaluation_dataset(dataset_key)
+    X = df["Text"].values
+    y = df["Sentiment"].values
+    labels = [label for label in DEFAULT_LABELS if label in set(y)] or list(np.unique(y))
+
+    def _cross_validated_metrics(model_label, model_type):
+        accuracy, precision, recall, confusion, f1 = evaluate_model(X, y, model_label, type=model_type, k=k, labels=labels)
+        return _metrics_dict(accuracy, precision, recall, confusion, f1)
+
+    payload = {
+        "labels": labels,
+        "display_name": "Train5 Corpus" if str(dataset_key).strip().lower() == "train5" else "News Corpus",
+        "models": {
+            "naive bayes": _cross_validated_metrics("Naive Bayes", 0),
+            "svm": _cross_validated_metrics("SVM", 0),
+            "vader": _cross_validated_metrics("VADER", 1),
+        },
+    }
+
+    if "OpenAI_Sentiment" in df.columns:
+        openai_predictions = df["OpenAI_Sentiment"].astype(str).str.strip().str.lower().values
+        accuracy, precision, recall, confusion, f1 = evaluate_predictions(y, openai_predictions, labels=labels)
+        payload["models"]["openai"] = _metrics_dict(accuracy, precision, recall, confusion, f1)
+
+    return payload
+
+
 def cache_metrics(data_path=None, force=False, k=5):
     global _METRICS_CACHE
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    data_path = Path(data_path) if data_path else DATA_PATH
     if not force and METRICS_PATH.exists():
         _METRICS_CACHE = load_cached_metrics(train_if_missing=False)
         return
 
-    if not data_path.exists():
-        raise FileNotFoundError(f"Training data not found: {data_path}")
-
-    df = read_file(data_path)
-    df['Text'] = df['Text'].astype(str).apply(preprocess)
-    X = df['Text'].values
-    y = df['Sentiment'].values
-    labels = list(np.unique(y))
-
-    def _metrics_for(model_label, model_type):
-        accuracy, precision, recall, confusion, f1 = evaluate_model(X, y, model_label, type=model_type, k=k)
-        return {
-            "accuracy": float(accuracy),
-            "precision": np.asarray(precision).tolist(),
-            "recall": np.asarray(recall).tolist(),
-            "f1": np.asarray(f1).tolist(),
-            "confusion": np.asarray(confusion).tolist(),
-        }
-
     payload = {
-        "labels": labels,
-        "models": {
-            "naive bayes": _metrics_for("Naive Bayes", 0),
-            "svm": _metrics_for("SVM", 0),
-            "vader": _metrics_for("VADER", 1),
+        "default_dataset": "train5",
+        "datasets": {
+            "train5": _build_dataset_metrics("train5", k=k),
+            "news": _build_dataset_metrics("news", k=k),
         },
     }
 
@@ -225,7 +284,22 @@ def load_cached_metrics(train_if_missing=True, data_path=None):
         else:
             raise FileNotFoundError(f"Missing cached metrics: {METRICS_PATH}")
     with open(METRICS_PATH, "r", encoding="utf-8") as handle:
-        _METRICS_CACHE = json.load(handle)
+        payload = json.load(handle)
+
+    dataset_payload = payload.get("datasets", {}) if isinstance(payload, dict) else {}
+    if not dataset_payload or "news" not in dataset_payload:
+        if train_if_missing:
+            cache_metrics(force=True)
+            return _METRICS_CACHE
+        train5_payload = payload if isinstance(payload, dict) else {}
+        payload = {
+            "default_dataset": "train5",
+            "datasets": {
+                "train5": train5_payload,
+            },
+        }
+
+    _METRICS_CACHE = payload
     return _METRICS_CACHE
 
 def emotion_score(X_train, y_train, X_test):
@@ -265,8 +339,15 @@ def vader_score(text):
     analyzer = get_vader_analyzer()
     return analyzer.polarity_scores(text)['compound']
 
-def evaluate_model(X,y,model,type=0,k=5):
-    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=42)
+def evaluate_model(X, y, model, type=0, k=5, labels=None):
+    labels = list(labels or np.unique(y))
+    _, counts = np.unique(y, return_counts=True)
+    min_class_count = int(counts.min()) if len(counts) else 0
+    n_splits = min(k, min_class_count)
+    if n_splits < 2:
+        raise ValueError("At least two examples per sentiment class are required for cross-validation")
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     accuracies = []
     precisions = []
     recalls = []
@@ -282,11 +363,7 @@ def evaluate_model(X,y,model,type=0,k=5):
         elif type == 1:
             pred = prebuilt_model(X_test)
 
-        accuracy = accuracy_score(y_test,pred)
-        precision = precision_score(y_test,pred, average=None)
-        recall = recall_score(y_test,pred,average=None)
-        confusion = confusion_matrix(y_test,pred)
-        f1 = f1_score(y_test, pred, average=None)
+        accuracy, precision, recall, confusion, f1 = evaluate_predictions(y_test, pred, labels=labels)
 
         accuracies.append(accuracy)
         precisions.append(precision)

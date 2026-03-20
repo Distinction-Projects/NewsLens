@@ -7,6 +7,8 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
+from src.pages.news_page_utils import build_status_alert
+
 
 dash.register_page(
     __name__,
@@ -231,21 +233,15 @@ def load_scraped_news(
 
     meta = payload.get("meta", {})
     records = payload.get("data", [])
-    source_mode = meta.get("source_mode") or "current"
-    snapshot_active = meta.get("snapshot_date")
-    mode_label = source_mode if source_mode != "snapshot" else f"snapshot ({snapshot_active or 'missing-date'})"
-    status_line = (
-        f"Mode: {mode_label} | "
-        f"Records loaded: {len(records)} | "
-        f"Generated at: {meta.get('generated_at')} | "
-        f"Cache: {'hit' if meta.get('from_cache') else 'miss'}"
+    trailing_parts = ["filtered to records with scraped payload"] if only_scraped else []
+    return (
+        build_status_alert(
+            meta,
+            leading_parts=[f"Records loaded: {len(records)}"],
+            trailing_parts=trailing_parts,
+        ),
+        _render_by_source(records, only_scraped=only_scraped),
     )
-    if meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-    if only_scraped:
-        status_line += " | filtered to records with scraped payload"
-
-    return dbc.Alert(status_line, color="info", className="mb-3"), _render_by_source(records, only_scraped=only_scraped)
 
 
 @callback(

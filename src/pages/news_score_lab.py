@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, mode_label, snapshot_param
+from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -190,17 +190,8 @@ def load_news_score_lab(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     high_score_by_source = chart_aggregates.get("high_score_by_source", [])
     score_tag_heatmap = chart_aggregates.get("score_tag_count_heatmap", [])
 
-    status_line = (
-        f"Mode: {mode_label(meta)} | "
-        f"Generated at: {meta.get('generated_at')} | "
-        f"Scored: {derived.get('scored_articles', 0)} | "
-        f"Cache: {'hit' if meta.get('from_cache') else 'miss'}"
-    )
-    if meta.get("using_last_good"):
-        status_line += " | using last-good fallback"
-
     return (
-        dbc.Alert(status_line, color="info", className="mb-3"),
+        build_status_alert(meta, leading_parts=[f"Scored: {derived.get('scored_articles', 0)}"]),
         _score_cards(derived),
         _score_histogram_figure(histogram_bins),
         _high_score_source_figure(high_score_by_source),
