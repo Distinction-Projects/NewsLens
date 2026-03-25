@@ -243,6 +243,20 @@ body {
     font-size: 18px !important;
 }
 
+.nav-group-toggle {
+    border-color: #042f33 !important;
+    color: #f6f6f6 !important;
+    background-color: rgba(4, 47, 51, 0.45) !important;
+    text-align: left;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.nav-group-toggle:hover {
+    background-color: rgba(4, 47, 51, 0.75) !important;
+    box-shadow: 0 0 8px rgba(75, 233, 250, 0.25);
+}
+
 .nav-pills .nav-link.active {
     background-color: #042f33;
 }
