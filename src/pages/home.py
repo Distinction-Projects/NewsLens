@@ -3,7 +3,7 @@ import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-dash.register_page(__name__, path='/', name='Home', title='Sentiment Analyzer | Home')
+dash.register_page(__name__, path='/', name='Home', title='NewsLens | Home')
 
 import pandas as pd
 
