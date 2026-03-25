@@ -51,7 +51,7 @@ def _article_analysis_payload(payload: dict) -> dict[str, str | None]:
 def _analysis_controls(payload: dict, scope: str) -> html.Div:
     article_id = str(payload.get("id") or payload.get("link") or payload.get("title") or "article")
     source_options = [
-        {"label": "AI Summary", "value": "summary"},
+        {"label": "Summary", "value": "summary"},
         {"label": "Full Article Text", "value": "body"},
     ]
 
@@ -124,10 +124,10 @@ def _selected_article_text(data: dict | None, text_source: str | None) -> tuple[
         return None, "Full Article Text"
 
     if summary_text:
-        return summary_text, "AI Summary"
+        return summary_text, "Summary"
     if body_text:
         return body_text, "Full Article Text"
-    return None, "AI Summary"
+    return None, "Summary"
 
 
 def _run_article_sentiment(model_choice: str | None, text: str) -> tuple[str, float]:
@@ -257,8 +257,7 @@ layout = dbc.Container(
                         dcc.Input(
                             id="news-filter-snapshot-date",
                             type="date",
-                            className="form-control",
-                            disabled=True,
+                            className="form-control"
                         ),
                     ],
                     md=2,
@@ -421,10 +420,10 @@ def analyze_news_article(_n_clicks, text_source, model_choice, article_data):
     return dbc.Card(
         dbc.CardBody(
             [
-                html.Div(f"Source analyzed: {source_label}", className="small text-muted mb-2"),
+                html.Div(f"Source analyzed: {source_label}", className="mb-1"),
                 html.P([html.Strong("Sentiment: "), sentiment], className="mb-1"),
                 html.P([html.Strong("Emotional intensity score: "), f"{score:.3f}"], className="mb-1"),
-                html.Small(f"Model: {model_choice}", className="text-muted"),
+                html.Small(f"Model: {model_choice}", className="mb-1"),
             ]
         ),
         color=card_color,

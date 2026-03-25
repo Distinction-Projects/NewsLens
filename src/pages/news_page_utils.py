@@ -56,5 +56,5 @@ def build_status_alert(
             html.Div(" | ".join(details), className="small mb-0"),
         ],
         color=color,
-        className=class_name,
+        className=f"news-status-alert {class_name}",
     )

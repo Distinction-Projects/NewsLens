@@ -344,6 +344,12 @@ input[type="checkbox" i] {
     color:#042f33 !important;
 }
 
+/* Keep "Last updated" status banners readable on info/warning alerts */
+.news-status-alert,
+.news-status-alert * {
+    color: #000000 !important;
+}
+
 /* === PAGE 3 ===*/
 .slider-div {
     padding: 8px 3px 0px 3px !important;
