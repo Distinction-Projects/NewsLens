@@ -4,4 +4,4 @@ __pycache__/
 .DS_Store
 src/models/*.joblib
 src/models/*.json
-ML_Sentiment.code-workspace
+NewsLens.code-workspace

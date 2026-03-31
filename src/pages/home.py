@@ -8,9 +8,9 @@ dash.register_page(__name__, path='/', name='Home', title='NewsLens | Home')
 import pandas as pd
 
 try:
-    from src.ml_sentiment import evaluate_model, preprocess
+    from src.NewsLens import evaluate_model, preprocess
 except ModuleNotFoundError:
-    from ml_sentiment import evaluate_model, preprocess
+    from NewsLens import evaluate_model, preprocess
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = BASE_DIR / "data" / "train5.csv"

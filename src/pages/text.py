@@ -13,7 +13,7 @@ from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
 
 try:
-    from src.ml_sentiment import (
+    from src.NewsLens import (
         preprocess,
         prebuilt_model,
         vader_score,
@@ -22,7 +22,7 @@ try:
         DATA_PATH,
     )
 except ModuleNotFoundError:
-    from ml_sentiment import (
+    from NewsLens import (
         preprocess,
         prebuilt_model,
         vader_score,

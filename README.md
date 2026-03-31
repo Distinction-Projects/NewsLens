@@ -14,7 +14,7 @@ Interactive Plotly Dash application that guides you through SARIMA modeling for 
 ## Run locally (Python 3.11)
 ```bash
 git clone <your fork of this repo>
-cd ML_Sentiment
+cd NewsLens
 
 # macOS / Linux (recommended when available)
 python3.11 -m venv .venv
@@ -113,7 +113,7 @@ The client also supports ETag conditional requests (`If-None-Match`) to avoid re
 - Restart the app after swapping data to ensure the in-memory dataset refreshes.
 
 ## Deploy to DigitalOcean
-- DigitalOcean App Platform: the included `app.yaml` is a ready-to-deploy spec. Point App Platform at this repo (`Distinction-Projects/ML_Sentiment`, branch `main`), confirm the detected spec, and deploy. Adjust the repo/branch in the manifest if your fork differs. The spec installs requirements, pre-downloads NLTK data, and starts `gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}` with Python 3.11 on a `basic-xxs` instance. A `.python-version` file pins Python 3.11 for the DO buildpack. `WORKER_TMP_DIR` defaults to `/dev/shm` (set in `app.yaml`) but the command falls back to `/tmp` if that path is absent (e.g., local macOS test).
+- DigitalOcean App Platform: the included `app.yaml` is a ready-to-deploy spec. Point App Platform at this repo (`Distinction-Projects/NewsLens`, branch `main`), confirm the detected spec, and deploy. Adjust the repo/branch in the manifest if your fork differs. The spec installs requirements, pre-downloads NLTK data, and starts `gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}` with Python 3.11 on a `basic-xxs` instance. A `.python-version` file pins Python 3.11 for the DO buildpack. `WORKER_TMP_DIR` defaults to `/dev/shm` (set in `app.yaml`) but the command falls back to `/tmp` if that path is absent (e.g., local macOS test).
 - Manual commands (if you prefer to enter them in the UI): build `pip install -r requirements.txt && python -m nltk.downloader stopwords punkt wordnet vader_lexicon punkt_tab && python -m src.cache_models`; run `gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}`.
 
 ## Project layout

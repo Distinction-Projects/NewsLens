@@ -9,9 +9,9 @@ from flask import current_app
 from src.pages.news_page_utils import build_status_alert
 
 try:
-    from src.ml_sentiment import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
+    from src.NewsLens import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
 except ModuleNotFoundError:
-    from ml_sentiment import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
+    from NewsLens import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
 
 
 dash.register_page(

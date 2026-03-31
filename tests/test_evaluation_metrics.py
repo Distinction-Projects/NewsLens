@@ -1,6 +1,6 @@
 import unittest
 
-from src.ml_sentiment import _build_dataset_metrics, load_cached_metrics
+from src.NewsLens import _build_dataset_metrics, load_cached_metrics
 
 
 class EvaluationMetricsTests(unittest.TestCase):

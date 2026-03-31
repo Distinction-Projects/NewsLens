@@ -4,9 +4,9 @@ import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 try:
-    from src.ml_sentiment import load_cached_metrics
+    from src.NewsLens import load_cached_metrics
 except ModuleNotFoundError:
-    from ml_sentiment import load_cached_metrics
+    from NewsLens import load_cached_metrics
 dash.register_page(__name__, name='Model Evaluation', title='Sentiment Analyzer | Model Evaluation')
 
 METRICS_CACHE = load_cached_metrics()

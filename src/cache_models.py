@@ -1,4 +1,4 @@
-from src.ml_sentiment import train_and_cache_models, cache_metrics
+from src.NewsLens import train_and_cache_models, cache_metrics
 
 
 def main():
