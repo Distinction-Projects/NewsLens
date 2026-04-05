@@ -1,38 +1,48 @@
-from pathlib import Path
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 dash.register_page(__name__, path='/', name='Home', title='NewsLens | Home')
 
-import pandas as pd
-
 try:
-    from src.NewsLens import evaluate_model, preprocess
+    from src.NewsLens import load_cached_metrics
 except ModuleNotFoundError:
-    from NewsLens import evaluate_model, preprocess
+    from NewsLens import load_cached_metrics
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-DATA_PATH = BASE_DIR / "data" / "train5.csv"
+METRICS = load_cached_metrics()
+if METRICS is None:
+    raise RuntimeError('Cached metrics could not be loaded')
 
-df = pd.read_csv(DATA_PATH)
-df.columns = ['Sentiment', 'Text', 'Score']
-df['Text'] = df['Text'].astype(str).apply(preprocess)
-X = df['Text'].values
-y = df['Sentiment'].values
+def _extract_home_metrics(payload):
+    """Return model accuracies for the home page from current or legacy metric schemas."""
+    # Current schema: {"default_dataset": "...", "datasets": {"train5": {"models": {...}}}}
+    if isinstance(payload, dict) and isinstance(payload.get("datasets"), dict):
+        datasets = payload.get("datasets", {})
+        default_dataset = payload.get("default_dataset", "train5")
+        dataset_payload = datasets.get(default_dataset) or next(iter(datasets.values()), {})
+        models = dataset_payload.get("models", {}) if isinstance(dataset_payload, dict) else {}
+    else:
+        # Legacy schema: {"models": {...}}
+        models = payload.get("models", {}) if isinstance(payload, dict) else {}
 
-vader_acc, *_ = evaluate_model(X, y, 'VADER', type=1, k=5)
-nb_acc, *_ = evaluate_model(X, y, 'Naive Bayes', type=0, k=5)
+    def _acc(model_key):
+        model_payload = models.get(model_key, {}) if isinstance(models, dict) else {}
+        value = model_payload.get("accuracy", 0.0) if isinstance(model_payload, dict) else 0.0
+        return float(value) if isinstance(value, (int, float)) else 0.0
 
-if nb_acc > vader_acc:
-    best_model = 'Naive Bayes'
-    diff = nb_acc - vader_acc
-elif vader_acc > nb_acc:
+    return _acc("vader"), _acc("naive bayes"), _acc("svm")
+
+
+vader_acc, nb_acc, svm_acc = _extract_home_metrics(METRICS)
+best_acc = max(vader_acc, nb_acc, svm_acc)
+diff = best_acc - vader_acc
+
+if best_acc == vader_acc:
     best_model = 'VADER'
-    diff = vader_acc - nb_acc
-else:
-    best_model = 'Both models are equal'
-    diff = 0
+elif best_acc == nb_acc:
+    best_model = 'Naive Bayes'
+elif best_acc == svm_acc:
+    best_model = 'Support Vector Machine'
 
 def make_feature_card(icon, title, description, link, link_text):
     """Create a consistent feature card."""
@@ -96,7 +106,7 @@ layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H5('Quick Comparison: VADER vs Naive Bayes', className='mb-0')),
+                dbc.CardHeader(html.H5('Quick Comparison: VADER, Naive Bayes, and SVM', className='mb-0')),
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
@@ -111,6 +121,12 @@ layout = dbc.Container([
                                 html.Span(f'{nb_acc:.1%}', className='float-end')
                             ]),
                             dbc.Progress(value=nb_acc * 100, color='success', className='mb-3', style={'height': '10px'}),
+
+                            html.Div([
+                                html.Span('SVM', className='fw-bold'),
+                                html.Span(f'{svm_acc:.1%}', className='float-end')
+                            ]),
+                            dbc.Progress(value=svm_acc * 100, color='warning', className='mb-3', style={'height': '10px'}),
                         ], md=8),
                         dbc.Col([
                             html.Div([

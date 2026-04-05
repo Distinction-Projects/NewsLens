@@ -1,15 +1,6 @@
-# SARIMA Dashboard (Python + Dash)
-(testing small change)
-Interactive Plotly Dash application that guides you through SARIMA modeling for time series forecasting using Python. The current dependency set targets Python 3.11 (works on 3.10–3.12, but 3.11 is recommended locally and on Render).
+# NewsLens — AI News Intelligence & Sentiment Analysis Platform
 
-- Live app: https://gabria1.pythonanywhere.com/
-- Original tutorial: [Time Series Data Analysis with SARIMA and Dash](https://medium.com/towards-data-science/time-series-data-analysis-with-sarima-and-dash-f4199c3fc092) on Towards Data Science. Please retain this attribution if you reuse or deploy.
-
-## Workflow in the app
-- **Data set up:** start from the built-in AirPassengers dataset (`src/data/AirPassengers.csv`). The app expects two columns (`Time`, `Values`) parsed as dates and numeric data.
-- **Stationarity checks:** apply log transforms and differencing, run the Augmented Dickey-Fuller test, and inspect ACF/PACF and Box-Cox plots.
-- **Model selection:** run a SARIMA `(p,d,q)(P,D,Q,m)` grid search scored by AIC with train/test split control.
-- **Prediction:** fit the selected model, visualize train/test forecasts with confidence intervals, and review residual ACF/PACF.
+NewsLens is a multi-page Dash web app that combines traditional machine learning sentiment classifiers (Naive Bayes, SVM, VADER) with an automated RSS pipeline that uses OpenAI to score AI news articles across six analytical lenses: credibility, emotional intensity, sentiment clarity, objectivity, linguistic quality, and entity-level sentiment. The app provides a unified news intelligence experience with real-time text testing, evaluation metrics, and curated RSS digest insights. Deployed on DigitalOcean.
 
 ## Run locally (Python 3.11)
 ```bash
@@ -108,10 +99,6 @@ Current mode (`RSS_DAILY_JSON_URL`) uses last-good fallback on upstream failures
 
 The client also supports ETag conditional requests (`If-None-Match`) to avoid re-downloading unchanged artifacts.
 
-### Working with data
-- The default AirPassengers sample lives in `src/data/AirPassengers.csv`. Replace that file (keep the `Time` and `Values` headers) to experiment with your own series.
-- Restart the app after swapping data to ensure the in-memory dataset refreshes.
-
 ## Deploy to DigitalOcean
 - DigitalOcean App Platform: the included `app.yaml` is a ready-to-deploy spec. Point App Platform at this repo (`Distinction-Projects/NewsLens`, branch `main`), confirm the detected spec, and deploy. Adjust the repo/branch in the manifest if your fork differs. The spec installs requirements, pre-downloads NLTK data, and starts `gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}` with Python 3.11 on a `basic-xxs` instance. A `.python-version` file pins Python 3.11 for the DO buildpack. `WORKER_TMP_DIR` defaults to `/dev/shm` (set in `app.yaml`) but the command falls back to `/tmp` if that path is absent (e.g., local macOS test).
 - Manual commands (if you prefer to enter them in the UI): build `pip install -r requirements.txt && python -m nltk.downloader stopwords punkt wordnet vader_lexicon punkt_tab && python -m src.cache_models`; run `gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR:-/tmp}`.
@@ -119,14 +106,14 @@ The client also supports ETag conditional requests (`If-None-Match`) to avoid re
 ## Project layout
 ```
 src/
+├── api/                 # REST API endpoints for news digest and stats
 ├── app.py               # Dash bootstrap + page/asset config
 ├── assets/              # Static assets (CSS, etc.)
 ├── components/          # Shared UI elements (nav, footer)
-├── data/                # AirPassengers sample + sentiment training CSV
+├── data/                # Training and cached data artifacts
 ├── models/              # Cached vectorizer + trained models (generated)
 ├── pages/               # Multi-page Dash views
-└── utils/               # Plot layout helpers, SARIMA utilities
+├── services/            # RSS digest and news scoring services
+└── utils/               # Helper utilities and layout components
 ```
 Each folder is a Python package (via `__init__.py`) so imports stay stable locally and on DigitalOcean.
-
-![dash_app_step03](https://user-images.githubusercontent.com/57110246/236455995-a98416d9-57f3-4c6e-b41b-0583ba66c86d.gif)
