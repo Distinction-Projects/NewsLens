@@ -1,0 +1,23 @@
+[Unit]
+Description=NewsLens Gunicorn service
+After=network.target
+
+[Service]
+Type=simple
+User=newslens
+Group=newslens
+WorkingDirectory=/srv/newslens/app
+EnvironmentFile=/etc/newslens/newslens.env
+Environment=NLTK_DATA=/srv/newslens/nltk_data
+ExecStart=/srv/newslens/venv/bin/gunicorn \
+    --chdir src \
+    --timeout 600 \
+    --workers 2 \
+    --bind 127.0.0.1:8000 \
+    --worker-tmp-dir /dev/shm \
+    app:server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

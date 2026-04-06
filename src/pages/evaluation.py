@@ -7,7 +7,7 @@ try:
     from src.NewsLens import load_cached_metrics
 except ModuleNotFoundError:
     from NewsLens import load_cached_metrics
-dash.register_page(__name__, name='Model Evaluation', title='Sentiment Analyzer | Model Evaluation')
+dash.register_page(__name__, path='/evaluation', name='Model Evaluation', title='NewsLens | Model Evaluation')
 
 METRICS_CACHE = load_cached_metrics()
 DEFAULT_DATASET = METRICS_CACHE.get("default_dataset", "train5")

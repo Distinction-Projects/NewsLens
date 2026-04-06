@@ -13,7 +13,7 @@ dash.register_page(
     __name__,
     path="/news/raw-json",
     name="News Raw JSON",
-    title="Sentiment Analyzer | News Raw JSON",
+    title="NewsLens | News Raw JSON",
 )
 
 
@@ -37,7 +37,7 @@ def _endpoint_path(endpoint_key: str) -> str:
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-raw-load", interval=3000, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-raw-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Raw JSON Explorer", className="mb-3"), width=12)]),
         dbc.Row(
             [
