@@ -2,7 +2,7 @@ import dash
 from dash import html
 import dash_bootstrap_components as dbc
 
-dash.register_page(__name__, path='/about', name='About', title='Sentiment Analyzer | About')
+dash.register_page(__name__, path='/about', name='About', title='NewsLens | About')
 
 layout = dbc.Container([
     # Header
@@ -32,8 +32,8 @@ layout = dbc.Container([
                                 'Passionate about machine learning, data science, and building '
                                 'applications that make complex analysis accessible. This project '
                                 'combines my interests in NLP and web development to create a tool '
-                                'for understanding emotional tone in text.'
-                                
+                                'for understanding emotional tone and multi-dimensional news content '
+                                'analysis.'
                             ),
                             html.Div([
                                 dbc.Badge('Python', color='primary', className='me-1'),
@@ -98,13 +98,28 @@ layout = dbc.Container([
                         html.Div([
                             html.Div([
                                 html.Span('Phase 4', className='badge bg-secondary me-2'),
-                                html.Strong('News Feed Integration'),
-                                html.Span(' (Upcoming)', className='fst-italic')
+                                html.Strong('News Feed Integration')
                             ]),
                             html.P(
-                                'Planned integration with RSS news feeds and the OpenAI API to analyze '
-                                'sentiment trends in real-time global news coverage. This will enable '
-                                'tracking of public sentiment across topics and sources over time.',
+                                'Delivered RSS pipeline integration with GitHub Actions automation, '
+                                'OpenAI-powered multi-lens rubric scoring across six analytical '
+                                'dimensions, and a dashboard landing page linking to all digest, stats, '
+                                'trends, sources, tags, and score lab views.',
+                                className='mb-0 ms-5'
+                            )
+                        ], className='mb-4'),
+
+                        html.Div([
+                            html.Div([
+                                html.Span('Phase 5', className='badge bg-secondary me-2'),
+                                html.Strong('Comparative Analysis'),
+                                html.Span(' (Current)', className='fst-italic')
+                            ]),
+                            html.P(
+                                'Building the bridge between the ML models and the LLM lens by running '
+                                'traditional classifiers on news articles and comparing their outputs '
+                                'with OpenAI rubric scores to understand when classic sentiment '
+                                'prediction agrees with multi-dimensional content analysis.',
                                 className='mb-0 ms-5'
                             )
                         ], className='mb-4'),
@@ -127,6 +142,7 @@ layout = dbc.Container([
                                 html.Li('Python'),
                                 html.Li('Scikit-Learn'),
                                 html.Li('NLTK / VADER'),
+                                html.Li('OpenAI API'),
                                 html.Li('Pandas & NumPy'),
                             ], className='list-unstyled text-muted')
                         ])
@@ -151,6 +167,7 @@ layout = dbc.Container([
                             html.Ul([
                                 html.Li('DigitalOcean App Platform'),
                                 html.Li('GitHub for Version Control'),
+                                html.Li('GitHub Actions'),
                             ], className='list-unstyled text-muted')
                         ])
                     ], className='h-100')
