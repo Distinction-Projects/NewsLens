@@ -11,7 +11,7 @@ dash.register_page(
     __name__,
     path="/news/workflow-status",
     name="News Workflow Status",
-    title="Sentiment Analyzer | News Workflow Status",
+    title="NewsLens | News Workflow Status",
 )
 
 

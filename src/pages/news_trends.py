@@ -12,7 +12,7 @@ dash.register_page(
     __name__,
     path="/news/trends",
     name="News Trends",
-    title="Sentiment Analyzer | News Trends",
+    title="NewsLens | News Trends",
 )
 
 
@@ -68,7 +68,7 @@ def _summary_cards(derived: dict) -> list:
     return [
         dbc.Col(
             dbc.Card(
-                dbc.CardBody([html.P(label, className="text-muted mb-1"), html.H4(str(value), className="mb-0")]),
+                dbc.CardBody([html.P(label, className="text-white mb-1"), html.H4(str(value), className="mb-0")]),
                 className="shadow-sm",
             ),
             md=3,

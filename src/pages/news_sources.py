@@ -12,7 +12,7 @@ dash.register_page(
     __name__,
     path="/news/sources",
     name="News Sources",
-    title="Sentiment Analyzer | News Sources",
+    title="NewsLens | News Sources",
 )
 
 
@@ -91,7 +91,16 @@ def _source_table(rows: list[dict], top_n: int):
                 ]
             )
         )
-    return dbc.Table([header, html.Tbody(body_rows)], bordered=True, striped=True, hover=True, responsive=True, size="sm")
+    return dbc.Table(
+        [header, html.Tbody(body_rows)],
+        bordered=True,
+        striped=True,
+        hover=True,
+        responsive=True,
+        size="sm",
+        className="text-dark",
+        style={"color": "#000"},
+    )
 
 
 layout = dbc.Container(

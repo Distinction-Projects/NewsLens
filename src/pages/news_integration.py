@@ -11,7 +11,7 @@ dash.register_page(
     __name__,
     path="/news/integration",
     name="News Integration",
-    title="Sentiment Analyzer | News Integration",
+    title="NewsLens | News Integration",
 )
 
 

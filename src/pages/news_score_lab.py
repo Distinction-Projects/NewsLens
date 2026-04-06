@@ -12,7 +12,7 @@ dash.register_page(
     __name__,
     path="/news/score-lab",
     name="News Score Lab",
-    title="Sentiment Analyzer | News Score Lab",
+    title="NewsLens | News Score Lab",
 )
 
 
@@ -94,7 +94,7 @@ def _score_cards(derived: dict) -> list:
     return [
         dbc.Col(
             dbc.Card(
-                dbc.CardBody([html.P(label, className="text-muted mb-1"), html.H4(str(value), className="mb-0")]),
+                dbc.CardBody([html.P(label, className="text-white mb-1"), html.H4(str(value), className="mb-0")]),
                 className="shadow-sm",
             ),
             md=3,

@@ -14,7 +14,7 @@ dash.register_page(
     __name__,
     path="/news/tags",
     name="News Tags",
-    title="Sentiment Analyzer | News Tags",
+    title="NewsLens | News Tags",
 )
 
 

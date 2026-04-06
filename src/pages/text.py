@@ -31,7 +31,7 @@ except ModuleNotFoundError:
         DATA_PATH,
     )
 
-dash.register_page(__name__, path='/text', name='Test Your Text', title='Sentiment Analyzer | Test Your Text')
+dash.register_page(__name__, path='/text', name='Test Your Text', title='NewsLens | Test Your Text')
 
 # Validate training data availability for cache warmup
 DATA_LOADED = False

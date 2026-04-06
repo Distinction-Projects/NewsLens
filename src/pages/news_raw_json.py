@@ -13,7 +13,7 @@ dash.register_page(
     __name__,
     path="/news/raw-json",
     name="News Raw JSON",
-    title="Sentiment Analyzer | News Raw JSON",
+    title="NewsLens| News Raw JSON",
 )
 
 

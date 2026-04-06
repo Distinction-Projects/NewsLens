@@ -12,7 +12,7 @@ dash.register_page(
     __name__,
     path="/news/snapshot-compare",
     name="News Snapshot Compare",
-    title="Sentiment Analyzer | News Snapshot Compare",
+    title="NewsLens | News Snapshot Compare",
 )
 
 
