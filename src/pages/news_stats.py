@@ -134,7 +134,7 @@ def _summary_cards(derived: dict) -> list:
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-stats-load", interval=3000, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-stats-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Statistics", className="mb-3"), width=12)]),
         dbc.Row(
             [

@@ -42,7 +42,7 @@ def _status_row(label: str, ok: bool, details: str) -> dbc.ListGroupItem:
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-integration-load", interval=3000, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-integration-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Integration Monitor", className="mb-2"), width=12)]),
         dbc.Row(
             [

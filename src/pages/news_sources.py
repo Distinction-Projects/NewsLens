@@ -105,7 +105,7 @@ def _source_table(rows: list[dict], top_n: int):
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-sources-load", interval=3000, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-sources-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Sources", className="mb-3"), width=12)]),
         dbc.Row(
             [

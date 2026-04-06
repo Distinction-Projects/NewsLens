@@ -124,10 +124,10 @@ def _selected_article_text(data: dict | None, text_source: str | None) -> tuple[
         return None, "Full Article Text"
 
     if summary_text:
-        return summary_text, "Summary"
+        return summary_text, "AI Summary"
     if body_text:
         return body_text, "Full Article Text"
-    return None, "Summary"
+    return None, "AI Summary"
 
 
 def _run_article_sentiment(model_choice: str | None, text: str) -> tuple[str, float]:
@@ -228,7 +228,7 @@ def _render_digest_rows(records: list[dict]) -> list:
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-digest-load", interval=3000, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-digest-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row(
             [
                 dbc.Col(html.H3("News Digest", className="mb-3"), width=12),
