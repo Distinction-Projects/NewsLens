@@ -1,0 +1,66 @@
+name: Deploy NewsLens Droplet
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: newslens-droplet-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DROPLET_HOST }}
+      DEPLOY_USER: ${{ secrets.DROPLET_USER }}
+      DEPLOY_PORT: ${{ secrets.DROPLET_PORT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load SSH Key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DROPLET_SSH_KEY }}
+
+      - name: Add Droplet Host Key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Sync App To Droplet
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '.DS_Store' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.pytest_cache' \
+            --exclude '.mypy_cache' \
+            --exclude '.tmp' \
+            -e "ssh -p ${DEPLOY_PORT:-22}" \
+            ./ "${DEPLOY_USER}@${DEPLOY_HOST}:/srv/newslens/app/"
+
+      - name: Restart Service And Smoke Check
+        run: |
+          set -euo pipefail
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" << 'EOF'
+          set -euo pipefail
+
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ]; then
+            SUDO="sudo"
+          fi
+
+          ${SUDO} chown -R newslens:newslens /srv/newslens/app
+          /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
+          ${SUDO} systemctl restart newslens
+          ${SUDO} systemctl is-active --quiet newslens
+          curl -fsS http://127.0.0.1:8000/news/source-effects >/dev/null
+          EOF

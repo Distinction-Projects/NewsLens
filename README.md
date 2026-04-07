@@ -253,6 +253,26 @@ sudo apt-get install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.example
 ```
 
+## GitHub Actions deploy to Droplet
+
+This repo includes an automated deploy workflow at:
+
+- `.github/workflows/deploy-droplet.yml`
+
+It runs on push to `main` (and supports manual runs via `workflow_dispatch`) and does:
+
+- rsync current repo contents to `/srv/newslens/app`
+- install/update Python requirements in `/srv/newslens/venv`
+- restart `newslens` with `systemd`
+- run a smoke check against `http://127.0.0.1:8000/news/source-effects`
+
+Required repository secrets:
+
+- `DROPLET_HOST` (example: `64.23.250.112`)
+- `DROPLET_USER` (example: `root`)
+- `DROPLET_SSH_KEY` (private SSH key for that user)
+- `DROPLET_PORT` (optional, defaults to `22`)
+
 ## Project layout
 
 ```text
