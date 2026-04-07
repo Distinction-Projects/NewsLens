@@ -63,14 +63,11 @@ jobs:
           ${SUDO} systemctl restart newslens
           ${SUDO} systemctl is-active --quiet newslens
 
-          for i in $(seq 1 12); do
-            if curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/ >/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
+          if curl -fsS --connect-timeout 5 --max-time 300 http://127.0.0.1:8000/ >/dev/null; then
+            exit 0
+          fi
 
           ${SUDO} systemctl status newslens --no-pager || true
-          ${SUDO} journalctl -u newslens -n 80 --no-pager || true
+          ${SUDO} journalctl -u newslens -n 120 --no-pager || true
           exit 1
           EOF
