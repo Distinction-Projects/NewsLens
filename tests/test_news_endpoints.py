@@ -170,6 +170,23 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(stats_payload["data"]["derived"]["input_articles"], 3)
         self.assertEqual(stats_payload["data"]["derived"]["excluded_unscraped_articles"], 1)
         self.assertEqual(stats_payload["data"]["derived"]["total_articles"], 2)
+        self.assertIn("lens_correlations", stats_payload["data"]["derived"])
+        self.assertIn("source_differentiation", stats_payload["data"]["derived"])
+        self.assertIn("source_lens_effects", stats_payload["data"]["derived"])
+        lens_correlations = stats_payload["data"]["derived"]["lens_correlations"]
+        self.assertIn("lenses", lens_correlations)
+        self.assertIn("correlation", lens_correlations)
+        self.assertIn("covariance", lens_correlations)
+        self.assertIn("pairwise_counts", lens_correlations)
+        source_differentiation = stats_payload["data"]["derived"]["source_differentiation"]
+        self.assertIn("status", source_differentiation)
+        self.assertIn("source_counts", source_differentiation)
+        self.assertIn("multivariate", source_differentiation)
+        self.assertIn("classification", source_differentiation)
+        source_lens_effects = stats_payload["data"]["derived"]["source_lens_effects"]
+        self.assertIn("status", source_lens_effects)
+        self.assertIn("permutations", source_lens_effects)
+        self.assertIn("rows", source_lens_effects)
         chart_aggregates = stats_payload["data"]["derived"]["chart_aggregates"]
         self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
         self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
@@ -180,6 +197,41 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         health_payload = health.get_json()
         self.assertTrue(health_payload["is_fresh"])
+
+    def test_export_endpoints(self):
+        export_json = self.client.get("/api/news/export?artifact=source_score_summary&format=json")
+        self.assertEqual(export_json.status_code, 200)
+        payload = export_json.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["artifact"], "source_score_summary")
+        self.assertIsInstance(payload["rows"], list)
+        self.assertGreaterEqual(len(payload["rows"]), 1)
+
+        export_csv = self.client.get("/api/news/export?artifact=source_score_summary&format=csv")
+        self.assertEqual(export_csv.status_code, 200)
+        self.assertIn("text/csv", export_csv.content_type)
+        csv_body = export_csv.get_data(as_text=True)
+        self.assertIn("source", csv_body)
+        self.assertIn("avg_percent", csv_body)
+
+        export_source_effects = self.client.get("/api/news/export?artifact=source_lens_effects&format=json")
+        self.assertEqual(export_source_effects.status_code, 200)
+        effects_payload = export_source_effects.get_json()
+        self.assertEqual(effects_payload["artifact"], "source_lens_effects")
+        self.assertIsInstance(effects_payload["rows"], list)
+
+        export_source_summary = self.client.get("/api/news/export?artifact=source_differentiation_summary&format=json")
+        self.assertEqual(export_source_summary.status_code, 200)
+        source_summary_payload = export_source_summary.get_json()
+        self.assertEqual(source_summary_payload["artifact"], "source_differentiation_summary")
+        self.assertIsInstance(source_summary_payload["rows"], list)
+        self.assertEqual(len(source_summary_payload["rows"]), 1)
+
+        bad_artifact = self.client.get("/api/news/export?artifact=unknown")
+        self.assertEqual(bad_artifact.status_code, 400)
+
+        bad_format = self.client.get("/api/news/export?artifact=source_score_summary&format=xml")
+        self.assertEqual(bad_format.status_code, 400)
 
     def test_freshness_is_stale_when_generated_at_missing(self):
         payload = dict(SAMPLE_PAYLOAD)

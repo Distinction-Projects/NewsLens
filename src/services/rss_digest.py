@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import random
 import threading
 import time
 from collections import Counter, OrderedDict
@@ -82,6 +84,36 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_score_lens_scores(value: Any) -> dict[str, dict[str, float | int | None]]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, dict[str, float | int | None]] = {}
+    for lens_name, payload in value.items():
+        if not isinstance(lens_name, str) or not isinstance(payload, dict):
+            continue
+
+        value_score = _coerce_float(payload.get("value"))
+        max_value = _coerce_float(payload.get("max_value"))
+        percent = _coerce_float(payload.get("percent"))
+        if percent is None and value_score is not None and max_value and max_value > 0:
+            percent = (value_score / max_value) * 100.0
+
+        rubric_count_raw = payload.get("rubric_count")
+        try:
+            rubric_count = int(rubric_count_raw) if rubric_count_raw is not None else None
+        except (TypeError, ValueError):
+            rubric_count = None
+
+        normalized[lens_name] = {
+            "value": value_score,
+            "max_value": max_value,
+            "percent": percent,
+            "rubric_count": rubric_count,
+        }
+    return normalized
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -283,6 +315,7 @@ def normalize_article(article: dict[str, Any]) -> dict[str, Any]:
             "max_value": score_max_value,
             "percent": score_percent,
             "rubric_count": rubric_count,
+            "lens_scores": _normalize_score_lens_scores(score_obj.get("lens_scores")),
         },
         "high_score": high_score_obj,
         "scraped": article.get("scraped"),
@@ -382,6 +415,8 @@ _SCORE_HISTOGRAM_BIN_LABELS = tuple(f"{start}-{start + 10}" for start in range(0
 _TAG_COUNT_DISTRIBUTION_LABELS = ("0", "1", "2", "3", "4", "5+")
 _TAG_COUNT_HEATMAP_LABELS = ("0", "1", "2", "3", "4+")
 _SCORE_HEATMAP_LABELS = tuple(bin_def["label"] for bin_def in _SCORE_DISTRIBUTION_BINS)
+_SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=200, minimum=0)
+_SOURCE_EFFECT_RANDOM_SEED = 17
 
 
 def _score_distribution_bin_index(score_percent: float) -> int:
@@ -425,9 +460,638 @@ def _score_heatmap_label(score_percent: float) -> str:
     return _SCORE_DISTRIBUTION_BINS[_score_distribution_bin_index(score_percent)]["label"]
 
 
+def _lens_max_map_from_analysis(analysis: Any) -> dict[str, float]:
+    if not isinstance(analysis, dict):
+        return {}
+    lens_summary = analysis.get("lens_summary")
+    if not isinstance(lens_summary, dict):
+        return {}
+    lenses = lens_summary.get("lenses", [])
+    if not isinstance(lenses, list):
+        return {}
+
+    result: dict[str, float] = {}
+    for row in lenses:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        max_total = row.get("max_total")
+        if isinstance(name, str) and isinstance(max_total, (int, float)) and max_total > 0:
+            result[name] = float(max_total)
+    return result
+
+
+def _record_lens_percentages(record: dict[str, Any], lens_maxima: dict[str, float]) -> dict[str, float]:
+    score = record.get("score")
+    score_obj = score if isinstance(score, dict) else {}
+    lens_scores = score_obj.get("lens_scores")
+    normalized: dict[str, float] = {}
+
+    if isinstance(lens_scores, dict):
+        for lens_name, payload in lens_scores.items():
+            if not isinstance(lens_name, str) or not isinstance(payload, dict):
+                continue
+            percent = _coerce_float(payload.get("percent"))
+            if percent is not None:
+                normalized[lens_name] = min(max(percent, 0.0), 100.0)
+                continue
+
+            value = _coerce_float(payload.get("value"))
+            max_value = _coerce_float(payload.get("max_value"))
+            if value is not None and max_value is not None and max_value > 0:
+                normalized[lens_name] = min(max((value / max_value) * 100.0, 0.0), 100.0)
+
+    if normalized:
+        return normalized
+
+    high_score = record.get("high_score")
+    high_score_obj = high_score if isinstance(high_score, dict) else {}
+    legacy_lens_scores = high_score_obj.get("lens_scores")
+    if not isinstance(legacy_lens_scores, dict):
+        return {}
+
+    for lens_name, value in legacy_lens_scores.items():
+        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
+            continue
+        max_total = lens_maxima.get(lens_name)
+        if isinstance(max_total, (int, float)) and max_total > 0:
+            normalized[lens_name] = min(max((float(value) / float(max_total)) * 100.0, 0.0), 100.0)
+        else:
+            normalized[lens_name] = min(max(float(value), 0.0), 100.0)
+    return normalized
+
+
+def _pairwise_stats(xs: list[float], ys: list[float]) -> tuple[float | None, float | None]:
+    if not xs or not ys or len(xs) != len(ys):
+        return None, None
+    count = len(xs)
+    if count == 0:
+        return None, None
+
+    mean_x = sum(xs) / count
+    mean_y = sum(ys) / count
+    covariance = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / count
+
+    var_x = sum((x - mean_x) ** 2 for x in xs) / count
+    var_y = sum((y - mean_y) ** 2 for y in ys) / count
+    if var_x <= 0 or var_y <= 0:
+        return covariance, None
+    correlation = covariance / math.sqrt(var_x * var_y)
+    return covariance, correlation
+
+
+def _lens_correlations_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    discovered = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float))
+    }
+    if preferred_lenses:
+        ordered = [name for name in preferred_lenses if name in discovered]
+        ordered.extend(sorted(discovered - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered)
+
+    size = len(lens_names)
+    if size == 0:
+        return {
+            "lenses": [],
+            "correlation": {"raw": [], "normalized": []},
+            "covariance": {"raw": [], "normalized": []},
+            "pairwise_counts": [],
+        }
+
+    corr_raw: list[list[float | None]] = [[None for _ in range(size)] for _ in range(size)]
+    corr_norm: list[list[float | None]] = [[None for _ in range(size)] for _ in range(size)]
+    cov_raw: list[list[float | None]] = [[None for _ in range(size)] for _ in range(size)]
+    cov_norm: list[list[float | None]] = [[None for _ in range(size)] for _ in range(size)]
+    pairwise_counts: list[list[int | None]] = [[None for _ in range(size)] for _ in range(size)]
+
+    for row_index, lens_a in enumerate(lens_names):
+        for col_index, lens_b in enumerate(lens_names):
+            xs: list[float] = []
+            ys: list[float] = []
+            for row in article_lens_percentages:
+                a = row.get(lens_a)
+                b = row.get(lens_b)
+                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                    xs.append(float(a))
+                    ys.append(float(b))
+            count = len(xs)
+            pairwise_counts[row_index][col_index] = count
+            if count == 0:
+                continue
+
+            covariance, correlation = _pairwise_stats(xs, ys)
+            if row_index == col_index:
+                if covariance is None:
+                    covariance = 0.0
+                if correlation is None:
+                    correlation = 1.0
+
+            cov_raw[row_index][col_index] = covariance
+            cov_norm[row_index][col_index] = (
+                (covariance / 10000.0) if isinstance(covariance, (int, float)) else None
+            )
+            corr_raw[row_index][col_index] = correlation
+            corr_norm[row_index][col_index] = correlation
+
+    return {
+        "lenses": lens_names,
+        "correlation": {"raw": corr_raw, "normalized": corr_norm},
+        "covariance": {"raw": cov_raw, "normalized": cov_norm},
+        "pairwise_counts": pairwise_counts,
+    }
+
+
+def _oneway_source_effect(
+    values: list[float],
+    source_labels: list[str],
+) -> dict[str, Any] | None:
+    if not values or len(values) != len(source_labels):
+        return None
+
+    by_source: dict[str, list[float]] = {}
+    for value, label in zip(values, source_labels):
+        by_source.setdefault(label, []).append(value)
+
+    n = len(values)
+    k = len(by_source)
+    if k < 2 or n <= k:
+        return None
+
+    grand_mean = sum(values) / n
+    source_means: dict[str, float] = {}
+    source_counts: dict[str, int] = {}
+    ss_between = 0.0
+    ss_within = 0.0
+    for source_name, group_values in by_source.items():
+        if not group_values:
+            continue
+        group_count = len(group_values)
+        group_mean = sum(group_values) / group_count
+        source_means[source_name] = group_mean
+        source_counts[source_name] = group_count
+        ss_between += group_count * (group_mean - grand_mean) ** 2
+        ss_within += sum((value - group_mean) ** 2 for value in group_values)
+
+    if len(source_means) < 2:
+        return None
+
+    df_between = len(source_means) - 1
+    df_within = n - len(source_means)
+    if df_between <= 0 or df_within <= 0:
+        return None
+
+    ms_between = ss_between / df_between
+    ms_within = ss_within / df_within
+    if ms_within <= 0:
+        ms_within = 1e-12
+    f_stat = ms_between / ms_within
+
+    ss_total = ss_between + ss_within
+    eta_sq = (ss_between / ss_total) if ss_total > 0 else 0.0
+    return {
+        "f_stat": f_stat,
+        "eta_sq": eta_sq,
+        "df_between": df_between,
+        "df_within": df_within,
+        "n": n,
+        "source_means": source_means,
+        "source_counts": source_counts,
+    }
+
+
+def _permutation_pvalue_for_source_effect(
+    observed_f: float | None,
+    values: list[float],
+    source_labels: list[str],
+    permutations: int,
+    seed: int,
+) -> float | None:
+    if observed_f is None or permutations <= 0:
+        return None
+
+    permuted_labels = source_labels.copy()
+    rng = random.Random(seed)
+    extreme = 0
+    valid = 0
+    for _ in range(permutations):
+        rng.shuffle(permuted_labels)
+        result = _oneway_source_effect(values, permuted_labels)
+        if not isinstance(result, dict):
+            continue
+        f_stat = _coerce_float(result.get("f_stat"))
+        if f_stat is None:
+            continue
+        valid += 1
+        if f_stat >= observed_f - 1e-12:
+            extreme += 1
+
+    if valid == 0:
+        return None
+    return (extreme + 1) / (valid + 1)
+
+
+def _source_lens_effects_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    preferred_lenses: list[str] | None = None,
+    permutations: int = _SOURCE_EFFECT_PERMUTATIONS,
+    random_seed: int = _SOURCE_EFFECT_RANDOM_SEED,
+) -> dict[str, Any]:
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        return {
+            "status": "unavailable",
+            "reason": "No article-level lens rows available.",
+            "permutations": permutations,
+            "rows": [],
+        }
+
+    discovered_lenses = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered_lenses]
+        ordered.extend(sorted(discovered_lenses - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered_lenses)
+
+    rows: list[dict[str, Any]] = []
+    for lens_index, lens_name in enumerate(lens_names):
+        values: list[float] = []
+        labels: list[str] = []
+        for row, source_label in zip(article_lens_percentages, source_labels):
+            value = row.get(lens_name)
+            if isinstance(value, (int, float)):
+                values.append(float(value))
+                labels.append(source_label)
+
+        effect = _oneway_source_effect(values, labels)
+        if not isinstance(effect, dict):
+            continue
+
+        observed_f = _coerce_float(effect.get("f_stat"))
+        p_perm = _permutation_pvalue_for_source_effect(
+            observed_f=observed_f,
+            values=values,
+            source_labels=labels,
+            permutations=permutations,
+            seed=random_seed + lens_index,
+        )
+
+        source_means = effect.get("source_means") if isinstance(effect.get("source_means"), dict) else {}
+        sorted_sources = sorted(
+            ((str(name), float(mean)) for name, mean in source_means.items() if isinstance(mean, (int, float))),
+            key=lambda item: item[1],
+        )
+        low_source = sorted_sources[0][0] if sorted_sources else None
+        high_source = sorted_sources[-1][0] if sorted_sources else None
+        source_gap = (sorted_sources[-1][1] - sorted_sources[0][1]) if len(sorted_sources) >= 2 else 0.0
+
+        source_counts = effect.get("source_counts") if isinstance(effect.get("source_counts"), dict) else {}
+
+        rows.append(
+            {
+                "lens": lens_name,
+                "n": int(effect.get("n", 0)),
+                "n_sources": len(source_counts),
+                "df_between": int(effect.get("df_between", 0)),
+                "df_within": int(effect.get("df_within", 0)),
+                "f_stat": observed_f,
+                "eta_sq": _coerce_float(effect.get("eta_sq")),
+                "p_perm": p_perm,
+                "source_gap": source_gap,
+                "top_source": high_source,
+                "bottom_source": low_source,
+                "source_means": source_means,
+                "source_counts": source_counts,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            1.0 if row.get("p_perm") is None else float(row.get("p_perm")),
+            -1.0 if row.get("eta_sq") is None else -float(row.get("eta_sq")),
+            str(row.get("lens", "")).lower(),
+        )
+    )
+
+    if rows:
+        return {
+            "status": "ok",
+            "reason": "",
+            "permutations": permutations,
+            "rows": rows,
+        }
+    return {
+        "status": "unavailable",
+        "reason": "Insufficient source coverage for one-way lens tests.",
+        "permutations": permutations,
+        "rows": [],
+    }
+
+
+def _multivariate_source_separation(
+    matrix: list[list[float]],
+    source_labels: list[str],
+) -> dict[str, Any] | None:
+    if not matrix or len(matrix) != len(source_labels):
+        return None
+    dims = len(matrix[0])
+    if dims == 0:
+        return None
+    if any(len(row) != dims for row in matrix):
+        return None
+
+    n = len(matrix)
+    by_source: dict[str, list[int]] = {}
+    for row_index, label in enumerate(source_labels):
+        by_source.setdefault(label, []).append(row_index)
+
+    k = len(by_source)
+    if k < 2 or n <= k:
+        return None
+
+    grand_mean = [0.0 for _ in range(dims)]
+    for row in matrix:
+        for dim_idx, value in enumerate(row):
+            grand_mean[dim_idx] += value
+    grand_mean = [value / n for value in grand_mean]
+
+    ss_total = 0.0
+    for row in matrix:
+        ss_total += sum((value - grand_mean[dim_idx]) ** 2 for dim_idx, value in enumerate(row))
+
+    ss_within = 0.0
+    for row_indexes in by_source.values():
+        group_size = len(row_indexes)
+        if group_size == 0:
+            continue
+        group_mean = [0.0 for _ in range(dims)]
+        for row_index in row_indexes:
+            row = matrix[row_index]
+            for dim_idx, value in enumerate(row):
+                group_mean[dim_idx] += value
+        group_mean = [value / group_size for value in group_mean]
+
+        for row_index in row_indexes:
+            row = matrix[row_index]
+            ss_within += sum((value - group_mean[dim_idx]) ** 2 for dim_idx, value in enumerate(row))
+
+    ss_between = max(0.0, ss_total - ss_within)
+    df_between = k - 1
+    df_within = n - k
+    if df_between <= 0 or df_within <= 0:
+        return None
+
+    ms_between = ss_between / df_between
+    ms_within = ss_within / df_within
+    if ms_within <= 0:
+        ms_within = 1e-12
+
+    f_stat = ms_between / ms_within
+    r_squared = (ss_between / ss_total) if ss_total > 0 else 0.0
+    return {
+        "f_stat": f_stat,
+        "r_squared": r_squared,
+        "df_between": df_between,
+        "df_within": df_within,
+    }
+
+
+def _nearest_centroid_loocv(
+    matrix: list[list[float]],
+    source_labels: list[str],
+) -> dict[str, Any] | None:
+    if not matrix or len(matrix) != len(source_labels):
+        return None
+    dims = len(matrix[0])
+    if dims == 0:
+        return None
+    if any(len(row) != dims for row in matrix):
+        return None
+
+    n = len(matrix)
+    unique_sources = sorted(set(source_labels))
+    if len(unique_sources) < 2:
+        return None
+
+    correct = 0
+    evaluated = 0
+    for holdout_index in range(n):
+        sums: dict[str, list[float]] = {}
+        counts: dict[str, int] = {}
+        for row_index, row in enumerate(matrix):
+            if row_index == holdout_index:
+                continue
+            label = source_labels[row_index]
+            sums.setdefault(label, [0.0 for _ in range(dims)])
+            counts[label] = counts.get(label, 0) + 1
+            for dim_idx, value in enumerate(row):
+                sums[label][dim_idx] += value
+
+        centroids: dict[str, list[float]] = {}
+        for label, vector_sums in sums.items():
+            count = counts.get(label, 0)
+            if count <= 0:
+                continue
+            centroids[label] = [value / count for value in vector_sums]
+
+        true_label = source_labels[holdout_index]
+        if true_label not in centroids:
+            continue
+
+        row = matrix[holdout_index]
+        best_label = ""
+        best_distance = float("inf")
+        for label, centroid in centroids.items():
+            distance = sum((value - centroid[dim_idx]) ** 2 for dim_idx, value in enumerate(row))
+            if distance < best_distance:
+                best_distance = distance
+                best_label = label
+
+        evaluated += 1
+        if best_label == true_label:
+            correct += 1
+
+    if evaluated == 0:
+        return None
+
+    source_counts: Counter[str] = Counter(source_labels)
+    baseline_accuracy = (max(source_counts.values()) / n) if n else 0.0
+    accuracy = correct / evaluated
+    return {
+        "accuracy": accuracy,
+        "baseline_accuracy": baseline_accuracy,
+        "evaluated": evaluated,
+        "total": n,
+    }
+
+
+def _permutation_pvalue(
+    observed: float | None,
+    source_labels: list[str],
+    permutations: int,
+    seed: int,
+    stat_fn,
+) -> float | None:
+    if observed is None or permutations <= 0:
+        return None
+
+    rng = random.Random(seed)
+    permuted_labels = source_labels.copy()
+    extreme = 0
+    valid = 0
+    for _ in range(permutations):
+        rng.shuffle(permuted_labels)
+        permuted_value = stat_fn(permuted_labels)
+        if not isinstance(permuted_value, (int, float)):
+            continue
+        valid += 1
+        if float(permuted_value) >= observed - 1e-12:
+            extreme += 1
+
+    if valid == 0:
+        return None
+    return (extreme + 1) / (valid + 1)
+
+
+def _source_differentiation_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    preferred_lenses: list[str] | None = None,
+    permutations: int = _SOURCE_EFFECT_PERMUTATIONS,
+    random_seed: int = _SOURCE_EFFECT_RANDOM_SEED,
+) -> dict[str, Any]:
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        return {
+            "status": "unavailable",
+            "reason": "No article-level lens rows available for source tests.",
+            "n_articles": 0,
+            "n_sources": 0,
+            "n_lenses": 0,
+            "source_counts": {},
+            "permutations": permutations,
+            "multivariate": None,
+            "classification": None,
+        }
+
+    discovered_lenses = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered_lenses]
+        ordered.extend(sorted(discovered_lenses - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered_lenses)
+
+    def _complete_matrix(required_lenses: list[str]) -> tuple[list[list[float]], list[str]]:
+        matrix: list[list[float]] = []
+        labels: list[str] = []
+        for row, label in zip(article_lens_percentages, source_labels):
+            values: list[float] = []
+            for lens_name in required_lenses:
+                value = row.get(lens_name)
+                if not isinstance(value, (int, float)):
+                    values = []
+                    break
+                values.append(float(value))
+            if values:
+                matrix.append(values)
+                labels.append(label)
+        return matrix, labels
+
+    matrix, matrix_labels = _complete_matrix(lens_names)
+    if not matrix:
+        if article_lens_percentages:
+            shared = set(article_lens_percentages[0].keys())
+            for row in article_lens_percentages[1:]:
+                shared &= set(row.keys())
+            if preferred_lenses:
+                reduced_lenses = [lens_name for lens_name in preferred_lenses if lens_name in shared]
+                reduced_lenses.extend(sorted(shared - set(reduced_lenses)))
+            else:
+                reduced_lenses = sorted(shared)
+            if reduced_lenses:
+                lens_names = reduced_lenses
+                matrix, matrix_labels = _complete_matrix(lens_names)
+
+    source_counts: Counter[str] = Counter(matrix_labels)
+    summary: dict[str, Any] = {
+        "status": "unavailable",
+        "reason": "",
+        "n_articles": len(matrix),
+        "n_sources": len(source_counts),
+        "n_lenses": len(lens_names),
+        "source_counts": dict(source_counts),
+        "permutations": permutations,
+        "multivariate": None,
+        "classification": None,
+    }
+
+    if not matrix:
+        summary["reason"] = "Need complete source-lens rows to run source differentiation tests."
+        return summary
+    if len(source_counts) < 2:
+        summary["reason"] = "Need at least 2 sources with complete rows."
+        return summary
+    if len(lens_names) < 1:
+        summary["reason"] = "Need at least 1 lens with complete source coverage."
+        return summary
+
+    multivariate = _multivariate_source_separation(matrix, matrix_labels)
+    if isinstance(multivariate, dict):
+        observed_f = _coerce_float(multivariate.get("f_stat"))
+        multivariate["p_perm"] = _permutation_pvalue(
+            observed=observed_f,
+            source_labels=matrix_labels,
+            permutations=permutations,
+            seed=random_seed,
+            stat_fn=lambda labels: (
+                (_multivariate_source_separation(matrix, labels) or {}).get("f_stat")
+            ),
+        )
+        summary["multivariate"] = multivariate
+
+    classification = _nearest_centroid_loocv(matrix, matrix_labels)
+    if isinstance(classification, dict):
+        observed_accuracy = _coerce_float(classification.get("accuracy"))
+        classification["p_perm"] = _permutation_pvalue(
+            observed=observed_accuracy,
+            source_labels=matrix_labels,
+            permutations=permutations,
+            seed=random_seed + 1,
+            stat_fn=lambda labels: ((_nearest_centroid_loocv(matrix, labels) or {}).get("accuracy")),
+        )
+        summary["classification"] = classification
+
+    if summary["multivariate"] or summary["classification"]:
+        summary["status"] = "ok"
+    else:
+        summary["reason"] = "Insufficient degrees of freedom for source-level tests."
+    return summary
+
+
 def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     input_records = extract_records(payload)
     excluded_unscraped_articles = len(input_records) - len(records)
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    analysis = payload.get("analysis") if isinstance(payload, dict) else None
+    lens_maxima = _lens_max_map_from_analysis(analysis)
 
     source_counter: Counter[str] = Counter()
     tag_counter: Counter[str] = Counter()
@@ -439,6 +1103,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     score_tag_heatmap_counter: Counter[tuple[str, str]] = Counter()
     high_score_source_counter: Counter[str] = Counter()
     source_score_values: dict[str, list[float]] = {}
+    article_lens_percentages: list[dict[str, float]] = []
+    source_labels_for_lens_rows: list[str] = []
 
     score_percents: list[float] = []
     scored_articles = 0
@@ -490,6 +1156,11 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         if isinstance(high_score, dict):
             high_scoring_articles += 1
             high_score_source_counter[source_label] += 1
+
+        lens_percentages = _record_lens_percentages(record, lens_maxima)
+        if lens_percentages:
+            article_lens_percentages.append(lens_percentages)
+            source_labels_for_lens_rows.append(source_label)
 
     source_counts = [{"source": source, "count": count} for source, count in source_counter.most_common()]
     tag_counts = [{"tag": tag, "count": count} for tag, count in tag_counter.most_common()]
@@ -561,8 +1232,20 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         for source_name, count in high_score_source_counter.most_common()
     ]
 
-    summary = payload.get("summary") if isinstance(payload, dict) else None
-    analysis = payload.get("analysis") if isinstance(payload, dict) else None
+    lens_correlations = _lens_correlations_from_records(
+        article_lens_percentages,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    source_lens_effects = _source_lens_effects_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    source_differentiation = _source_differentiation_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
 
     total_articles = len(records)
     average_percent = sum(score_percents) / len(score_percents) if score_percents else None
@@ -577,6 +1260,9 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "high_score_ratio": high_score_ratio,
         "source_counts": source_counts,
         "tag_counts": tag_counts,
+        "lens_correlations": lens_correlations,
+        "source_lens_effects": source_lens_effects,
+        "source_differentiation": source_differentiation,
         "daily_counts_utc": daily_counts,
         "score_distribution": {
             "bins": score_bins,
