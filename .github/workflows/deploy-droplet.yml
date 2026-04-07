@@ -62,5 +62,15 @@ jobs:
           /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
           ${SUDO} systemctl restart newslens
           ${SUDO} systemctl is-active --quiet newslens
-          curl -fsS http://127.0.0.1:8000/news/source-effects >/dev/null
+
+          for i in $(seq 1 12); do
+            if curl -fsS http://127.0.0.1:8000/news/source-effects >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          ${SUDO} systemctl status newslens --no-pager || true
+          ${SUDO} journalctl -u newslens -n 80 --no-pager || true
+          exit 1
           EOF
