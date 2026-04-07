@@ -63,7 +63,16 @@ jobs:
           ${SUDO} systemctl restart newslens
           ${SUDO} systemctl is-active --quiet newslens
 
-          if curl -fsS --connect-timeout 5 --max-time 300 http://127.0.0.1:8000/ >/dev/null; then
+          ok=0
+          for i in $(seq 1 36); do
+            if curl -fsS --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/ >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$ok" -eq 1 ]; then
             exit 0
           fi
 
