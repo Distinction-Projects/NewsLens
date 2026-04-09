@@ -39,15 +39,15 @@ def _select_lens_correlations(data: dict) -> tuple[dict, str]:
     if not isinstance(data, dict):
         return {}, "missing"
 
-    analysis = data.get("analysis")
-    upstream = analysis.get("lens_correlations") if isinstance(analysis, dict) else None
-    if isinstance(upstream, dict) and isinstance(upstream.get("lenses"), list) and upstream.get("lenses"):
-        return upstream, "upstream"
-
     derived = data.get("derived")
     derived_corr = derived.get("lens_correlations") if isinstance(derived, dict) else None
     if isinstance(derived_corr, dict):
         return derived_corr, "derived"
+
+    analysis = data.get("analysis")
+    upstream = analysis.get("lens_correlations") if isinstance(analysis, dict) else None
+    if isinstance(upstream, dict) and isinstance(upstream.get("lenses"), list) and upstream.get("lenses"):
+        return upstream, "upstream"
 
     return {}, "missing"
 
@@ -115,12 +115,55 @@ def _pair_rows(
     return sorted(rows, key=lambda row: (abs(row[2]), row[2]), reverse=True)
 
 
-def _summary_cards(lenses: list[str], pair_rows: list[tuple[str, str, float]], matrix_label: str) -> list:
-    strongest_pair = f"{pair_rows[0][0]} / {pair_rows[0][1]}" if pair_rows else "n/a"
-    strongest_value = f"{pair_rows[0][2]:.4f}" if pair_rows else "n/a"
+def _pair_rows_from_backend(lens_correlations: dict, matrix_key: str) -> list[tuple[str, str, float]] | None:
+    pair_rankings = lens_correlations.get("pair_rankings") if isinstance(lens_correlations, dict) else None
+    if not isinstance(pair_rankings, dict):
+        return None
+    ranking_rows = pair_rankings.get(matrix_key)
+    if not isinstance(ranking_rows, list):
+        return None
+
+    rows: list[tuple[str, str, float]] = []
+    for row in ranking_rows:
+        if not isinstance(row, dict):
+            continue
+        lens_a = row.get("lens_a")
+        lens_b = row.get("lens_b")
+        value = row.get("value")
+        if isinstance(lens_a, str) and lens_a.strip() and isinstance(lens_b, str) and lens_b.strip() and isinstance(value, (int, float)):
+            rows.append((lens_a, lens_b, float(value)))
+    return rows
+
+
+def _matrix_summary_from_backend(lens_correlations: dict, matrix_key: str) -> dict | None:
+    summary_by_matrix = lens_correlations.get("summary_by_matrix") if isinstance(lens_correlations, dict) else None
+    if not isinstance(summary_by_matrix, dict):
+        return None
+    matrix_summary = summary_by_matrix.get(matrix_key)
+    if not isinstance(matrix_summary, dict):
+        return None
+    return matrix_summary
+
+
+def _summary_cards(
+    lenses: list[str],
+    pair_rows: list[tuple[str, str, float]],
+    matrix_label: str,
+    matrix_summary: dict | None = None,
+) -> list:
+    summary = matrix_summary if isinstance(matrix_summary, dict) else {}
+    strongest_pair = str(summary.get("strongest_pair")) if isinstance(summary.get("strongest_pair"), str) else (
+        f"{pair_rows[0][0]} / {pair_rows[0][1]}" if pair_rows else "n/a"
+    )
+    strongest_value_raw = summary.get("strongest_value")
+    if isinstance(strongest_value_raw, (int, float)):
+        strongest_value = f"{float(strongest_value_raw):.4f}"
+    else:
+        strongest_value = f"{pair_rows[0][2]:.4f}" if pair_rows else "n/a"
+    pair_count = int(summary.get("pair_count")) if isinstance(summary.get("pair_count"), (int, float)) else len(pair_rows)
     cards = [
         ("Lenses", len(lenses)),
-        ("Lens Pairs", len(pair_rows)),
+        ("Lens Pairs", pair_count),
         ("Matrix", matrix_label),
         ("Strongest Pair", strongest_pair),
         ("Strongest Value", strongest_value),
@@ -230,7 +273,7 @@ layout = dbc.Container(
                 dbc.Col(
                     html.P(
                         "This page compares lens correlation and covariance matrices. It uses precomputed "
-                        "upstream matrices when available and falls back to derived matrices from local stats.",
+                        "backend-derived matrices with fallback to upstream analysis matrices for compatibility.",
                         className="text-muted",
                     ),
                     width=12,
@@ -349,14 +392,16 @@ def load_news_lens_correlations(_load_tick, _refresh_clicks, matrix_key, top_n, 
     pair_limit = max(1, min(pair_limit, 30))
 
     lenses, matrix, matrix_label = _matrix_payload(lens_correlations, matrix_name)
-    pair_rows = _pair_rows(lenses, matrix, matrix_name)
+    backend_pair_rows = _pair_rows_from_backend(lens_correlations, matrix_name)
+    pair_rows = backend_pair_rows if backend_pair_rows is not None else _pair_rows(lenses, matrix, matrix_name)
+    matrix_summary = _matrix_summary_from_backend(lens_correlations, matrix_name)
 
     return (
         build_status_alert(
             meta,
             leading_parts=[f"Source: {corr_source}", f"Matrix: {matrix_label}", f"Lenses: {len(lenses)}"],
         ),
-        _summary_cards(lenses, pair_rows, matrix_label),
+        _summary_cards(lenses, pair_rows, matrix_label, matrix_summary),
         _matrix_figure(lenses, matrix, matrix_label, matrix_name),
         _pair_figure(pair_rows, matrix_label, matrix_name, pair_limit),
         _pair_table(pair_rows, matrix_label, pair_limit),

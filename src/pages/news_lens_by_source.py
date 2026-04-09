@@ -244,23 +244,47 @@ def _selected_lens_figure(source_rows: list[dict], selected_lens: str | None, to
     return figure
 
 
-def _summary_cards(source_rows: list[dict], selected_lens: str | None) -> list:
-    selected_values = [
-        float(row["lens_means"][selected_lens])
-        for row in source_rows
-        if selected_lens and isinstance(row["lens_means"].get(selected_lens), (int, float))
-    ]
-    overall_values = [
-        float(row["overall_avg"]) for row in source_rows if isinstance(row.get("overall_avg"), (int, float))
-    ]
+def _summary_cards(source_rows: list[dict], selected_lens: str | None, lens_summary: dict | None = None) -> list:
+    summary = lens_summary if isinstance(lens_summary, dict) else {}
+    source_count = int(summary.get("source_count")) if isinstance(summary.get("source_count"), (int, float)) else len(source_rows)
+    covered_articles = (
+        int(summary.get("covered_articles"))
+        if isinstance(summary.get("covered_articles"), (int, float))
+        else sum(int(row.get("article_count") or 0) for row in source_rows)
+    )
+
+    source_overall_avg = summary.get("source_overall_avg")
+    if not isinstance(source_overall_avg, (int, float)):
+        overall_values = [
+            float(row["overall_avg"]) for row in source_rows if isinstance(row.get("overall_avg"), (int, float))
+        ]
+        source_overall_avg = (sum(overall_values) / len(overall_values)) if overall_values else None
+
+    selected_avg = None
+    source_lens_average_rows = summary.get("source_lens_average_rows")
+    if selected_lens and isinstance(source_lens_average_rows, list):
+        for row in source_lens_average_rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("lens") == selected_lens and isinstance(row.get("mean"), (int, float)):
+                selected_avg = float(row["mean"])
+                break
+    if selected_avg is None:
+        selected_values = [
+            float(row["lens_means"][selected_lens])
+            for row in source_rows
+            if selected_lens and isinstance(row["lens_means"].get(selected_lens), (int, float))
+        ]
+        selected_avg = (sum(selected_values) / len(selected_values)) if selected_values else None
+
     cards = [
-        ("Sources with Lens Data", len(source_rows)),
-        ("Avg Source Overall %", f"{(sum(overall_values) / len(overall_values)):.1f}" if overall_values else "n/a"),
+        ("Sources with Lens Data", source_count),
+        ("Avg Source Overall %", f"{float(source_overall_avg):.1f}" if isinstance(source_overall_avg, (int, float)) else "n/a"),
         (
             f"Avg {selected_lens} %" if selected_lens else "Avg Selected Lens %",
-            f"{(sum(selected_values) / len(selected_values)):.1f}" if selected_values else "n/a",
+            f"{float(selected_avg):.1f}" if isinstance(selected_avg, (int, float)) else "n/a",
         ),
-        ("Covered Articles", sum(int(row.get("article_count") or 0) for row in source_rows)),
+        ("Covered Articles", covered_articles),
     ]
     return [
         dbc.Col(
@@ -444,36 +468,38 @@ def load_news_lens_by_source(_load_tick, _refresh_clicks, selected_lens, data_mo
         "refresh": "true" if force_refresh else None,
     }
     stats_code, stats_payload = api_get("/api/news/stats", common_params)
-    digest_code, digest_payload = api_get("/api/news/digest", common_params)
     n_value = int(top_n) if isinstance(top_n, (int, float)) and top_n else 12
     n_value = max(3, min(50, n_value))
 
-    if stats_code != 200 or digest_code != 200:
+    if stats_code != 200:
         stats_error = stats_payload.get("error", "Unknown error")
-        digest_error = digest_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"Lens-by-source data error: stats={stats_code} ({stats_error}); digest={digest_code} ({digest_error})",
+            f"Lens-by-source data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, [], None, _summary_cards([], None), empty, empty, dbc.Alert("No table data.", color="warning")
 
-    meta = digest_payload.get("meta", {})
-    analysis = stats_payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lens_maxima = _lens_max_map(lens_summary)
-    digest_articles = digest_payload.get("data", []) if isinstance(digest_payload.get("data"), list) else []
-    source_rows, lens_names, coverage_mode = _source_lens_rows(digest_articles, lens_maxima)
+    meta = stats_payload.get("meta", {})
+    derived = stats_payload.get("data", {}).get("derived", {})
+    lens_views = derived.get("lens_views", {}) if isinstance(derived, dict) else {}
+    source_rows = lens_views.get("source_rows", []) if isinstance(lens_views.get("source_rows"), list) else []
+    coverage_mode = str(lens_views.get("coverage_mode") or "no lens data")
+    lens_summary = lens_views.get("summary", {}) if isinstance(lens_views.get("summary"), dict) else {}
+    source_count = int(lens_summary.get("source_count")) if isinstance(lens_summary.get("source_count"), (int, float)) else len(source_rows)
+    lens_names = [str(name) for name in lens_views.get("lens_names", []) if isinstance(name, str) and name.strip()]
+    if not lens_names:
+        lens_names = sorted({lens_name for row in source_rows for lens_name in row.get("lens_means", {}).keys()})
     effective_lens = selected_lens if selected_lens in lens_names else (lens_names[0] if lens_names else None)
 
     return (
         build_status_alert(
             meta,
-            leading_parts=[f"Sources with lens data: {len(source_rows)}", f"Coverage: {coverage_mode}"],
+            leading_parts=[f"Sources with lens data: {source_count}", f"Coverage: {coverage_mode}"],
         ),
         _lens_options(lens_names),
         effective_lens,
-        _summary_cards(source_rows, effective_lens),
+        _summary_cards(source_rows, effective_lens, lens_summary),
         _selected_lens_figure(source_rows, effective_lens, n_value),
         _source_heatmap_figure(source_rows, lens_names, n_value),
         _source_table(source_rows, effective_lens, n_value),

@@ -16,6 +16,23 @@ dash.register_page(
 )
 
 
+def _select_lens_inventory(data: dict) -> tuple[dict, str]:
+    if not isinstance(data, dict):
+        return {}, "missing"
+
+    derived = data.get("derived")
+    derived_inventory = derived.get("lens_inventory") if isinstance(derived, dict) else None
+    if isinstance(derived_inventory, dict) and isinstance(derived_inventory.get("lenses"), list):
+        return derived_inventory, "derived"
+
+    analysis = data.get("analysis")
+    upstream_summary = analysis.get("lens_summary") if isinstance(analysis, dict) else None
+    if isinstance(upstream_summary, dict):
+        return upstream_summary, "upstream"
+
+    return {}, "missing"
+
+
 def _empty_figure(title: str) -> go.Figure:
     figure = go.Figure()
     figure.update_layout(title=title, template="plotly_white", margin={"l": 30, "r": 20, "t": 60, "b": 40})
@@ -87,7 +104,7 @@ def _lens_cards(lens_summary: dict) -> list:
 
 def _lens_table(lenses: list[dict], items_total: object):
     if not lenses:
-        return dbc.Alert("No upstream lens summary is available.", color="warning", className="mb-0")
+        return dbc.Alert("No lens inventory data is available.", color="warning", className="mb-0")
 
     header = html.Thead(
         html.Tr(
@@ -126,7 +143,7 @@ layout = dbc.Container(
                 dbc.Col(
                     html.P(
                         "This page surfaces the upstream lens inventory that powers the multi-lens scoring pipeline. "
-                        "It is a direct view over the published analysis bundle rather than a local reconstruction.",
+                        "It prefers backend-derived inventory from stats, with upstream summary fallback for compatibility.",
                         className="text-muted",
                     ),
                     width=12,
@@ -207,18 +224,26 @@ def load_news_lenses(_load_tick, _refresh_clicks, data_mode, snapshot_date):
         error = payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         return dbc.Alert(f"Stats error ({status_code}): {error}", color="danger"), _lens_cards({}), empty, empty, dbc.Alert(
-            "No lens summary data.", color="warning"
+            "No lens inventory data.", color="warning"
         )
 
     meta = payload.get("meta", {})
-    analysis = payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lenses = lens_summary.get("lenses", []) if isinstance(lens_summary, dict) else []
-    items_total = lens_summary.get("items_total") if isinstance(lens_summary, dict) else None
+    data = payload.get("data", {})
+    lens_inventory, inventory_source = _select_lens_inventory(data if isinstance(data, dict) else {})
+    lenses = lens_inventory.get("lenses", []) if isinstance(lens_inventory, dict) else []
+    items_total = lens_inventory.get("items_total") if isinstance(lens_inventory, dict) else None
+    coverage_mode = lens_inventory.get("coverage_mode") if isinstance(lens_inventory, dict) else None
 
     return (
-        build_status_alert(meta, leading_parts=[f"Lenses: {len(lenses)}"]),
-        _lens_cards(lens_summary),
+        build_status_alert(
+            meta,
+            leading_parts=[
+                f"Lenses: {len(lenses)}",
+                f"Inventory: {inventory_source}",
+                f"Coverage: {coverage_mode or 'n/a'}",
+            ],
+        ),
+        _lens_cards(lens_inventory),
         _lens_capacity_figure(lenses),
         _lens_coverage_figure(lenses, items_total),
         _lens_table(lenses, items_total),

@@ -153,14 +153,27 @@ def _lens_stability_rows(articles: list[dict], lens_maxima: dict[str, float]) ->
     return rows, coverage
 
 
-def _summary_cards(rows: list[dict]) -> list:
-    avg_stddev = statistics.fmean([float(row["stddev"]) for row in rows]) if rows else None
-    top_lens = rows[0]["lens"] if rows else "n/a"
+def _summary_cards(rows: list[dict], lens_summary: dict | None = None) -> list:
+    summary = lens_summary if isinstance(lens_summary, dict) else {}
+    lenses_analyzed = (
+        int(summary.get("stability_lens_count"))
+        if isinstance(summary.get("stability_lens_count"), (int, float))
+        else len(rows)
+    )
+    avg_stddev = summary.get("stability_avg_stddev")
+    if not isinstance(avg_stddev, (int, float)):
+        avg_stddev = statistics.fmean([float(row["stddev"]) for row in rows]) if rows else None
+    top_lens = str(summary.get("stability_top_lens")) if isinstance(summary.get("stability_top_lens"), str) else (rows[0]["lens"] if rows else "n/a")
+    total_samples = (
+        int(summary.get("stability_total_samples"))
+        if isinstance(summary.get("stability_total_samples"), (int, float))
+        else sum(int(row.get("count") or 0) for row in rows)
+    )
     cards = [
-        ("Lenses Analyzed", len(rows)),
+        ("Lenses Analyzed", lenses_analyzed),
         ("Avg Std Dev", f"{avg_stddev:.2f}" if isinstance(avg_stddev, (int, float)) else "n/a"),
         ("Most Volatile Lens", top_lens),
-        ("Total Lens-Item Samples", sum(int(row.get("count") or 0) for row in rows)),
+        ("Total Lens-Item Samples", total_samples),
     ]
     return [
         dbc.Col(
@@ -389,28 +402,31 @@ def load_news_lens_stability(_load_tick, _refresh_clicks, metric, data_mode, sna
         "refresh": "true" if force_refresh else None,
     }
     stats_code, stats_payload = api_get("/api/news/stats", common_params)
-    digest_code, digest_payload = api_get("/api/news/digest", common_params)
 
-    if stats_code != 200 or digest_code != 200:
+    if stats_code != 200:
         stats_error = stats_payload.get("error", "Unknown error")
-        digest_error = digest_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"Lens stability data error: stats={stats_code} ({stats_error}); digest={digest_code} ({digest_error})",
+            f"Lens stability data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, _summary_cards([]), empty, empty, alert
 
-    meta = digest_payload.get("meta", {})
-    analysis = stats_payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lens_maxima = _lens_max_map(lens_summary)
-    digest_articles = digest_payload.get("data", []) if isinstance(digest_payload.get("data"), list) else []
-    rows, coverage_mode = _lens_stability_rows(digest_articles, lens_maxima)
+    meta = stats_payload.get("meta", {})
+    derived = stats_payload.get("data", {}).get("derived", {})
+    lens_views = derived.get("lens_views", {}) if isinstance(derived, dict) else {}
+    rows = lens_views.get("stability_rows", []) if isinstance(lens_views.get("stability_rows"), list) else []
+    coverage_mode = str(lens_views.get("coverage_mode") or "no lens data")
+    lens_summary = lens_views.get("summary", {}) if isinstance(lens_views.get("summary"), dict) else {}
+    lenses_analyzed = (
+        int(lens_summary.get("stability_lens_count"))
+        if isinstance(lens_summary.get("stability_lens_count"), (int, float))
+        else len(rows)
+    )
 
     return (
-        build_status_alert(meta, leading_parts=[f"Lenses analyzed: {len(rows)}", f"Coverage: {coverage_mode}"]),
-        _summary_cards(rows),
+        build_status_alert(meta, leading_parts=[f"Lenses analyzed: {lenses_analyzed}", f"Coverage: {coverage_mode}"]),
+        _summary_cards(rows, lens_summary),
         _stability_scatter(rows),
         _metric_bar(rows, str(metric or "stddev"), n_value),
         _stability_table(rows, str(metric or "stddev"), n_value),

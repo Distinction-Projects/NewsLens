@@ -160,29 +160,55 @@ def _sorted_rows(article_rows: list[dict], selected_lens: str | None) -> list[di
     )
 
 
-def _coverage_cards(article_rows: list[dict], selected_lens: str | None) -> list:
-    overall_values = [
-        float(row["overall_percent"])
-        for row in article_rows
-        if isinstance(row.get("overall_percent"), (int, float))
-    ]
-    selected_values = [
-        float(row["lens_scores"][selected_lens])
-        for row in article_rows
-        if selected_lens and isinstance(row["lens_scores"].get(selected_lens), (int, float))
-    ]
-    dominant_counts: defaultdict[str, int] = defaultdict(int)
-    for row in article_rows:
-        dominant_counts[row["strongest_lens"]] += 1
-    dominant_lens = max(dominant_counts.items(), key=lambda item: item[1])[0] if dominant_counts else "n/a"
+def _coverage_cards(article_rows: list[dict], selected_lens: str | None, lens_summary: dict | None = None) -> list:
+    summary = lens_summary if isinstance(lens_summary, dict) else {}
+    article_count = int(summary.get("article_count")) if isinstance(summary.get("article_count"), (int, float)) else len(article_rows)
+
+    overall_avg = summary.get("overall_avg")
+    if not isinstance(overall_avg, (int, float)):
+        overall_values = [
+            float(row["overall_percent"])
+            for row in article_rows
+            if isinstance(row.get("overall_percent"), (int, float))
+        ]
+        overall_avg = (sum(overall_values) / len(overall_values)) if overall_values else None
+
+    selected_avg = None
+    lens_average_rows = summary.get("lens_average_rows")
+    if selected_lens and isinstance(lens_average_rows, list):
+        for row in lens_average_rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("lens") == selected_lens and isinstance(row.get("mean"), (int, float)):
+                selected_avg = float(row["mean"])
+                break
+    if selected_avg is None:
+        selected_values = [
+            float(row["lens_scores"][selected_lens])
+            for row in article_rows
+            if selected_lens and isinstance(row["lens_scores"].get(selected_lens), (int, float))
+        ]
+        selected_avg = (sum(selected_values) / len(selected_values)) if selected_values else None
+
+    dominant_lens = "n/a"
+    dominant_counts = summary.get("dominant_lens_counts")
+    if isinstance(dominant_counts, list) and dominant_counts:
+        first = dominant_counts[0]
+        if isinstance(first, dict) and isinstance(first.get("lens"), str) and first.get("lens"):
+            dominant_lens = first["lens"]
+    if dominant_lens == "n/a":
+        fallback_counts: defaultdict[str, int] = defaultdict(int)
+        for row in article_rows:
+            fallback_counts[row["strongest_lens"]] += 1
+        dominant_lens = max(fallback_counts.items(), key=lambda item: item[1])[0] if fallback_counts else "n/a"
 
     cards = [
-        ("Articles in Matrix", len(article_rows)),
+        ("Articles in Matrix", article_count),
         (
             f"Avg {selected_lens} %" if selected_lens else "Avg Selected Lens %",
-            f"{(sum(selected_values) / len(selected_values)):.1f}" if selected_values else "n/a",
+            f"{float(selected_avg):.1f}" if isinstance(selected_avg, (int, float)) else "n/a",
         ),
-        ("Avg Overall %", f"{(sum(overall_values) / len(overall_values)):.1f}" if overall_values else "n/a"),
+        ("Avg Overall %", f"{float(overall_avg):.1f}" if isinstance(overall_avg, (int, float)) else "n/a"),
         ("Most Common Strongest Lens", dominant_lens),
     ]
     return [
@@ -461,16 +487,14 @@ def load_news_lens_matrix(_load_tick, _refresh_clicks, selected_lens, data_mode,
         "refresh": "true" if force_refresh else None,
     }
     stats_code, stats_payload = api_get("/api/news/stats", common_params)
-    digest_code, digest_payload = api_get("/api/news/digest", common_params)
     n_value = int(top_n) if isinstance(top_n, (int, float)) and top_n else 12
     n_value = max(5, min(40, n_value))
 
-    if stats_code != 200 or digest_code != 200:
+    if stats_code != 200:
         stats_error = stats_payload.get("error", "Unknown error")
-        digest_error = digest_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"Lens matrix data error: stats={stats_code} ({stats_error}); digest={digest_code} ({digest_error})",
+            f"Lens matrix data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, [], None, _coverage_cards([], None), empty, empty, dbc.Alert(
@@ -478,14 +502,14 @@ def load_news_lens_matrix(_load_tick, _refresh_clicks, selected_lens, data_mode,
             color="warning",
         )
 
-    meta = digest_payload.get("meta", {})
-    analysis = stats_payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lens_maxima = _lens_max_map(lens_summary)
-    digest_articles = digest_payload.get("data", []) if isinstance(digest_payload.get("data"), list) else []
-    article_rows, coverage_mode = _matrix_rows(digest_articles, lens_maxima)
-
-    lens_names = list(lens_maxima.keys())
+    meta = stats_payload.get("meta", {})
+    derived = stats_payload.get("data", {}).get("derived", {})
+    lens_views = derived.get("lens_views", {}) if isinstance(derived, dict) else {}
+    article_rows = lens_views.get("article_rows", []) if isinstance(lens_views.get("article_rows"), list) else []
+    coverage_mode = str(lens_views.get("coverage_mode") or "no lens data")
+    lens_summary = lens_views.get("summary", {}) if isinstance(lens_views.get("summary"), dict) else {}
+    article_count = int(lens_summary.get("article_count")) if isinstance(lens_summary.get("article_count"), (int, float)) else len(article_rows)
+    lens_names = [str(name) for name in lens_views.get("lens_names", []) if isinstance(name, str) and name.strip()]
     if not lens_names:
         lens_names = sorted({lens_name for row in article_rows for lens_name in row["lens_scores"]})
     effective_lens = selected_lens if selected_lens in lens_names else (lens_names[0] if lens_names else None)
@@ -494,13 +518,13 @@ def load_news_lens_matrix(_load_tick, _refresh_clicks, selected_lens, data_mode,
         build_status_alert(
             meta,
             leading_parts=[
-                f"Articles with lens scores: {len(article_rows)}",
+                f"Articles with lens scores: {article_count}",
                 f"Coverage: {coverage_mode}",
             ],
         ),
         _lens_options(lens_names),
         effective_lens,
-        _coverage_cards(article_rows, effective_lens),
+        _coverage_cards(article_rows, effective_lens, lens_summary),
         _heatmap_figure(article_rows, lens_names, effective_lens, n_value),
         _selected_lens_scatter(article_rows, effective_lens, n_value),
         _matrix_table(article_rows, lens_names, effective_lens, n_value),

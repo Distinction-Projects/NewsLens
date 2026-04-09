@@ -132,14 +132,23 @@ def _lens_options(lens_names: list[str]) -> list[dict]:
     return [{"label": lens_name, "value": lens_name} for lens_name in lens_names]
 
 
-def _lens_average_figure(article_rows: list[dict], lens_names: list[str]) -> go.Figure:
+def _lens_average_figure(article_rows: list[dict], lens_names: list[str], lens_average_rows: list[dict] | None = None) -> go.Figure:
     if not article_rows or not lens_names:
         return _empty_figure("Average Lens Percent Across Available Articles")
 
-    averages = []
-    for lens_name in lens_names:
-        values = [row["lens_scores"].get(lens_name) for row in article_rows if isinstance(row["lens_scores"].get(lens_name), (int, float))]
-        averages.append(sum(values) / len(values) if values else 0.0)
+    summary_rows = lens_average_rows if isinstance(lens_average_rows, list) else []
+    summary_means = {
+        str(row.get("lens")): float(row.get("mean"))
+        for row in summary_rows
+        if isinstance(row, dict) and isinstance(row.get("lens"), str) and isinstance(row.get("mean"), (int, float))
+    }
+    if summary_means:
+        averages = [summary_means.get(lens_name, 0.0) for lens_name in lens_names]
+    else:
+        averages = []
+        for lens_name in lens_names:
+            values = [row["lens_scores"].get(lens_name) for row in article_rows if isinstance(row["lens_scores"].get(lens_name), (int, float))]
+            averages.append(sum(values) / len(values) if values else 0.0)
 
     figure = go.Figure(data=[go.Bar(x=lens_names, y=averages, marker_color="#6f42c1")])
     figure.update_layout(title="Average Lens Percent Across Available Articles", template="plotly_white", yaxis={"range": [0, 100]})
@@ -179,24 +188,50 @@ def _selected_lens_figure(article_rows: list[dict], selected_lens: str | None, t
     return figure
 
 
-def _summary_cards(article_rows: list[dict], selected_lens: str | None) -> list:
-    overall_values = [float(row["overall_percent"]) for row in article_rows if isinstance(row.get("overall_percent"), (int, float))]
-    selected_values = [
-        float(row["lens_scores"][selected_lens])
-        for row in article_rows
-        if selected_lens and isinstance(row["lens_scores"].get(selected_lens), (int, float))
-    ]
-    dominant_counts: defaultdict[str, int] = defaultdict(int)
-    for row in article_rows:
-        dominant_counts[row["strongest_lens"]] += 1
-    dominant_lens = max(dominant_counts.items(), key=lambda item: item[1])[0] if dominant_counts else "n/a"
+def _summary_cards(article_rows: list[dict], selected_lens: str | None, lens_summary: dict | None = None) -> list:
+    summary = lens_summary if isinstance(lens_summary, dict) else {}
+    article_count = int(summary.get("article_count")) if isinstance(summary.get("article_count"), (int, float)) else len(article_rows)
+
+    overall_avg = summary.get("overall_avg")
+    if not isinstance(overall_avg, (int, float)):
+        overall_values = [float(row["overall_percent"]) for row in article_rows if isinstance(row.get("overall_percent"), (int, float))]
+        overall_avg = (sum(overall_values) / len(overall_values)) if overall_values else None
+
+    selected_avg = None
+    lens_average_rows = summary.get("lens_average_rows")
+    if selected_lens and isinstance(lens_average_rows, list):
+        for row in lens_average_rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("lens") == selected_lens and isinstance(row.get("mean"), (int, float)):
+                selected_avg = float(row["mean"])
+                break
+    if selected_avg is None:
+        selected_values = [
+            float(row["lens_scores"][selected_lens])
+            for row in article_rows
+            if selected_lens and isinstance(row["lens_scores"].get(selected_lens), (int, float))
+        ]
+        selected_avg = (sum(selected_values) / len(selected_values)) if selected_values else None
+
+    dominant_lens = "n/a"
+    dominant_counts = summary.get("dominant_lens_counts")
+    if isinstance(dominant_counts, list) and dominant_counts:
+        first = dominant_counts[0]
+        if isinstance(first, dict) and isinstance(first.get("lens"), str) and first.get("lens"):
+            dominant_lens = first["lens"]
+    if dominant_lens == "n/a":
+        fallback_counts: defaultdict[str, int] = defaultdict(int)
+        for row in article_rows:
+            fallback_counts[row["strongest_lens"]] += 1
+        dominant_lens = max(fallback_counts.items(), key=lambda item: item[1])[0] if fallback_counts else "n/a"
 
     cards = [
-        ("Articles with Lens Scores", len(article_rows)),
-        ("Avg Overall %", f"{(sum(overall_values) / len(overall_values)):.1f}" if overall_values else "n/a"),
+        ("Articles with Lens Scores", article_count),
+        ("Avg Overall %", f"{float(overall_avg):.1f}" if isinstance(overall_avg, (int, float)) else "n/a"),
         (
             f"Avg {selected_lens} %" if selected_lens else "Avg Selected Lens %",
-            f"{(sum(selected_values) / len(selected_values)):.1f}" if selected_values else "n/a",
+            f"{float(selected_avg):.1f}" if isinstance(selected_avg, (int, float)) else "n/a",
         ),
         ("Most Common Strongest Lens", dominant_lens),
     ]
@@ -371,28 +406,27 @@ def load_news_high_score_lenses(_load_tick, _refresh_clicks, selected_lens, data
         "refresh": "true" if force_refresh else None,
     }
     stats_code, stats_payload = api_get("/api/news/stats", common_params)
-    digest_code, digest_payload = api_get("/api/news/digest", common_params)
     n_value = int(top_n) if isinstance(top_n, (int, float)) and top_n else 10
     n_value = max(3, min(50, n_value))
 
-    if stats_code != 200 or digest_code != 200:
+    if stats_code != 200:
         stats_error = stats_payload.get("error", "Unknown error")
-        digest_error = digest_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"High-score lens data error: stats={stats_code} ({stats_error}); digest={digest_code} ({digest_error})",
+            f"High-score lens data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, [], None, _summary_cards([], None), empty, empty, dbc.Alert("No table data.", color="warning")
 
-    meta = digest_payload.get("meta", {})
-    analysis = stats_payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lens_maxima = _lens_max_map(lens_summary)
-    digest_articles = digest_payload.get("data", []) if isinstance(digest_payload.get("data"), list) else []
-    article_rows, coverage_mode = _article_rows(digest_articles, lens_maxima)
-
-    lens_names = list(lens_maxima.keys())
+    meta = stats_payload.get("meta", {})
+    derived = stats_payload.get("data", {}).get("derived", {})
+    lens_views = derived.get("lens_views", {}) if isinstance(derived, dict) else {}
+    article_rows = lens_views.get("article_rows", []) if isinstance(lens_views.get("article_rows"), list) else []
+    coverage_mode = str(lens_views.get("coverage_mode") or "no lens data")
+    lens_summary = lens_views.get("summary", {}) if isinstance(lens_views.get("summary"), dict) else {}
+    lens_average_rows = lens_summary.get("lens_average_rows", []) if isinstance(lens_summary.get("lens_average_rows"), list) else []
+    article_count = int(lens_summary.get("article_count")) if isinstance(lens_summary.get("article_count"), (int, float)) else len(article_rows)
+    lens_names = [str(name) for name in lens_views.get("lens_names", []) if isinstance(name, str) and name.strip()]
     if not lens_names:
         lens_names = sorted({lens_name for row in article_rows for lens_name in row["lens_scores"]})
     effective_lens = selected_lens if selected_lens in lens_names else (lens_names[0] if lens_names else None)
@@ -401,15 +435,15 @@ def load_news_high_score_lenses(_load_tick, _refresh_clicks, selected_lens, data
         build_status_alert(
             meta,
             leading_parts=[
-                f"Articles with lens scores: {len(article_rows)}",
+                f"Articles with lens scores: {article_count}",
                 f"Coverage: {coverage_mode}",
             ],
         ),
         _lens_options(lens_names),
         effective_lens,
-        _summary_cards(article_rows, effective_lens),
+        _summary_cards(article_rows, effective_lens, lens_summary),
         _selected_lens_figure(article_rows, effective_lens, n_value),
-        _lens_average_figure(article_rows, lens_names),
+        _lens_average_figure(article_rows, lens_names, lens_average_rows),
         _article_table(article_rows, effective_lens, n_value),
     )
 
