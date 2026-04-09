@@ -153,6 +153,133 @@ class RssDigestServiceTests(unittest.TestCase):
             stats["total_articles"],
         )
 
+        lens_correlations = stats["lens_correlations"]
+        self.assertIn("lenses", lens_correlations)
+        self.assertIn("correlation", lens_correlations)
+        self.assertIn("covariance", lens_correlations)
+        self.assertIn("pairwise_counts", lens_correlations)
+        self.assertIn("source_differentiation", stats)
+        self.assertIn("status", stats["source_differentiation"])
+        self.assertIn("source_counts", stats["source_differentiation"])
+        self.assertIn("multivariate", stats["source_differentiation"])
+        self.assertIn("classification", stats["source_differentiation"])
+        self.assertIn("source_lens_effects", stats)
+        self.assertIn("status", stats["source_lens_effects"])
+        self.assertIn("permutations", stats["source_lens_effects"])
+        self.assertIn("rows", stats["source_lens_effects"])
+
+        lenses = lens_correlations["lenses"]
+        pairwise = lens_correlations["pairwise_counts"]
+        corr_raw = lens_correlations["correlation"]["raw"]
+        cov_raw = lens_correlations["covariance"]["raw"]
+        self.assertEqual(len(pairwise), len(lenses))
+        self.assertEqual(len(corr_raw), len(lenses))
+        self.assertEqual(len(cov_raw), len(lenses))
+        if lenses:
+            self.assertEqual(pairwise[0][0], 1)
+
+    def test_source_lens_effects_are_derived_when_source_signal_exists(self):
+        payload = {
+            "analysis": {"lens_summary": {"lenses": [{"name": "Evidence", "max_total": 10.0}]}},
+            "articles": [
+                {
+                    "id": "s-a-1",
+                    "title": "A1",
+                    "published": "2026-03-02T00:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "A1", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 90.0}}},
+                },
+                {
+                    "id": "s-a-2",
+                    "title": "A2",
+                    "published": "2026-03-02T01:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "A2", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 88.0}}},
+                },
+                {
+                    "id": "s-a-3",
+                    "title": "A3",
+                    "published": "2026-03-02T02:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "A3", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 91.0}}},
+                },
+                {
+                    "id": "s-b-1",
+                    "title": "B1",
+                    "published": "2026-03-02T03:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "B1", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 20.0}}},
+                },
+                {
+                    "id": "s-b-2",
+                    "title": "B2",
+                    "published": "2026-03-02T04:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "B2", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 18.0}}},
+                },
+                {
+                    "id": "s-b-3",
+                    "title": "B3",
+                    "published": "2026-03-02T05:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "B3", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 22.0}}},
+                },
+            ],
+        }
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        effects = stats["source_lens_effects"]
+        self.assertEqual(effects["status"], "ok")
+        self.assertGreaterEqual(effects["permutations"], 1)
+        rows = effects["rows"]
+        self.assertGreaterEqual(len(rows), 1)
+        evidence_row = next((row for row in rows if row.get("lens") == "Evidence"), None)
+        self.assertIsNotNone(evidence_row)
+        self.assertGreater(float(evidence_row["eta_sq"]), 0.5)
+        self.assertEqual(evidence_row["top_source"], "Source A")
+        self.assertEqual(evidence_row["bottom_source"], "Source B")
+
+        source_diff = stats["source_differentiation"]
+        self.assertEqual(source_diff["status"], "ok")
+        self.assertEqual(source_diff["n_articles"], 6)
+        self.assertEqual(source_diff["n_sources"], 2)
+        self.assertEqual(source_diff["n_lenses"], 1)
+        self.assertEqual(source_diff["source_counts"].get("Source A"), 3)
+        self.assertEqual(source_diff["source_counts"].get("Source B"), 3)
+        self.assertIsInstance(source_diff["multivariate"], dict)
+        self.assertIsInstance(source_diff["classification"], dict)
+        self.assertGreater(float(source_diff["classification"]["accuracy"]), float(source_diff["classification"]["baseline_accuracy"]))
+
     def test_last_good_fallback(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp:
             json.dump(SAMPLE_PAYLOAD, temp)

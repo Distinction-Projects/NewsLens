@@ -38,6 +38,31 @@ class NewsPageRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
 
+    def test_news_lenses_page_route(self):
+        response = self.client.get("/news/lenses")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_lens_matrix_page_route(self):
+        response = self.client.get("/news/lens-matrix")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_lens_correlations_page_route(self):
+        response = self.client.get("/news/lens-correlations")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_source_differentiation_page_route(self):
+        response = self.client.get("/news/source-differentiation")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_source_effects_page_route(self):
+        response = self.client.get("/news/source-effects")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
     def test_news_tags_page_route(self):
         response = self.client.get("/news/tags")
         self.assertEqual(response.status_code, 200)
@@ -50,6 +75,35 @@ class NewsPageRouteTests(unittest.TestCase):
 
     def test_news_raw_json_page_route(self):
         response = self.client.get("/news/raw-json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_lens_explorer_page_route(self):
+        response = self.client.get("/news/lens-explorer")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_high_score_lenses_legacy_route(self):
+        response = self.client.get("/news/high-score-lenses")
+        self.assertIn(response.status_code, {200, 301, 302, 308})
+
+    def test_news_lens_by_source_page_route(self):
+        response = self.client.get("/news/lens-by-source")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_lens_stability_page_route(self):
+        response = self.client.get("/news/lens-stability")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_source_tag_matrix_page_route(self):
+        response = self.client.get("/news/source-tag-matrix")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
+    def test_news_data_quality_page_route(self):
+        response = self.client.get("/news/data-quality")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
 
