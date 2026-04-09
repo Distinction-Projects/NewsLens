@@ -48,6 +48,17 @@ python -m src.cache_models
 python -m src.app
 ```
 
+```PowerShell
+git clone <your fork or the canonical repo>
+cd NewsLens
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+ 
+```
+
+
 Default local URL:
 
 - `http://localhost:8050`
