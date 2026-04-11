@@ -13,7 +13,6 @@ from src.pages.news_page_utils import api_get, build_status_alert, snapshot_para
 dash.register_page(
     __name__,
     path="/news/lens-explorer",
-    redirect_from=["/news/high-score-lenses"],
     name="News Lens Explorer",
     title="NewsLens | News Lens Explorer",
 )
@@ -68,52 +67,23 @@ def _full_score_lens_scores(article: dict) -> dict[str, float]:
     return normalized_scores
 
 
-def _legacy_high_score_lens_scores(article: dict, lens_maxima: dict[str, float]) -> dict[str, float]:
-    high_score = article.get("high_score")
-    if not isinstance(high_score, dict):
-        return {}
-    lens_scores = high_score.get("lens_scores")
-    if not isinstance(lens_scores, dict) or not lens_scores:
-        return {}
-
-    normalized_scores: dict[str, float] = {}
-    for lens_name, value in lens_scores.items():
-        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
-            continue
-        max_total = lens_maxima.get(lens_name)
-        if isinstance(max_total, (int, float)) and max_total > 0:
-            normalized_scores[lens_name] = (float(value) / float(max_total)) * 100.0
-        else:
-            normalized_scores[lens_name] = float(value)
-    return normalized_scores
-
-
 def _article_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[list[dict], str]:
+    _ = lens_maxima
     rows: list[dict] = []
-    data_modes: set[str] = set()
     for article in articles:
         normalized_scores = _full_score_lens_scores(article)
-        row_mode = "full"
-        if not normalized_scores:
-            normalized_scores = _legacy_high_score_lens_scores(article, lens_maxima)
-            row_mode = "legacy"
-
         if not normalized_scores:
             continue
 
-        data_modes.add(row_mode)
         strongest_lens, strongest_percent = max(normalized_scores.items(), key=lambda item: item[1])
         source = article.get("source") if isinstance(article.get("source"), dict) else {}
         score = article.get("score") if isinstance(article.get("score"), dict) else {}
-        high_score = article.get("high_score") if isinstance(article.get("high_score"), dict) else {}
         rows.append(
             {
                 "title": article.get("title", "Untitled"),
                 "source": source.get("name", "Unknown"),
                 "published": article.get("published"),
-                "overall_percent": score.get("percent")
-                if isinstance(score.get("percent"), (int, float))
-                else high_score.get("overall_percent"),
+                "overall_percent": score.get("percent") if isinstance(score.get("percent"), (int, float)) else None,
                 "lens_scores": normalized_scores,
                 "strongest_lens": strongest_lens,
                 "strongest_percent": strongest_percent,
@@ -121,11 +91,7 @@ def _article_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[
         )
     if not rows:
         return rows, "no lens data"
-    if data_modes == {"full"}:
-        return rows, "all scored articles"
-    if data_modes == {"legacy"}:
-        return rows, "high-score fallback"
-    return rows, "mixed"
+    return rows, "all scored articles"
 
 
 def _lens_options(lens_names: list[str]) -> list[dict]:
@@ -294,14 +260,14 @@ def _article_table(article_rows: list[dict], selected_lens: str | None, top_n: i
 
 layout = dbc.Container(
     [
-        dcc.Interval(id="news-high-score-lenses-load", interval=50, n_intervals=0, max_intervals=1),
+        dcc.Interval(id="news-lens-explorer-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Lens Explorer", className="mb-2"), width=12)]),
         dbc.Row(
             [
                 dbc.Col(
                     html.P(
                         "This page previews the notebook-style lens explorer using full per-article lens scores when "
-                        "the upstream contract provides them, with fallback to the older high-score subset.",
+                        "the upstream contract provides them, with fallback to legacy lens-score fields.",
                         className="text-muted",
                     ),
                     width=12,
@@ -314,7 +280,7 @@ layout = dbc.Container(
                     [
                         dbc.Label("Data mode"),
                         dcc.Dropdown(
-                            id="news-high-score-lenses-mode",
+                            id="news-lens-explorer-mode",
                             options=[
                                 {"label": "Current", "value": "current"},
                                 {"label": "Snapshot", "value": "snapshot"},
@@ -329,7 +295,7 @@ layout = dbc.Container(
                     [
                         dbc.Label("Snapshot date (UTC)"),
                         dcc.Input(
-                            id="news-high-score-lenses-snapshot-date",
+                            id="news-lens-explorer-snapshot-date",
                             type="date",
                             className="form-control",
                             disabled=True,
@@ -340,7 +306,7 @@ layout = dbc.Container(
                 dbc.Col(
                     [
                         dbc.Label("Lens"),
-                        dcc.Dropdown(id="news-high-score-lenses-lens", options=[], value=None, clearable=False),
+                        dcc.Dropdown(id="news-lens-explorer-lens", options=[], value=None, clearable=False),
                     ],
                     md=3,
                 ),
@@ -348,7 +314,7 @@ layout = dbc.Container(
                     [
                         dbc.Label("Top N articles"),
                         dcc.Input(
-                            id="news-high-score-lenses-top-n",
+                            id="news-lens-explorer-top-n",
                             type="number",
                             min=3,
                             max=50,
@@ -362,22 +328,22 @@ layout = dbc.Container(
                 dbc.Col(
                     [
                         dbc.Label("Actions"),
-                        dbc.Button("Refresh", id="news-high-score-lenses-refresh", color="secondary"),
+                        dbc.Button("Refresh", id="news-lens-explorer-refresh", color="secondary"),
                     ],
                     md=1,
                 ),
-                dbc.Col(html.Div(id="news-high-score-lenses-status"), md=2),
+                dbc.Col(html.Div(id="news-lens-explorer-status"), md=2),
             ],
             className="mb-3",
         ),
-        dbc.Row(id="news-high-score-lenses-cards"),
+        dbc.Row(id="news-lens-explorer-cards"),
         dbc.Row(
             [
-                dbc.Col(dcc.Graph(id="news-high-score-lenses-selected-graph"), lg=7, className="mb-3"),
-                dbc.Col(dcc.Graph(id="news-high-score-lenses-average-graph"), lg=5, className="mb-3"),
+                dbc.Col(dcc.Graph(id="news-lens-explorer-selected-graph"), lg=7, className="mb-3"),
+                dbc.Col(dcc.Graph(id="news-lens-explorer-average-graph"), lg=5, className="mb-3"),
             ]
         ),
-        dbc.Row([dbc.Col(html.Div(id="news-high-score-lenses-table"), width=12)]),
+        dbc.Row([dbc.Col(html.Div(id="news-lens-explorer-table"), width=12)]),
     ],
     fluid=True,
     className="py-4",
@@ -385,22 +351,22 @@ layout = dbc.Container(
 
 
 @callback(
-    Output("news-high-score-lenses-status", "children"),
-    Output("news-high-score-lenses-lens", "options"),
-    Output("news-high-score-lenses-lens", "value"),
-    Output("news-high-score-lenses-cards", "children"),
-    Output("news-high-score-lenses-selected-graph", "figure"),
-    Output("news-high-score-lenses-average-graph", "figure"),
-    Output("news-high-score-lenses-table", "children"),
-    Input("news-high-score-lenses-load", "n_intervals"),
-    Input("news-high-score-lenses-refresh", "n_clicks"),
-    Input("news-high-score-lenses-lens", "value"),
-    State("news-high-score-lenses-mode", "value"),
-    State("news-high-score-lenses-snapshot-date", "value"),
-    State("news-high-score-lenses-top-n", "value"),
+    Output("news-lens-explorer-status", "children"),
+    Output("news-lens-explorer-lens", "options"),
+    Output("news-lens-explorer-lens", "value"),
+    Output("news-lens-explorer-cards", "children"),
+    Output("news-lens-explorer-selected-graph", "figure"),
+    Output("news-lens-explorer-average-graph", "figure"),
+    Output("news-lens-explorer-table", "children"),
+    Input("news-lens-explorer-load", "n_intervals"),
+    Input("news-lens-explorer-refresh", "n_clicks"),
+    Input("news-lens-explorer-lens", "value"),
+    State("news-lens-explorer-mode", "value"),
+    State("news-lens-explorer-snapshot-date", "value"),
+    State("news-lens-explorer-top-n", "value"),
 )
-def load_news_high_score_lenses(_load_tick, _refresh_clicks, selected_lens, data_mode, snapshot_date, top_n):
-    force_refresh = ctx.triggered_id == "news-high-score-lenses-refresh"
+def load_news_lens_explorer(_load_tick, _refresh_clicks, selected_lens, data_mode, snapshot_date, top_n):
+    force_refresh = ctx.triggered_id == "news-lens-explorer-refresh"
     common_params = {
         "snapshot_date": snapshot_param(data_mode, snapshot_date),
         "refresh": "true" if force_refresh else None,
@@ -413,7 +379,7 @@ def load_news_high_score_lenses(_load_tick, _refresh_clicks, selected_lens, data
         stats_error = stats_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"High-score lens data error: stats={stats_code} ({stats_error})",
+            f"Lens data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, [], None, _summary_cards([], None), empty, empty, dbc.Alert("No table data.", color="warning")
@@ -449,8 +415,8 @@ def load_news_high_score_lenses(_load_tick, _refresh_clicks, selected_lens, data
 
 
 @callback(
-    Output("news-high-score-lenses-snapshot-date", "disabled"),
-    Input("news-high-score-lenses-mode", "value"),
+    Output("news-lens-explorer-snapshot-date", "disabled"),
+    Input("news-lens-explorer-mode", "value"),
 )
-def toggle_high_score_snapshot_input(data_mode):
+def toggle_lens_explorer_snapshot_input(data_mode):
     return data_mode != "snapshot"

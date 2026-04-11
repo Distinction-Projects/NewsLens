@@ -7,6 +7,8 @@
 - For lens inventory/metadata UI, consume backend-derived `data.derived.lens_inventory` from `/api/news/stats` before reading raw `data.analysis.lens_summary`.
 - For source-tag pages, consume backend-derived `data.derived.source_tag_views` for source/tag ordering and summary metrics before rebuilding counters in page code.
 - For data-quality pages, consume backend-derived `data.derived.data_quality` before introducing page-local completeness scans.
+- For scoring diagnostics, consume backend-derived `data.derived.score_status` and score count fields (`zero_score_articles`, `unscorable_articles`, etc.) instead of inferring from UI-side heuristics.
+- For full payload inspection UIs, consume `/api/news/upstream` rather than piecing together only `summary`/`analysis` from `/api/news/stats`.
 - For selector-style pages (for example correlations/source differentiation), prefer `data.derived.*` first and use `data.analysis.*` only as fallback.
 
 ## Page conventions

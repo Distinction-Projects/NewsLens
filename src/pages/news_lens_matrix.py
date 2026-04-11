@@ -71,43 +71,15 @@ def _full_score_lens_scores(article: dict) -> dict[str, float]:
     return normalized_scores
 
 
-def _legacy_high_score_lens_scores(article: dict, lens_maxima: dict[str, float]) -> dict[str, float]:
-    high_score = article.get("high_score")
-    if not isinstance(high_score, dict):
-        return {}
-
-    lens_scores = high_score.get("lens_scores")
-    if not isinstance(lens_scores, dict):
-        return {}
-
-    normalized_scores: dict[str, float] = {}
-    for lens_name, value in lens_scores.items():
-        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
-            continue
-        max_total = lens_maxima.get(lens_name)
-        if isinstance(max_total, (int, float)) and max_total > 0:
-            normalized_scores[lens_name] = (float(value) / float(max_total)) * 100.0
-        else:
-            normalized_scores[lens_name] = float(value)
-    return normalized_scores
-
-
 def _matrix_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[list[dict], str]:
+    _ = lens_maxima
     rows: list[dict] = []
-    data_modes: set[str] = set()
     for article in articles:
         lens_scores = _full_score_lens_scores(article)
-        row_mode = "full"
-        if not lens_scores:
-            lens_scores = _legacy_high_score_lens_scores(article, lens_maxima)
-            row_mode = "legacy"
-
         if not lens_scores:
             continue
 
-        data_modes.add(row_mode)
         score = article.get("score") if isinstance(article.get("score"), dict) else {}
-        high_score = article.get("high_score") if isinstance(article.get("high_score"), dict) else {}
         source = article.get("source") if isinstance(article.get("source"), dict) else {}
         strongest_lens, strongest_percent = max(lens_scores.items(), key=lambda item: item[1])
         rows.append(
@@ -116,9 +88,7 @@ def _matrix_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[l
                 "title": article.get("title", "Untitled"),
                 "source": source.get("name", "Unknown"),
                 "published": article.get("published"),
-                "overall_percent": score.get("percent")
-                if isinstance(score.get("percent"), (int, float))
-                else high_score.get("overall_percent"),
+                "overall_percent": score.get("percent") if isinstance(score.get("percent"), (int, float)) else None,
                 "lens_scores": lens_scores,
                 "strongest_lens": strongest_lens,
                 "strongest_percent": strongest_percent,
@@ -127,11 +97,7 @@ def _matrix_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[l
 
     if not rows:
         return rows, "no lens data"
-    if data_modes == {"full"}:
-        return rows, "all scored articles"
-    if data_modes == {"legacy"}:
-        return rows, "high-score fallback"
-    return rows, "mixed"
+    return rows, "all scored articles"
 
 
 def _lens_options(lens_names: list[str]) -> list[dict]:
@@ -381,7 +347,7 @@ layout = dbc.Container(
                 dbc.Col(
                     html.P(
                         "This page brings the lens-matrix notebook view into NewsLens. It ranks articles by a selected "
-                        "lens, shows the lens-by-article heatmap, and falls back to the legacy high-score subset when "
+                        "lens, shows the lens-by-article heatmap, and falls back to legacy lens-score fields when "
                         "the full contract is not available.",
                         className="text-muted",
                     ),

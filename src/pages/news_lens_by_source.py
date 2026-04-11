@@ -63,51 +63,22 @@ def _full_score_lens_scores(article: dict) -> dict[str, float]:
     return normalized_scores
 
 
-def _legacy_high_score_lens_scores(article: dict, lens_maxima: dict[str, float]) -> dict[str, float]:
-    high_score = article.get("high_score")
-    if not isinstance(high_score, dict):
-        return {}
-    lens_scores = high_score.get("lens_scores")
-    if not isinstance(lens_scores, dict):
-        return {}
-
-    normalized_scores: dict[str, float] = {}
-    for lens_name, value in lens_scores.items():
-        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
-            continue
-        max_total = lens_maxima.get(lens_name)
-        if isinstance(max_total, (int, float)) and max_total > 0:
-            normalized_scores[lens_name] = (float(value) / float(max_total)) * 100.0
-        else:
-            normalized_scores[lens_name] = float(value)
-    return normalized_scores
-
-
 def _source_lens_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[list[dict], list[str], str]:
     by_source_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_source_overall: dict[str, list[float]] = defaultdict(list)
     by_source_count: dict[str, int] = defaultdict(int)
-    data_modes: set[str] = set()
 
     for article in articles:
         lens_scores = _full_score_lens_scores(article)
-        row_mode = "full"
-        if not lens_scores:
-            lens_scores = _legacy_high_score_lens_scores(article, lens_maxima)
-            row_mode = "legacy"
         if not lens_scores:
             continue
 
-        data_modes.add(row_mode)
         source = article.get("source") if isinstance(article.get("source"), dict) else {}
         source_name = str(source.get("name") or "Unknown")
         by_source_count[source_name] += 1
 
         score = article.get("score") if isinstance(article.get("score"), dict) else {}
-        high_score = article.get("high_score") if isinstance(article.get("high_score"), dict) else {}
         overall_percent = score.get("percent")
-        if not isinstance(overall_percent, (int, float)):
-            overall_percent = high_score.get("overall_percent")
         if isinstance(overall_percent, (int, float)):
             by_source_overall[source_name].append(float(overall_percent))
 
@@ -142,14 +113,7 @@ def _source_lens_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tu
             }
         )
 
-    if not rows:
-        coverage = "no lens data"
-    elif data_modes == {"full"}:
-        coverage = "all scored articles"
-    elif data_modes == {"legacy"}:
-        coverage = "high-score fallback"
-    else:
-        coverage = "mixed"
+    coverage = "all scored articles" if rows else "no lens data"
     return rows, lens_names, coverage
 
 
@@ -363,7 +327,7 @@ layout = dbc.Container(
                 dbc.Col(
                     html.P(
                         "This page maps average lens performance to sources, using full per-article lens scores when "
-                        "available and falling back to legacy high-score lens fields.",
+                        "available and falling back to legacy lens-score fields.",
                         className="text-muted",
                     ),
                     width=12,

@@ -38,10 +38,10 @@ def _score_histogram_figure(histogram_bins: list[dict]) -> go.Figure:
     return figure
 
 
-def _high_score_source_figure(high_score_by_source: list[dict], top_n: int = 12) -> go.Figure:
-    rows = high_score_by_source[:top_n]
+def _scored_source_figure(scored_by_source: list[dict], top_n: int = 12) -> go.Figure:
+    rows = scored_by_source[:top_n]
     if not rows:
-        return _empty_figure("High Scores by Source")
+        return _empty_figure("Scored Articles by Source")
     figure = go.Figure(
         data=[
             go.Bar(
@@ -51,7 +51,7 @@ def _high_score_source_figure(high_score_by_source: list[dict], top_n: int = 12)
             )
         ]
     )
-    figure.update_layout(title="High Scores by Source", template="plotly_white")
+    figure.update_layout(title="Scored Articles by Source", template="plotly_white")
     return figure
 
 
@@ -84,12 +84,21 @@ def _score_tag_heatmap_figure(heatmap_rows: list[dict]) -> go.Figure:
 def _score_cards(derived: dict) -> list:
     distribution = derived.get("score_distribution", {}) if isinstance(derived, dict) else {}
     average = distribution.get("average_percent")
-    high_ratio = derived.get("high_score_ratio")
+    score_coverage_ratio = derived.get("score_coverage_ratio")
+    scored_articles = derived.get("scored_articles", 0)
+    zero_score_articles = derived.get("zero_score_articles", 0)
+    unscorable_articles = derived.get("unscorable_articles", "n/a")
     cards = [
-        ("Scored Articles", derived.get("scored_articles", 0)),
+        ("Scored Articles", scored_articles),
+        ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a"),
+        ("Unscorable", unscorable_articles if isinstance(unscorable_articles, int) else "n/a"),
         ("Average Score %", f"{average:.1f}" if isinstance(average, (int, float)) else "n/a"),
-        ("High-Score Articles", derived.get("high_scoring_articles", 0)),
-        ("High-Score Ratio", f"{high_ratio * 100:.1f}%" if isinstance(high_ratio, (int, float)) else "n/a"),
+        (
+            "Score Coverage",
+            f"{score_coverage_ratio * 100:.1f}%"
+            if isinstance(score_coverage_ratio, (int, float))
+            else "n/a",
+        ),
     ]
     return [
         dbc.Col(
@@ -97,7 +106,7 @@ def _score_cards(derived: dict) -> list:
                 dbc.CardBody([html.P(label, className="text-white mb-1"), html.H4(str(value), className="mb-0")]),
                 className="shadow-sm",
             ),
-            md=3,
+            md=2,
             className="mb-3",
         )
         for label, value in cards
@@ -187,14 +196,20 @@ def load_news_score_lab(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     derived = payload.get("data", {}).get("derived", {})
     chart_aggregates = derived.get("chart_aggregates", {})
     histogram_bins = chart_aggregates.get("score_histogram_bins", [])
-    high_score_by_source = chart_aggregates.get("high_score_by_source", [])
+    scored_by_source = chart_aggregates.get("scored_by_source", [])
     score_tag_heatmap = chart_aggregates.get("score_tag_count_heatmap", [])
 
     return (
-        build_status_alert(meta, leading_parts=[f"Scored: {derived.get('scored_articles', 0)}"]),
+        build_status_alert(
+            meta,
+            leading_parts=[
+                f"Scored: {derived.get('scored_articles', 0)}",
+                f"Unscorable: {derived.get('unscorable_articles', 0)}",
+            ],
+        ),
         _score_cards(derived),
         _score_histogram_figure(histogram_bins),
-        _high_score_source_figure(high_score_by_source),
+        _scored_source_figure(scored_by_source),
         _score_tag_heatmap_figure(score_tag_heatmap),
     )
 

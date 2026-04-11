@@ -67,41 +67,16 @@ def _full_score_lens_scores(article: dict) -> dict[str, float]:
     return normalized_scores
 
 
-def _legacy_high_score_lens_scores(article: dict, lens_maxima: dict[str, float]) -> dict[str, float]:
-    high_score = article.get("high_score")
-    if not isinstance(high_score, dict):
-        return {}
-    lens_scores = high_score.get("lens_scores")
-    if not isinstance(lens_scores, dict):
-        return {}
-
-    normalized_scores: dict[str, float] = {}
-    for lens_name, value in lens_scores.items():
-        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
-            continue
-        max_total = lens_maxima.get(lens_name)
-        if isinstance(max_total, (int, float)) and max_total > 0:
-            normalized_scores[lens_name] = (float(value) / float(max_total)) * 100.0
-        else:
-            normalized_scores[lens_name] = float(value)
-    return normalized_scores
-
-
 def _lens_stability_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[list[dict], str]:
+    _ = lens_maxima
     lens_values: dict[str, list[float]] = defaultdict(list)
     lens_source_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    data_modes: set[str] = set()
 
     for article in articles:
         lens_scores = _full_score_lens_scores(article)
-        row_mode = "full"
-        if not lens_scores:
-            lens_scores = _legacy_high_score_lens_scores(article, lens_maxima)
-            row_mode = "legacy"
         if not lens_scores:
             continue
 
-        data_modes.add(row_mode)
         source = article.get("source") if isinstance(article.get("source"), dict) else {}
         source_name = str(source.get("name") or "Unknown")
 
@@ -142,14 +117,7 @@ def _lens_stability_rows(articles: list[dict], lens_maxima: dict[str, float]) ->
         )
 
     rows.sort(key=lambda row: (float(row.get("stddev") or 0.0), float(row.get("range") or 0.0)), reverse=True)
-    if not rows:
-        coverage = "no lens data"
-    elif data_modes == {"full"}:
-        coverage = "all scored articles"
-    elif data_modes == {"legacy"}:
-        coverage = "high-score fallback"
-    else:
-        coverage = "mixed"
+    coverage = "all scored articles" if rows else "no lens data"
     return rows, coverage
 
 

@@ -34,6 +34,8 @@
     - `derived.lens_correlations` (including pair rankings/summary)
     - `derived.source_tag_views`
     - `derived.data_quality`
+    - `derived.score_status` / `derived.{zero_score_articles,unscorable_articles,...}` for scoring diagnostics
+  - for full contract inspection, use `/api/news/upstream` instead of reconstructing from partial endpoint fields
   - keep page modules focused on rendering/filtering, not article-level recomputation
 - Prefer the smallest area that can satisfy the task:
   - service/data shape work: `src/services` + `src/api` + related tests

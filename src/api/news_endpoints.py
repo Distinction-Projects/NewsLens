@@ -308,6 +308,41 @@ def register_news_endpoints(server) -> None:
             200,
         )
 
+    @server.get("/api/news/upstream")
+    def get_news_upstream():
+        force_refresh = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+        snapshot_date: str | None = None
+
+        try:
+            snapshot_date = parse_snapshot_date(request.args.get("snapshot_date"))
+            bundle = client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date)
+        except ValueError as exc:
+            return jsonify({"status": "bad_request", "error": str(exc)}), 400
+        except RssDigestNotFoundError as exc:
+            if snapshot_date:
+                return jsonify({"status": "not_found", "error": str(exc)}), 404
+            return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"}), 503
+
+        upstream_payload = bundle.get("upstream_payload")
+        return (
+            jsonify(
+                {
+                    "status": "ok",
+                    "meta": _common_meta(
+                        bundle,
+                        filtered_count=len(bundle.get("articles_normalized", [])),
+                        returned_count=len(bundle.get("articles_normalized", [])),
+                    ),
+                    "data": {
+                        "upstream": upstream_payload,
+                    },
+                }
+            ),
+            200,
+        )
+
     @server.get("/api/news/export")
     def export_news_artifact():
         force_refresh = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}

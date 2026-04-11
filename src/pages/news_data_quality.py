@@ -27,12 +27,22 @@ def _data_quality_from_stats(derived: dict) -> dict:
 
 
 def _summary_cards(meta: dict, stats_derived: dict, quality: dict):
+    score_coverage_ratio = stats_derived.get("score_coverage_ratio")
+    score_coverage_text = (
+        f"{score_coverage_ratio * 100:.1f}%"
+        if isinstance(score_coverage_ratio, (int, float))
+        else "n/a"
+    )
+    zero_score_articles = stats_derived.get("zero_score_articles", "n/a")
+    unscorable_articles = stats_derived.get("unscorable_articles", "n/a")
     cards = [
         ("Input Articles", meta.get("input_articles_count", "n/a")),
         ("Excluded Unscraped", meta.get("excluded_unscraped_articles", "n/a")),
         ("Included (Digest)", quality.get("total", "n/a")),
         ("Scored (Digest)", quality.get("scored", "n/a")),
-        ("High Scoring", stats_derived.get("high_scoring_articles", "n/a")),
+        ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a"),
+        ("Unscorable", unscorable_articles if isinstance(unscorable_articles, int) else "n/a"),
+        ("Score Coverage", score_coverage_text),
         ("Avg Tags / Article", f"{quality.get('average_tags', 0.0):.2f}"),
     ]
     return [
@@ -41,8 +51,8 @@ def _summary_cards(meta: dict, stats_derived: dict, quality: dict):
                 dbc.CardBody([html.P(label, className="text-muted mb-1"), html.H4(str(value), className="mb-0")]),
                 className="shadow-sm",
             ),
-            md=4,
-            lg=2,
+            md=3,
+            lg=3,
             className="mb-3",
         )
         for label, value in cards

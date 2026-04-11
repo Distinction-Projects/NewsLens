@@ -29,12 +29,18 @@ def _extract_metrics(payload: dict) -> dict:
     source_counts = derived.get("source_counts") if isinstance(derived.get("source_counts"), list) else []
     tag_counts = derived.get("tag_counts") if isinstance(derived.get("tag_counts"), list) else []
     daily_counts = derived.get("daily_counts_utc") if isinstance(derived.get("daily_counts_utc"), list) else []
-    high_score_ratio = derived.get("high_score_ratio")
+    score_coverage_ratio = derived.get("score_coverage_ratio")
     return {
         "generated_at": meta.get("generated_at"),
         "total_articles": derived.get("total_articles"),
         "scored_articles": derived.get("scored_articles"),
-        "high_score_ratio_percent": (high_score_ratio * 100.0) if isinstance(high_score_ratio, (int, float)) else None,
+        "zero_score_articles": derived.get("zero_score_articles"),
+        "unscorable_articles": derived.get("unscorable_articles"),
+        "score_coverage_ratio_percent": (
+            score_coverage_ratio * 100.0
+            if isinstance(score_coverage_ratio, (int, float))
+            else None
+        ),
         "source_count": len(source_counts),
         "tag_count": len(tag_counts),
         "days_covered": len(daily_counts),
@@ -45,7 +51,9 @@ def _metric_cards(current_metrics: dict, snapshot_metrics: dict) -> list:
     metrics = [
         ("Total Articles", "total_articles"),
         ("Scored Articles", "scored_articles"),
-        ("High-Score Ratio %", "high_score_ratio_percent"),
+        ("Zero Scores", "zero_score_articles"),
+        ("Unscorable", "unscorable_articles"),
+        ("Score Coverage %", "score_coverage_ratio_percent"),
         ("Source Count", "source_count"),
         ("Tag Count", "tag_count"),
         ("Days Covered", "days_covered"),
@@ -92,7 +100,9 @@ def _comparison_figure(current_metrics: dict, snapshot_metrics: dict) -> go.Figu
     keys = [
         ("Total Articles", "total_articles"),
         ("Scored Articles", "scored_articles"),
-        ("High-Score Ratio %", "high_score_ratio_percent"),
+        ("Zero Scores", "zero_score_articles"),
+        ("Unscorable", "unscorable_articles"),
+        ("Score Coverage %", "score_coverage_ratio_percent"),
         ("Days Covered", "days_covered"),
     ]
 
@@ -122,7 +132,9 @@ def _comparison_table(current_metrics: dict, snapshot_metrics: dict):
         ("Generated At", "generated_at"),
         ("Total Articles", "total_articles"),
         ("Scored Articles", "scored_articles"),
-        ("High-Score Ratio %", "high_score_ratio_percent"),
+        ("Zero Scores", "zero_score_articles"),
+        ("Unscorable", "unscorable_articles"),
+        ("Score Coverage %", "score_coverage_ratio_percent"),
         ("Source Count", "source_count"),
         ("Tag Count", "tag_count"),
         ("Days Covered", "days_covered"),

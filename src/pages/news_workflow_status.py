@@ -37,14 +37,23 @@ def _summary_cards(
     excluded_unscraped: int | None,
     included_articles: int | None,
     scored_articles: int | None,
-    high_scoring_articles: int | None,
+    zero_score_articles: int | None,
+    unscorable_articles: int | None,
+    score_coverage_ratio: float | None,
 ):
+    score_coverage_text = (
+        f"{score_coverage_ratio * 100:.1f}%"
+        if isinstance(score_coverage_ratio, (int, float))
+        else "n/a"
+    )
     cards = [
         ("Input Articles", input_articles if isinstance(input_articles, int) else "n/a", "primary"),
         ("Excluded (Scrape Errors)", excluded_unscraped if isinstance(excluded_unscraped, int) else "n/a", "danger"),
         ("Included Articles", included_articles if isinstance(included_articles, int) else "n/a", "info"),
         ("Scored Articles", scored_articles if isinstance(scored_articles, int) else "n/a", "success"),
-        ("High Scoring", high_scoring_articles if isinstance(high_scoring_articles, int) else "n/a", "warning"),
+        ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a", "secondary"),
+        ("Unscorable", unscorable_articles if isinstance(unscorable_articles, int) else "n/a", "dark"),
+        ("Score Coverage", score_coverage_text, "warning"),
     ]
     return [
         dbc.Col(
@@ -175,7 +184,9 @@ def load_workflow_status(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     excluded_unscraped = digest_meta.get("excluded_unscraped_articles")
     included_articles = derived.get("total_articles")
     scored_articles = derived.get("scored_articles")
-    high_scoring_articles = derived.get("high_scoring_articles")
+    zero_score_articles = derived.get("zero_score_articles")
+    unscorable_articles = derived.get("unscorable_articles")
+    score_coverage_ratio = derived.get("score_coverage_ratio")
 
     ingest_ok = digest_status == 200
     scrape_filter_ok = (
@@ -186,6 +197,7 @@ def load_workflow_status(_load_tick, _refresh_clicks, data_mode, snapshot_date):
         and excluded_unscraped >= 0
     )
     scoring_ok = stats_status == 200 and isinstance(scored_articles, int) and scored_articles > 0
+    unscorable_ok = stats_status == 200 and isinstance(unscorable_articles, int) and unscorable_articles == 0
     precompute_ok = stats_status == 200 and bool(stats_meta.get("schema_version"))
 
     if data_mode == "snapshot":
@@ -220,7 +232,15 @@ def load_workflow_status(_load_tick, _refresh_clicks, data_mode, snapshot_date):
                         _check_row(
                             "Rubric scoring present",
                             "pass" if scoring_ok else "fail",
-                            f"scored_articles={scored_articles}",
+                            (
+                                f"scored_articles={scored_articles}, "
+                                f"zero_scores={zero_score_articles}, unscorable={unscorable_articles}"
+                            ),
+                        ),
+                        _check_row(
+                            "Unscorable article gate",
+                            "pass" if unscorable_ok else "warn",
+                            "Warn when included articles are missing usable score outputs.",
                         ),
                         _check_row(
                             "Precomputed contract present",
@@ -254,7 +274,15 @@ def load_workflow_status(_load_tick, _refresh_clicks, data_mode, snapshot_date):
             color=alert_color,
             class_name="mb-0",
         ),
-        _summary_cards(input_articles, excluded_unscraped, included_articles, scored_articles, high_scoring_articles),
+        _summary_cards(
+            input_articles,
+            excluded_unscraped,
+            included_articles,
+            scored_articles,
+            zero_score_articles,
+            unscorable_articles,
+            score_coverage_ratio,
+        ),
         checks,
         _latest_card(latest_record),
     )

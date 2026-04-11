@@ -16,6 +16,8 @@
 - For reusable lens inventory/metadata, treat `derived.lens_inventory` in `/api/news/stats` as the canonical backend shape.
 - For reusable source/tag ordering and lookup, treat `derived.source_tag_views` as canonical for pages.
 - Keep data-completeness metrics in `derived.data_quality` instead of recomputing per page.
+- Treat score diagnostics as backend-owned: use `derived.score_status` and related aggregate counts (`zero_score_articles`, `unscorable_articles`, etc.) from `/api/news/stats`.
+- Use `/api/news/upstream` when a page needs full raw contract inspection.
 
 ## Common mistakes to avoid
 - Editing `src/pages/Distinction.code-workspace` (not runtime code).

@@ -21,6 +21,7 @@ _ENDPOINT_OPTIONS = [
     {"label": "Digest", "value": "digest"},
     {"label": "Latest Digest Item", "value": "latest"},
     {"label": "Stats", "value": "stats"},
+    {"label": "Upstream Contract (raw)", "value": "upstream"},
     {"label": "Freshness", "value": "freshness"},
 ]
 
@@ -30,6 +31,8 @@ def _endpoint_path(endpoint_key: str) -> str:
         return "/api/news/digest/latest"
     if endpoint_key == "stats":
         return "/api/news/stats"
+    if endpoint_key == "upstream":
+        return "/api/news/upstream"
     if endpoint_key == "freshness":
         return "/health/news-freshness"
     return "/api/news/digest"
@@ -162,9 +165,9 @@ def load_news_raw_json(
     force_refresh = ctx.triggered_id == "news-raw-refresh"
     path = _endpoint_path(endpoint_key or "digest")
     params = {
-        "date": date_filter,
-        "tag": tag_filter,
-        "source": source_filter,
+        "date": date_filter if endpoint_key in {"digest", "latest"} else None,
+        "tag": tag_filter if endpoint_key in {"digest", "latest"} else None,
+        "source": source_filter if endpoint_key in {"digest", "latest"} else None,
         "limit": limit_value if endpoint_key == "digest" else None,
         "snapshot_date": snapshot_param(data_mode, snapshot_date),
         "refresh": "true" if force_refresh else None,

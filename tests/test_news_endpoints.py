@@ -24,7 +24,7 @@ SAMPLE_PAYLOAD = {
         "generated_at": DIGEST_UTC_ISO,
         "run_id": "digest-abc123",
     },
-    "summary": {"articles": 3, "scored_articles": 3, "high_scoring_articles": 2},
+    "summary": {"articles": 3, "scored_articles": 3},
     "analysis": {"lens_summary": {}, "source_differentiation": {}},
     "articles": [
         {
@@ -40,8 +40,13 @@ SAMPLE_PAYLOAD = {
             "feed": {"name": "Headlines", "url": "https://example.com/feed"},
             "scraped": {"title": "Latest Story", "body_text": "Body"},
             "scrape_error": None,
-            "score": {"value": 14.0, "max_value": 20.0, "percent": 70.0, "rubric_count": 3},
-            "high_score": {"overall_score": 14.0, "overall_percent": 70.0, "lens_scores": {"L1": 7.0}},
+            "score": {
+                "value": 14.0,
+                "max_value": 20.0,
+                "percent": 70.0,
+                "rubric_count": 3,
+                "lens_scores": {"L1": {"percent": 70.0}},
+            },
         },
         {
             "id": "a-2",
@@ -57,7 +62,6 @@ SAMPLE_PAYLOAD = {
             "scraped": {"title": "Older Story", "body_text": "Body"},
             "scrape_error": None,
             "score": {"value": 8.0, "max_value": 20.0, "percent": 40.0, "rubric_count": 3},
-            "high_score": None,
         },
         {
             "id": "a-3",
@@ -73,7 +77,6 @@ SAMPLE_PAYLOAD = {
             "scraped": None,
             "scrape_error": "HTTP 500",
             "score": {"value": 20.0, "max_value": 20.0, "percent": 100.0, "rubric_count": 3},
-            "high_score": {"overall_score": 20.0, "overall_percent": 100.0, "lens_scores": {"L1": 10.0}},
         },
     ],
 }
@@ -170,6 +173,12 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(stats_payload["data"]["derived"]["input_articles"], 3)
         self.assertEqual(stats_payload["data"]["derived"]["excluded_unscraped_articles"], 1)
         self.assertEqual(stats_payload["data"]["derived"]["total_articles"], 2)
+        self.assertEqual(stats_payload["data"]["derived"]["scored_articles"], 2)
+        self.assertEqual(stats_payload["data"]["derived"]["zero_score_articles"], 0)
+        self.assertEqual(stats_payload["data"]["derived"]["unscorable_articles"], 0)
+        self.assertIn("score_status", stats_payload["data"]["derived"])
+        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["scored"], 2)
+        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["unscorable"], 0)
         self.assertIn("lens_correlations", stats_payload["data"]["derived"])
         self.assertIn("source_differentiation", stats_payload["data"]["derived"])
         self.assertIn("source_lens_effects", stats_payload["data"]["derived"])
@@ -230,7 +239,7 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(data_quality["summary"]["missing_source"], 0)
         coverage_by_field = {row["field"]: row for row in data_quality["field_coverage"]}
         self.assertEqual(coverage_by_field["Title"]["present"], 2)
-        self.assertEqual(coverage_by_field["Lens Scores"]["present"], 0)
+        self.assertEqual(coverage_by_field["Lens Scores"]["present"], 1)
         chart_aggregates = stats_payload["data"]["derived"]["chart_aggregates"]
         self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
         self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
@@ -238,6 +247,7 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(len(chart_aggregates["score_tag_count_heatmap"]), 25)
         self.assertIn("source_tag_totals", chart_aggregates)
         self.assertIn("tag_totals", chart_aggregates)
+        self.assertIn("score_status_by_source", chart_aggregates)
         self.assertEqual(chart_aggregates["source_tag_totals"][0]["source"], "PBS NewsHour")
         self.assertEqual(chart_aggregates["source_tag_totals"][0]["count"], 3)
         self.assertEqual(chart_aggregates["tag_totals"][0]["tag"], "OpenAI")
@@ -260,6 +270,25 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         health_payload = health.get_json()
         self.assertTrue(health_payload["is_fresh"])
+
+    def test_upstream_endpoint(self):
+        response = self.client.get("/api/news/upstream")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("meta", payload)
+        self.assertIn("data", payload)
+        upstream = payload["data"]["upstream"]
+        self.assertIsInstance(upstream, dict)
+        self.assertIn("articles", upstream)
+        self.assertEqual(len(upstream["articles"]), 3)
+        self.assertEqual(upstream["articles"][0]["id"], "a-1")
+
+        snapshot_response = self.client.get(f"/api/news/upstream?snapshot_date={self.snapshot_date}")
+        self.assertEqual(snapshot_response.status_code, 200)
+        snapshot_payload = snapshot_response.get_json()
+        self.assertEqual(snapshot_payload["meta"]["source_mode"], "snapshot")
+        self.assertEqual(snapshot_payload["meta"]["snapshot_date"], self.snapshot_date)
 
     def test_export_endpoints(self):
         export_json = self.client.get("/api/news/export?artifact=source_score_summary&format=json")

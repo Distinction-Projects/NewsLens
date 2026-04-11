@@ -17,7 +17,7 @@ SAMPLE_PAYLOAD = {
     "schema_version": "1.0",
     "generated_at": "2026-03-02T20:54:00Z",
     "contract": "rss_pipeline_precomputed",
-    "summary": {"articles": 3, "scored_articles": 3, "high_scoring_articles": 2},
+    "summary": {"articles": 3, "scored_articles": 3},
     "analysis": {"lens_summary": {}, "source_differentiation": {}},
     "articles": [
         {
@@ -33,8 +33,13 @@ SAMPLE_PAYLOAD = {
             "feed": {"name": "Headlines", "url": "https://example.com/feed"},
             "scraped": {"title": "Latest Story", "body_text": "Body"},
             "scrape_error": None,
-            "score": {"value": 14.0, "max_value": 20.0, "percent": 70.0, "rubric_count": 3},
-            "high_score": {"overall_score": 14.0, "overall_percent": 70.0, "lens_scores": {"L1": 7.0}},
+            "score": {
+                "value": 14.0,
+                "max_value": 20.0,
+                "percent": 70.0,
+                "rubric_count": 3,
+                "lens_scores": {"L1": {"percent": 70.0}},
+            },
         },
         {
             "id": "a-2",
@@ -50,7 +55,6 @@ SAMPLE_PAYLOAD = {
             "scraped": {"title": "Older Story", "body_text": "Body"},
             "scrape_error": None,
             "score": {"value": 8.0, "max_value": 20.0, "percent": 40.0, "rubric_count": 3},
-            "high_score": None,
         },
         {
             "id": "a-3",
@@ -66,7 +70,6 @@ SAMPLE_PAYLOAD = {
             "scraped": None,
             "scrape_error": "HTTP 403",
             "score": {"value": 20.0, "max_value": 20.0, "percent": 100.0, "rubric_count": 3},
-            "high_score": {"overall_score": 20.0, "overall_percent": 100.0, "lens_scores": {"L1": 10.0}},
         },
     ],
 }
@@ -125,7 +128,17 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(stats["excluded_unscraped_articles"], 1)
         self.assertEqual(stats["total_articles"], 2)
         self.assertEqual(stats["scored_articles"], 2)
-        self.assertEqual(stats["high_scoring_articles"], 1)
+        self.assertEqual(stats["zero_score_articles"], 0)
+        self.assertEqual(stats["positive_score_articles"], 2)
+        self.assertEqual(stats["unscorable_articles"], 0)
+        self.assertEqual(stats["scored_without_percent_articles"], 0)
+        self.assertEqual(stats["score_object_present_articles"], 2)
+        self.assertEqual(stats["score_object_missing_articles"], 0)
+        self.assertEqual(stats["placeholder_zero_unscorable_articles"], 0)
+        self.assertIn("score_status", stats)
+        self.assertEqual(stats["score_status"]["scored"], 2)
+        self.assertEqual(stats["score_status"]["unscorable"], 0)
+        self.assertEqual(stats["score_coverage_ratio"], 1.0)
         self.assertTrue(stats["source_counts"])
         self.assertTrue(stats["tag_counts"])
         self.assertEqual(stats["score_distribution"]["count"], 2)
@@ -139,7 +152,8 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("source_tag_totals", chart_aggregates)
         self.assertIn("tag_totals", chart_aggregates)
         self.assertIn("score_tag_count_heatmap", chart_aggregates)
-        self.assertIn("high_score_by_source", chart_aggregates)
+        self.assertIn("scored_by_source", chart_aggregates)
+        self.assertIn("score_status_by_source", chart_aggregates)
         self.assertIn("source_tag_views", stats)
 
         self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
@@ -213,14 +227,14 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIsInstance(lens_views["summary"]["lens_average_rows"], list)
         self.assertEqual(lens_views["summary"]["lens_average_rows"][0]["lens"], "L1")
         self.assertEqual(lens_views["summary"]["lens_average_rows"][0]["count"], 1)
-        self.assertEqual(lens_views["summary"]["lens_average_rows"][0]["mean"], 7.0)
+        self.assertEqual(lens_views["summary"]["lens_average_rows"][0]["mean"], 70.0)
         self.assertEqual(lens_views["summary"]["source_count"], 1)
         self.assertEqual(lens_views["summary"]["covered_articles"], 1)
         self.assertEqual(lens_views["summary"]["source_overall_avg"], 70.0)
         self.assertIsInstance(lens_views["summary"]["source_lens_average_rows"], list)
         self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["lens"], "L1")
         self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["count"], 1)
-        self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["mean"], 7.0)
+        self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["mean"], 70.0)
         self.assertEqual(lens_views["summary"]["stability_lens_count"], 1)
         self.assertEqual(lens_views["summary"]["stability_avg_stddev"], 0.0)
         self.assertEqual(lens_views["summary"]["stability_top_lens"], "L1")
@@ -246,7 +260,7 @@ class RssDigestServiceTests(unittest.TestCase):
         coverage_by_field = {row["field"]: row for row in data_quality["field_coverage"]}
         self.assertEqual(coverage_by_field["Title"]["present"], 2)
         self.assertEqual(coverage_by_field["Score Percent"]["present"], 2)
-        self.assertEqual(coverage_by_field["Lens Scores"]["present"], 0)
+        self.assertEqual(coverage_by_field["Lens Scores"]["present"], 1)
 
         lenses = lens_correlations["lenses"]
         pairwise = lens_correlations["pairwise_counts"]
@@ -265,6 +279,62 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIsNone(summary_by_matrix["corr_raw"]["strongest_value"])
         if lenses:
             self.assertEqual(pairwise[0][0], 1)
+
+    def test_score_status_distinguishes_zero_from_unscorable(self):
+        payload = {
+            "articles": [
+                {
+                    "id": "score-zero",
+                    "title": "Scored zero",
+                    "published": "2026-03-02T00:00:00Z",
+                    "ai_tags": ["A"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Scored zero", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"value": 0.0, "max_value": 20.0, "percent": 0.0},
+                },
+                {
+                    "id": "placeholder-zero",
+                    "title": "Placeholder zero",
+                    "published": "2026-03-02T01:00:00Z",
+                    "ai_tags": ["B"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Placeholder zero", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"value": None, "max_value": 0.0, "percent": 0.0},
+                },
+                {
+                    "id": "missing-score",
+                    "title": "Missing score",
+                    "published": "2026-03-02T02:00:00Z",
+                    "ai_tags": ["C"],
+                    "topic_tags": [],
+                    "source": {"name": "Source C"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Missing score", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": None,
+                },
+            ]
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        self.assertEqual(stats["total_articles"], 3)
+        self.assertEqual(stats["scored_articles"], 1)
+        self.assertEqual(stats["zero_score_articles"], 1)
+        self.assertEqual(stats["positive_score_articles"], 0)
+        self.assertEqual(stats["unscorable_articles"], 2)
+        self.assertEqual(stats["placeholder_zero_unscorable_articles"], 1)
+        self.assertAlmostEqual(stats["score_coverage_ratio"], 1 / 3, places=6)
+        self.assertEqual(stats["score_status"]["zero"], 1)
+        self.assertEqual(stats["score_status"]["unscorable"], 2)
+        self.assertEqual(stats["score_status"]["placeholder_zero_unscorable"], 1)
+        self.assertEqual(stats["data_quality"]["summary"]["scored"], 1)
 
     def test_source_lens_effects_are_derived_when_source_signal_exists(self):
         payload = {
