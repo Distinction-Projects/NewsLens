@@ -53,6 +53,11 @@ class NewsPageRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
 
+    def test_news_lens_pca_page_route(self):
+        response = self.client.get("/news/lens-pca")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
     def test_news_source_differentiation_page_route(self):
         response = self.client.get("/news/source-differentiation")
         self.assertEqual(response.status_code, 200)

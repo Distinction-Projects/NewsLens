@@ -184,6 +184,8 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("source_lens_effects", stats_payload["data"]["derived"])
         self.assertIn("lens_views", stats_payload["data"]["derived"])
         self.assertIn("lens_inventory", stats_payload["data"]["derived"])
+        self.assertIn("lens_pca", stats_payload["data"]["derived"])
+        self.assertIn("lens_mds", stats_payload["data"]["derived"])
         lens_correlations = stats_payload["data"]["derived"]["lens_correlations"]
         self.assertIn("lenses", lens_correlations)
         self.assertIn("correlation", lens_correlations)
@@ -204,6 +206,22 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("status", source_lens_effects)
         self.assertIn("permutations", source_lens_effects)
         self.assertIn("rows", source_lens_effects)
+        lens_pca = stats_payload["data"]["derived"]["lens_pca"]
+        self.assertIn("status", lens_pca)
+        self.assertIn("reason", lens_pca)
+        self.assertIn("components", lens_pca)
+        self.assertIn("explained_variance", lens_pca)
+        self.assertIn("variance_drivers", lens_pca)
+        self.assertIn("article_points", lens_pca)
+        self.assertIn("source_centroids", lens_pca)
+        lens_mds = stats_payload["data"]["derived"]["lens_mds"]
+        self.assertIn("status", lens_mds)
+        self.assertIn("reason", lens_mds)
+        self.assertIn("dimensions", lens_mds)
+        self.assertIn("dimension_strength", lens_mds)
+        self.assertIn("stress", lens_mds)
+        self.assertIn("article_points", lens_mds)
+        self.assertIn("source_centroids", lens_mds)
         lens_views = stats_payload["data"]["derived"]["lens_views"]
         self.assertIn("coverage_mode", lens_views)
         self.assertIn("lens_names", lens_views)

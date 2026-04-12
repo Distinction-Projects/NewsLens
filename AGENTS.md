@@ -32,6 +32,8 @@
     - `derived.lens_views`
     - `derived.lens_inventory`
     - `derived.lens_correlations` (including pair rankings/summary)
+    - `derived.lens_pca` (components, explained variance, loadings, variance drivers, article points)
+    - `derived.lens_mds` (distance-preserving embedding, stress, dimension strength, article/source points)
     - `derived.source_tag_views`
     - `derived.data_quality`
     - `derived.score_status` / `derived.{zero_score_articles,unscorable_articles,...}` for scoring diagnostics

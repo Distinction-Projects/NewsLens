@@ -5,6 +5,8 @@
 - For lens analytics pages, consume backend-derived `data.derived.lens_views` from `/api/news/stats` before adding any page-local article aggregation.
 - For lens correlation pages, consume backend-derived `data.derived.lens_correlations.pair_rankings` and `summary_by_matrix` before deriving pair rankings client-side.
 - For lens inventory/metadata UI, consume backend-derived `data.derived.lens_inventory` from `/api/news/stats` before reading raw `data.analysis.lens_summary`.
+- For PCA/variance pages, consume backend-derived `data.derived.lens_pca` from `/api/news/stats` for explained variance, loadings, drivers, and article/source points.
+- For MDS/projection pages, consume backend-derived `data.derived.lens_mds` from `/api/news/stats` for stress, dimension strength, and article/source points.
 - For source-tag pages, consume backend-derived `data.derived.source_tag_views` for source/tag ordering and summary metrics before rebuilding counters in page code.
 - For data-quality pages, consume backend-derived `data.derived.data_quality` before introducing page-local completeness scans.
 - For scoring diagnostics, consume backend-derived `data.derived.score_status` and score count fields (`zero_score_articles`, `unscorable_articles`, etc.) instead of inferring from UI-side heuristics.

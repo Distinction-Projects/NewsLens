@@ -21,6 +21,14 @@
 - Keep reusable lens-correlation views under `derive_stats(...)->derived.lens_correlations`:
   - `lenses`, matrix payloads, `pairwise_counts`
   - additive pair ranking helpers (`pair_rankings`, `summary_by_matrix`) for UI pages
+- Keep reusable PCA views under `derive_stats(...)->derived.lens_pca`:
+  - `components`, `explained_variance`, `loadings`
+  - `variance_drivers`, `article_points`, `source_centroids`
+  - stable status/reason keys for insufficient coverage states
+- Keep reusable MDS views under `derive_stats(...)->derived.lens_mds`:
+  - `dimensions`, `dimension_strength`, `stress`
+  - `article_points`, `source_centroids`
+  - stable status/reason keys for insufficient coverage states
 - Keep reusable lens inventory metadata under `derive_stats(...)->derived.lens_inventory`:
   - `coverage_mode`
   - `items_total`

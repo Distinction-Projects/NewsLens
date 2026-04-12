@@ -14,6 +14,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+try:
+    import numpy as np
+except Exception:  # pragma: no cover - optional dependency guard
+    np = None
+
 
 DEFAULT_RSS_DAILY_JSON_URL = (
     "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/processed/rss_openai_precomputed.json"
@@ -414,6 +419,8 @@ _TAG_COUNT_HEATMAP_LABELS = ("0", "1", "2", "3", "4+")
 _SCORE_HEATMAP_LABELS = tuple(bin_def["label"] for bin_def in _SCORE_DISTRIBUTION_BINS)
 _SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=200, minimum=0)
 _SOURCE_EFFECT_RANDOM_SEED = 17
+_PCA_MAX_COMPONENTS = _coerce_int(os.getenv("RSS_PCA_MAX_COMPONENTS"), default=6, minimum=1)
+_MDS_MAX_DIMENSIONS = _coerce_int(os.getenv("RSS_MDS_MAX_DIMENSIONS"), default=3, minimum=1)
 
 
 def _score_distribution_bin_index(score_percent: float) -> int:
@@ -1184,6 +1191,551 @@ def _lens_correlations_from_records(
     }
 
 
+def _lens_pca_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    article_meta_rows: list[dict[str, Any]] | None = None,
+    preferred_lenses: list[str] | None = None,
+    max_components: int = _PCA_MAX_COMPONENTS,
+) -> dict[str, Any]:
+    if np is None:
+        return {
+            "status": "unavailable",
+            "reason": "numpy is unavailable; PCA cannot be computed.",
+            "n_articles": 0,
+            "n_lenses": 0,
+            "source_counts": {},
+            "lenses": [],
+            "components": [],
+            "explained_variance": [],
+            "loadings": {"lenses": [], "components": [], "matrix": []},
+            "component_summary": [],
+            "variance_drivers": [],
+            "article_points": [],
+            "source_centroids": [],
+            "basis": "zscore_lens_percentages",
+            "coverage_mode": "none",
+        }
+
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        return {
+            "status": "unavailable",
+            "reason": "No article-level lens rows available for PCA.",
+            "n_articles": 0,
+            "n_lenses": 0,
+            "source_counts": {},
+            "lenses": [],
+            "components": [],
+            "explained_variance": [],
+            "loadings": {"lenses": [], "components": [], "matrix": []},
+            "component_summary": [],
+            "variance_drivers": [],
+            "article_points": [],
+            "source_centroids": [],
+            "basis": "zscore_lens_percentages",
+            "coverage_mode": "none",
+        }
+
+    discovered = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered]
+        ordered.extend(sorted(discovered - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered)
+
+    def _complete_matrix(required_lenses: list[str]) -> tuple[list[list[float]], list[str], list[int]]:
+        matrix: list[list[float]] = []
+        labels: list[str] = []
+        kept_indexes: list[int] = []
+        for row_index, (row, label) in enumerate(zip(article_lens_percentages, source_labels)):
+            values: list[float] = []
+            for lens_name in required_lenses:
+                value = row.get(lens_name)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    values = []
+                    break
+                values.append(float(value))
+            if values:
+                matrix.append(values)
+                labels.append(str(label))
+                kept_indexes.append(row_index)
+        return matrix, labels, kept_indexes
+
+    matrix, matrix_labels, kept_indexes = _complete_matrix(lens_names)
+    if not matrix and article_lens_percentages:
+        shared = set(article_lens_percentages[0].keys())
+        for row in article_lens_percentages[1:]:
+            shared &= set(row.keys())
+        shared = {
+            lens_name
+            for lens_name in shared
+            if isinstance(lens_name, str)
+            and all(isinstance(row.get(lens_name), (int, float)) and math.isfinite(float(row[lens_name])) for row in article_lens_percentages)
+        }
+        if preferred_lenses:
+            reduced_lenses = [lens_name for lens_name in preferred_lenses if lens_name in shared]
+            reduced_lenses.extend(sorted(shared - set(reduced_lenses)))
+        else:
+            reduced_lenses = sorted(shared)
+        if reduced_lenses:
+            lens_names = reduced_lenses
+            matrix, matrix_labels, kept_indexes = _complete_matrix(lens_names)
+
+    source_counts: Counter[str] = Counter(matrix_labels)
+    if not matrix:
+        return {
+            "status": "unavailable",
+            "reason": "Need complete source-lens rows to run PCA.",
+            "n_articles": 0,
+            "n_lenses": len(lens_names),
+            "source_counts": dict(source_counts),
+            "lenses": lens_names,
+            "components": [],
+            "explained_variance": [],
+            "loadings": {"lenses": lens_names, "components": [], "matrix": []},
+            "component_summary": [],
+            "variance_drivers": [],
+            "article_points": [],
+            "source_centroids": [],
+            "basis": "zscore_lens_percentages",
+            "coverage_mode": "none",
+        }
+
+    n_articles = len(matrix)
+    n_lenses = len(lens_names)
+    if n_articles < 2 or n_lenses < 1:
+        return {
+            "status": "unavailable",
+            "reason": "Need at least 2 complete rows and 1 lens to run PCA.",
+            "n_articles": n_articles,
+            "n_lenses": n_lenses,
+            "source_counts": dict(source_counts),
+            "lenses": lens_names,
+            "components": [],
+            "explained_variance": [],
+            "loadings": {"lenses": lens_names, "components": [], "matrix": []},
+            "component_summary": [],
+            "variance_drivers": [],
+            "article_points": [],
+            "source_centroids": [],
+            "basis": "zscore_lens_percentages",
+            "coverage_mode": "none",
+        }
+
+    matrix_np = np.asarray(matrix, dtype=float)
+    means_np = matrix_np.mean(axis=0)
+    centered_np = matrix_np - means_np
+    stds_np = centered_np.std(axis=0, ddof=0)
+    safe_stds_np = np.where(stds_np > 1e-12, stds_np, 1.0)
+    standardized_np = centered_np / safe_stds_np
+
+    covariance_np = (standardized_np.T @ standardized_np) / max(n_articles - 1, 1)
+    eigenvalues_np, eigenvectors_np = np.linalg.eigh(covariance_np)
+    sort_order = np.argsort(eigenvalues_np)[::-1]
+    eigenvalues_np = np.maximum(eigenvalues_np[sort_order], 0.0)
+    eigenvectors_np = eigenvectors_np[:, sort_order]
+
+    non_zero_components = int(sum(float(value) > 1e-12 for value in eigenvalues_np.tolist()))
+    if non_zero_components == 0:
+        return {
+            "status": "unavailable",
+            "reason": "PCA eigenvalues are all zero for the complete-row matrix.",
+            "n_articles": n_articles,
+            "n_lenses": n_lenses,
+            "source_counts": dict(source_counts),
+            "lenses": lens_names,
+            "components": [],
+            "explained_variance": [],
+            "loadings": {"lenses": lens_names, "components": [], "matrix": []},
+            "component_summary": [],
+            "variance_drivers": [],
+            "article_points": [],
+            "source_centroids": [],
+            "basis": "zscore_lens_percentages",
+            "coverage_mode": "complete_rows",
+        }
+
+    component_count = min(max_components, n_lenses, max(non_zero_components, 1))
+    loadings_np = eigenvectors_np[:, :component_count].T
+    scores_np = standardized_np @ eigenvectors_np[:, :component_count]
+
+    for component_index in range(component_count):
+        component_values = loadings_np[component_index]
+        dominant_index = int(np.argmax(np.abs(component_values)))
+        if component_values[dominant_index] < 0:
+            loadings_np[component_index] = -component_values
+            scores_np[:, component_index] = -scores_np[:, component_index]
+
+    total_variance = float(np.sum(eigenvalues_np))
+    explained_ratio = [
+        (float(value) / total_variance) if total_variance > 0 else 0.0
+        for value in eigenvalues_np[:component_count].tolist()
+    ]
+
+    explained_rows: list[dict[str, Any]] = []
+    running_ratio = 0.0
+    component_labels: list[str] = []
+    for component_index in range(component_count):
+        label = f"PC{component_index + 1}"
+        component_labels.append(label)
+        ratio = explained_ratio[component_index]
+        running_ratio += ratio
+        explained_rows.append(
+            {
+                "component": label,
+                "eigenvalue": float(eigenvalues_np[component_index]),
+                "explained_variance_ratio": ratio,
+                "cumulative_variance_ratio": running_ratio,
+            }
+        )
+
+    component_summary: list[dict[str, Any]] = []
+    for component_index, component_label in enumerate(component_labels):
+        pairs = [
+            (lens_name, float(loadings_np[component_index][lens_index]))
+            for lens_index, lens_name in enumerate(lens_names)
+        ]
+        sorted_abs = sorted(pairs, key=lambda item: abs(item[1]), reverse=True)
+        top_positive = [
+            {"lens": lens_name, "loading": loading}
+            for lens_name, loading in sorted((pair for pair in pairs if pair[1] > 0), key=lambda item: item[1], reverse=True)[:3]
+        ]
+        top_negative = [
+            {"lens": lens_name, "loading": loading}
+            for lens_name, loading in sorted((pair for pair in pairs if pair[1] < 0), key=lambda item: item[1])[:3]
+        ]
+        component_summary.append(
+            {
+                "component": component_label,
+                "explained_variance_ratio": explained_ratio[component_index],
+                "strongest_loadings": [
+                    {"lens": lens_name, "loading": loading, "abs_loading": abs(loading)}
+                    for lens_name, loading in sorted_abs[:5]
+                ],
+                "top_positive": top_positive,
+                "top_negative": top_negative,
+            }
+        )
+
+    variance_drivers: list[dict[str, Any]] = []
+    for lens_index, lens_name in enumerate(lens_names):
+        weighted_contribution = 0.0
+        for component_index in range(component_count):
+            weighted_contribution += (float(loadings_np[component_index][lens_index]) ** 2) * explained_ratio[component_index]
+        variance_drivers.append(
+            {
+                "lens": lens_name,
+                "weighted_contribution": weighted_contribution,
+                "pc1_loading": float(loadings_np[0][lens_index]) if component_count >= 1 else None,
+                "pc2_loading": float(loadings_np[1][lens_index]) if component_count >= 2 else None,
+            }
+        )
+    variance_drivers.sort(key=lambda row: float(row.get("weighted_contribution") or 0.0), reverse=True)
+
+    article_meta = article_meta_rows if isinstance(article_meta_rows, list) else []
+    article_points: list[dict[str, Any]] = []
+    for row_offset, row_index in enumerate(kept_indexes):
+        meta_row = article_meta[row_index] if row_index < len(article_meta) and isinstance(article_meta[row_index], dict) else {}
+        title = _clean_text(meta_row.get("title")) or "Untitled"
+        if len(title) > 160:
+            title = f"{title[:157]}..."
+        point_source = _clean_text(meta_row.get("source")) or _clean_text(matrix_labels[row_offset]) or "Unknown"
+        article_points.append(
+            {
+                "id": _clean_text(meta_row.get("id")),
+                "title": title,
+                "source": point_source,
+                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
+                "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
+                "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
+                "pc1": float(scores_np[row_offset][0]) if component_count >= 1 else None,
+                "pc2": float(scores_np[row_offset][1]) if component_count >= 2 else None,
+                "pc3": float(scores_np[row_offset][2]) if component_count >= 3 else None,
+            }
+        )
+
+    by_source_points: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in article_points:
+        source_name = _clean_text(row.get("source")) or "Unknown"
+        by_source_points[source_name].append(row)
+
+    source_centroids: list[dict[str, Any]] = []
+    for source_name, rows in by_source_points.items():
+        pc1_values = [float(row["pc1"]) for row in rows if isinstance(row.get("pc1"), (int, float))]
+        pc2_values = [float(row["pc2"]) for row in rows if isinstance(row.get("pc2"), (int, float))]
+        pc3_values = [float(row["pc3"]) for row in rows if isinstance(row.get("pc3"), (int, float))]
+        source_centroids.append(
+            {
+                "source": source_name,
+                "count": len(rows),
+                "pc1": (sum(pc1_values) / len(pc1_values)) if pc1_values else None,
+                "pc2": (sum(pc2_values) / len(pc2_values)) if pc2_values else None,
+                "pc3": (sum(pc3_values) / len(pc3_values)) if pc3_values else None,
+            }
+        )
+    source_centroids.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "n_articles": n_articles,
+        "n_lenses": n_lenses,
+        "source_counts": dict(source_counts),
+        "lenses": lens_names,
+        "components": component_labels,
+        "explained_variance": explained_rows,
+        "loadings": {
+            "lenses": lens_names,
+            "components": component_labels,
+            "matrix": loadings_np.tolist(),
+        },
+        "component_summary": component_summary,
+        "variance_drivers": variance_drivers,
+        "article_points": article_points,
+        "source_centroids": source_centroids,
+        "basis": "zscore_lens_percentages",
+        "coverage_mode": "complete_rows",
+    }
+
+
+def _lens_mds_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    article_meta_rows: list[dict[str, Any]] | None = None,
+    preferred_lenses: list[str] | None = None,
+    max_dimensions: int = _MDS_MAX_DIMENSIONS,
+) -> dict[str, Any]:
+    empty_payload = {
+        "status": "unavailable",
+        "reason": "",
+        "n_articles": 0,
+        "n_lenses": 0,
+        "source_counts": {},
+        "lenses": [],
+        "dimensions": [],
+        "dimension_strength": [],
+        "stress": None,
+        "article_points": [],
+        "source_centroids": [],
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "none",
+    }
+    if np is None:
+        payload = dict(empty_payload)
+        payload["reason"] = "numpy is unavailable; MDS cannot be computed."
+        return payload
+
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        payload = dict(empty_payload)
+        payload["reason"] = "No article-level lens rows available for MDS."
+        return payload
+
+    discovered = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered]
+        ordered.extend(sorted(discovered - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered)
+
+    def _complete_matrix(required_lenses: list[str]) -> tuple[list[list[float]], list[str], list[int]]:
+        matrix: list[list[float]] = []
+        labels: list[str] = []
+        kept_indexes: list[int] = []
+        for row_index, (row, label) in enumerate(zip(article_lens_percentages, source_labels)):
+            values: list[float] = []
+            for lens_name in required_lenses:
+                value = row.get(lens_name)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    values = []
+                    break
+                values.append(float(value))
+            if values:
+                matrix.append(values)
+                labels.append(str(label))
+                kept_indexes.append(row_index)
+        return matrix, labels, kept_indexes
+
+    matrix, matrix_labels, kept_indexes = _complete_matrix(lens_names)
+    if not matrix and article_lens_percentages:
+        shared = set(article_lens_percentages[0].keys())
+        for row in article_lens_percentages[1:]:
+            shared &= set(row.keys())
+        shared = {
+            lens_name
+            for lens_name in shared
+            if isinstance(lens_name, str)
+            and all(isinstance(row.get(lens_name), (int, float)) and math.isfinite(float(row[lens_name])) for row in article_lens_percentages)
+        }
+        if preferred_lenses:
+            reduced_lenses = [lens_name for lens_name in preferred_lenses if lens_name in shared]
+            reduced_lenses.extend(sorted(shared - set(reduced_lenses)))
+        else:
+            reduced_lenses = sorted(shared)
+        if reduced_lenses:
+            lens_names = reduced_lenses
+            matrix, matrix_labels, kept_indexes = _complete_matrix(lens_names)
+
+    source_counts: Counter[str] = Counter(matrix_labels)
+    if not matrix:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need complete source-lens rows to run MDS."
+        payload["n_lenses"] = len(lens_names)
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    n_articles = len(matrix)
+    n_lenses = len(lens_names)
+    if n_articles < 2 or n_lenses < 1:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need at least 2 complete rows and 1 lens to run MDS."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    matrix_np = np.asarray(matrix, dtype=float)
+    means_np = matrix_np.mean(axis=0)
+    centered_np = matrix_np - means_np
+    stds_np = centered_np.std(axis=0, ddof=0)
+    safe_stds_np = np.where(stds_np > 1e-12, stds_np, 1.0)
+    standardized_np = centered_np / safe_stds_np
+
+    diff_np = standardized_np[:, np.newaxis, :] - standardized_np[np.newaxis, :, :]
+    distance_sq_np = np.maximum(np.sum(diff_np * diff_np, axis=2), 0.0)
+    n = n_articles
+    centering_np = np.eye(n) - np.ones((n, n)) / float(n)
+    gram_np = -0.5 * centering_np @ distance_sq_np @ centering_np
+
+    eigenvalues_np, eigenvectors_np = np.linalg.eigh(gram_np)
+    sort_order = np.argsort(eigenvalues_np)[::-1]
+    eigenvalues_np = eigenvalues_np[sort_order]
+    eigenvectors_np = eigenvectors_np[:, sort_order]
+
+    positive_mask = eigenvalues_np > 1e-12
+    positive_values_np = eigenvalues_np[positive_mask]
+    positive_vectors_np = eigenvectors_np[:, positive_mask]
+    if len(positive_values_np) == 0:
+        payload = dict(empty_payload)
+        payload["reason"] = "MDS eigenvalues are all non-positive for the complete-row matrix."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        payload["coverage_mode"] = "complete_rows"
+        return payload
+
+    dimension_count = min(max_dimensions, len(positive_values_np))
+    selected_values_np = positive_values_np[:dimension_count]
+    selected_vectors_np = positive_vectors_np[:, :dimension_count]
+    coords_np = selected_vectors_np * np.sqrt(selected_values_np)
+
+    for dim_index in range(dimension_count):
+        dim_values = coords_np[:, dim_index]
+        dominant_index = int(np.argmax(np.abs(dim_values)))
+        if dim_values[dominant_index] < 0:
+            coords_np[:, dim_index] = -dim_values
+
+    total_strength = float(np.sum(positive_values_np))
+    dimension_labels: list[str] = []
+    dimension_strength: list[dict[str, Any]] = []
+    running_ratio = 0.0
+    for dim_index in range(dimension_count):
+        label = f"MDS{dim_index + 1}"
+        dimension_labels.append(label)
+        eigenvalue = float(selected_values_np[dim_index])
+        ratio = (eigenvalue / total_strength) if total_strength > 0 else 0.0
+        running_ratio += ratio
+        dimension_strength.append(
+            {
+                "dimension": label,
+                "eigenvalue": eigenvalue,
+                "strength_ratio": ratio,
+                "cumulative_strength_ratio": running_ratio,
+            }
+        )
+
+    original_dist_np = np.sqrt(distance_sq_np)
+    approx_diff_np = coords_np[:, np.newaxis, :] - coords_np[np.newaxis, :, :]
+    approx_dist_np = np.sqrt(np.maximum(np.sum(approx_diff_np * approx_diff_np, axis=2), 0.0))
+    tri_upper = np.triu_indices(n, k=1)
+    numerator = float(np.sum(np.square(original_dist_np[tri_upper] - approx_dist_np[tri_upper])))
+    denominator = float(np.sum(np.square(original_dist_np[tri_upper])))
+    stress = math.sqrt(numerator / denominator) if denominator > 1e-12 else 0.0
+
+    article_meta = article_meta_rows if isinstance(article_meta_rows, list) else []
+    article_points: list[dict[str, Any]] = []
+    for row_offset, row_index in enumerate(kept_indexes):
+        meta_row = article_meta[row_index] if row_index < len(article_meta) and isinstance(article_meta[row_index], dict) else {}
+        title = _clean_text(meta_row.get("title")) or "Untitled"
+        if len(title) > 160:
+            title = f"{title[:157]}..."
+        point_source = _clean_text(meta_row.get("source")) or _clean_text(matrix_labels[row_offset]) or "Unknown"
+        article_points.append(
+            {
+                "id": _clean_text(meta_row.get("id")),
+                "title": title,
+                "source": point_source,
+                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
+                "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
+                "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
+                "mds1": float(coords_np[row_offset][0]) if dimension_count >= 1 else None,
+                "mds2": float(coords_np[row_offset][1]) if dimension_count >= 2 else None,
+                "mds3": float(coords_np[row_offset][2]) if dimension_count >= 3 else None,
+            }
+        )
+
+    by_source_points: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in article_points:
+        source_name = _clean_text(row.get("source")) or "Unknown"
+        by_source_points[source_name].append(row)
+
+    source_centroids: list[dict[str, Any]] = []
+    for source_name, rows in by_source_points.items():
+        mds1_values = [float(row["mds1"]) for row in rows if isinstance(row.get("mds1"), (int, float))]
+        mds2_values = [float(row["mds2"]) for row in rows if isinstance(row.get("mds2"), (int, float))]
+        mds3_values = [float(row["mds3"]) for row in rows if isinstance(row.get("mds3"), (int, float))]
+        source_centroids.append(
+            {
+                "source": source_name,
+                "count": len(rows),
+                "mds1": (sum(mds1_values) / len(mds1_values)) if mds1_values else None,
+                "mds2": (sum(mds2_values) / len(mds2_values)) if mds2_values else None,
+                "mds3": (sum(mds3_values) / len(mds3_values)) if mds3_values else None,
+            }
+        )
+    source_centroids.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "n_articles": n_articles,
+        "n_lenses": n_lenses,
+        "source_counts": dict(source_counts),
+        "lenses": lens_names,
+        "dimensions": dimension_labels,
+        "dimension_strength": dimension_strength,
+        "stress": stress,
+        "article_points": article_points,
+        "source_centroids": source_centroids,
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "complete_rows",
+    }
+
+
 def _oneway_source_effect(
     values: list[float],
     source_labels: list[str],
@@ -1683,6 +2235,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     source_score_values: dict[str, list[float]] = {}
     article_lens_percentages: list[dict[str, float]] = []
     source_labels_for_lens_rows: list[str] = []
+    article_meta_for_lens_rows: list[dict[str, Any]] = []
 
     score_percents: list[float] = []
     scored_articles = 0
@@ -1746,8 +2299,19 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
 
         lens_percentages = _record_lens_percentages(record, lens_maxima)
         if lens_percentages:
+            strongest_lens, strongest_percent = max(lens_percentages.items(), key=lambda item: item[1])
             article_lens_percentages.append(lens_percentages)
             source_labels_for_lens_rows.append(source_label)
+            article_meta_for_lens_rows.append(
+                {
+                    "id": _clean_text(record.get("id")),
+                    "title": _clean_text(record.get("title")),
+                    "source": source_label,
+                    "overall_percent": _overall_percent_for_record(record),
+                    "strongest_lens": strongest_lens,
+                    "strongest_percent": strongest_percent,
+                }
+            )
 
     source_counts = [{"source": source, "count": count} for source, count in source_counter.most_common()]
     tag_counts = [{"tag": tag, "count": count} for tag, count in tag_counter.most_common()]
@@ -1842,6 +2406,18 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         article_lens_percentages,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    lens_pca = _lens_pca_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        article_meta_rows=article_meta_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    lens_mds = _lens_mds_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        article_meta_rows=article_meta_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -1897,6 +2473,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "source_counts": source_counts,
         "tag_counts": tag_counts,
         "lens_correlations": lens_correlations,
+        "lens_pca": lens_pca,
+        "lens_mds": lens_mds,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "lens_views": lens_views,

@@ -206,6 +206,26 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("status", stats["source_lens_effects"])
         self.assertIn("permutations", stats["source_lens_effects"])
         self.assertIn("rows", stats["source_lens_effects"])
+        self.assertIn("lens_pca", stats)
+        lens_pca = stats["lens_pca"]
+        self.assertIn("status", lens_pca)
+        self.assertIn("reason", lens_pca)
+        self.assertIn("components", lens_pca)
+        self.assertIn("explained_variance", lens_pca)
+        self.assertIn("variance_drivers", lens_pca)
+        self.assertIn("article_points", lens_pca)
+        self.assertIn("source_centroids", lens_pca)
+        self.assertEqual(lens_pca["status"], "unavailable")
+        self.assertIn("lens_mds", stats)
+        lens_mds = stats["lens_mds"]
+        self.assertIn("status", lens_mds)
+        self.assertIn("reason", lens_mds)
+        self.assertIn("dimensions", lens_mds)
+        self.assertIn("dimension_strength", lens_mds)
+        self.assertIn("stress", lens_mds)
+        self.assertIn("article_points", lens_mds)
+        self.assertIn("source_centroids", lens_mds)
+        self.assertEqual(lens_mds["status"], "unavailable")
         self.assertIn("lens_views", stats)
         lens_views = stats["lens_views"]
         self.assertIn("coverage_mode", lens_views)
@@ -279,6 +299,141 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIsNone(summary_by_matrix["corr_raw"]["strongest_value"])
         if lenses:
             self.assertEqual(pairwise[0][0], 1)
+
+    def test_lens_pca_is_derived_when_complete_rows_exist(self):
+        payload = {
+            "analysis": {
+                "lens_summary": {
+                    "lenses": [
+                        {"name": "Evidence", "max_total": 10.0},
+                        {"name": "Impact", "max_total": 10.0},
+                        {"name": "Novelty", "max_total": 10.0},
+                    ]
+                }
+            },
+            "articles": [
+                {
+                    "id": "pca-1",
+                    "title": "PCA one",
+                    "published": "2026-03-02T00:00:00Z",
+                    "ai_tags": ["OpenAI"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "PCA one", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {
+                        "value": 8.0,
+                        "max_value": 10.0,
+                        "percent": 80.0,
+                        "lens_scores": {
+                            "Evidence": {"percent": 90.0},
+                            "Impact": {"percent": 70.0},
+                            "Novelty": {"percent": 60.0},
+                        },
+                    },
+                },
+                {
+                    "id": "pca-2",
+                    "title": "PCA two",
+                    "published": "2026-03-02T01:00:00Z",
+                    "ai_tags": ["OpenAI"],
+                    "topic_tags": [],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "PCA two", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {
+                        "value": 6.0,
+                        "max_value": 10.0,
+                        "percent": 60.0,
+                        "lens_scores": {
+                            "Evidence": {"percent": 80.0},
+                            "Impact": {"percent": 50.0},
+                            "Novelty": {"percent": 45.0},
+                        },
+                    },
+                },
+                {
+                    "id": "pca-3",
+                    "title": "PCA three",
+                    "published": "2026-03-02T02:00:00Z",
+                    "ai_tags": ["OpenAI"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "PCA three", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {
+                        "value": 9.0,
+                        "max_value": 10.0,
+                        "percent": 90.0,
+                        "lens_scores": {
+                            "Evidence": {"percent": 40.0},
+                            "Impact": {"percent": 85.0},
+                            "Novelty": {"percent": 75.0},
+                        },
+                    },
+                },
+                {
+                    "id": "pca-4",
+                    "title": "PCA four",
+                    "published": "2026-03-02T03:00:00Z",
+                    "ai_tags": ["OpenAI"],
+                    "topic_tags": [],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "PCA four", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {
+                        "value": 7.0,
+                        "max_value": 10.0,
+                        "percent": 70.0,
+                        "lens_scores": {
+                            "Evidence": {"percent": 35.0},
+                            "Impact": {"percent": 78.0},
+                            "Novelty": {"percent": 65.0},
+                        },
+                    },
+                },
+            ],
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        pca = stats["lens_pca"]
+        if pca["status"] == "unavailable":
+            self.assertIn("numpy", str(pca.get("reason", "")).lower())
+            self.assertEqual(pca["n_articles"], 0)
+            self.assertEqual(pca["components"], [])
+            return
+
+        self.assertEqual(pca["status"], "ok")
+        self.assertEqual(pca["n_articles"], 4)
+        self.assertEqual(pca["n_lenses"], 3)
+        self.assertEqual(len(pca["components"]), 3)
+        self.assertEqual(len(pca["explained_variance"]), 3)
+        self.assertEqual(pca["coverage_mode"], "complete_rows")
+        self.assertGreater(len(pca["variance_drivers"]), 0)
+        self.assertEqual(len(pca["article_points"]), 4)
+        self.assertEqual(len(pca["source_centroids"]), 2)
+
+        loadings = pca["loadings"]
+        self.assertEqual(loadings["lenses"], pca["lenses"])
+        self.assertEqual(loadings["components"], pca["components"])
+        self.assertEqual(len(loadings["matrix"]), 3)
+        self.assertEqual(len(loadings["matrix"][0]), 3)
+
+        mds = stats["lens_mds"]
+        self.assertEqual(mds["status"], "ok")
+        self.assertEqual(mds["n_articles"], 4)
+        self.assertEqual(mds["n_lenses"], 3)
+        self.assertEqual(mds["dimensions"], ["MDS1", "MDS2", "MDS3"])
+        self.assertEqual(mds["coverage_mode"], "complete_rows")
+        self.assertEqual(len(mds["dimension_strength"]), 3)
+        self.assertEqual(len(mds["article_points"]), 4)
+        self.assertEqual(len(mds["source_centroids"]), 2)
+        self.assertIsInstance(mds["stress"], float)
 
     def test_score_status_distinguishes_zero_from_unscorable(self):
         payload = {
