@@ -46,30 +46,27 @@ class NewsLensMatrixTests(unittest.TestCase):
         self.assertEqual(coverage, "no lens data")
         self.assertEqual(rows, [])
 
-    def test_sorted_rows_use_selected_lens_then_overall_score(self):
+    def test_sorted_rows_prioritize_selected_lens_separation_gap(self):
         rows = [
             {
                 "title": "Alpha",
-                "overall_percent": 50.0,
-                "strongest_percent": 80.0,
-                "lens_scores": {"Evidence": 70.0},
+                "strongest_percent": 70.0,
+                "lens_scores": {"Evidence": 70.0, "Impact": 69.0},
             },
             {
                 "title": "Beta",
-                "overall_percent": 65.0,
-                "strongest_percent": 70.0,
-                "lens_scores": {"Evidence": 70.0},
+                "strongest_percent": 68.0,
+                "lens_scores": {"Evidence": 68.0, "Impact": 20.0},
             },
             {
                 "title": "Gamma",
-                "overall_percent": 40.0,
-                "strongest_percent": 60.0,
-                "lens_scores": {"Evidence": 55.0},
+                "strongest_percent": 70.0,
+                "lens_scores": {"Evidence": 70.0, "Impact": 40.0},
             },
         ]
 
         ordered = _sorted_rows(rows, "Evidence")
-        self.assertEqual([row["title"] for row in ordered], ["Beta", "Alpha", "Gamma"])
+        self.assertEqual([row["title"] for row in ordered], ["Beta", "Gamma", "Alpha"])
 
 
 if __name__ == "__main__":

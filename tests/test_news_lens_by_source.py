@@ -25,9 +25,10 @@ class NewsLensBySourceTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source"], "Source A")
         self.assertEqual(rows[0]["article_count"], 2)
-        self.assertAlmostEqual(rows[0]["overall_avg"], 70.0)
         self.assertAlmostEqual(rows[0]["lens_means"]["Evidence"], 80.0)
         self.assertAlmostEqual(rows[0]["lens_means"]["Impact"], 55.0)
+        self.assertEqual(rows[0]["strongest_lens"], "Evidence")
+        self.assertAlmostEqual(rows[0]["strongest_gap"], 25.0)
 
     def test_source_lens_rows_skip_articles_without_full_lens_scores(self):
         rows, lens_names, coverage = _source_lens_rows(

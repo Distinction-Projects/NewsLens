@@ -1,7 +1,7 @@
 import unittest
 
 import src.app  # noqa: F401
-from src.pages.news_lens_explorer import _article_rows
+from src.pages.news_lens_explorer import _article_rows, _selected_gap_details
 
 
 class NewsLensExplorerTests(unittest.TestCase):
@@ -36,9 +36,12 @@ class NewsLensExplorerTests(unittest.TestCase):
 
         self.assertEqual(coverage, "all scored articles")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["overall_percent"], 62.5)
         self.assertEqual(rows[0]["strongest_lens"], "Evidence")
         self.assertEqual(rows[0]["lens_scores"]["Impact"], 50.0)
+        gap, runner_up_lens, runner_up_percent = _selected_gap_details(rows[0], "Evidence")
+        self.assertEqual(gap, 25.0)
+        self.assertEqual(runner_up_lens, "Impact")
+        self.assertEqual(runner_up_percent, 50.0)
 
     def test_article_rows_skip_articles_without_full_lens_scores(self):
         rows, coverage = _article_rows(

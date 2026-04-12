@@ -179,11 +179,6 @@ def _article_scatter_figure(pca_payload: dict, color_by: str, max_points: int) -
                     [
                         row.get("source"),
                         row.get("strongest_lens"),
-                        (
-                            f"{float(row.get('overall_percent')):.1f}"
-                            if isinstance(row.get("overall_percent"), (int, float))
-                            else "n/a"
-                        ),
                     ]
                     for row in rows
                 ],
@@ -192,8 +187,7 @@ def _article_scatter_figure(pca_payload: dict, color_by: str, max_points: int) -
                     "PC1: %{x:.3f}<br>"
                     "PC2: %{y:.3f}<br>"
                     "Source: %{customdata[0]}<br>"
-                    "Strongest Lens: %{customdata[1]}<br>"
-                    "Overall %: %{customdata[2]}<extra></extra>"
+                    "Strongest Lens: %{customdata[1]}<extra></extra>"
                 ),
                 marker={"size": 8, "opacity": 0.75},
             )
@@ -269,11 +263,6 @@ def _mds_scatter_figure(mds_payload: dict, color_by: str, max_points: int) -> go
                     [
                         row.get("source"),
                         row.get("strongest_lens"),
-                        (
-                            f"{float(row.get('overall_percent')):.1f}"
-                            if isinstance(row.get("overall_percent"), (int, float))
-                            else "n/a"
-                        ),
                     ]
                     for row in rows
                 ],
@@ -282,8 +271,7 @@ def _mds_scatter_figure(mds_payload: dict, color_by: str, max_points: int) -> go
                     "MDS1: %{x:.3f}<br>"
                     "MDS2: %{y:.3f}<br>"
                     "Source: %{customdata[0]}<br>"
-                    "Strongest Lens: %{customdata[1]}<br>"
-                    "Overall %: %{customdata[2]}<extra></extra>"
+                    "Strongest Lens: %{customdata[1]}<extra></extra>"
                 ),
                 marker={"size": 8, "opacity": 0.75},
             )
