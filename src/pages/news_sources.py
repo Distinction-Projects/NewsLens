@@ -98,8 +98,6 @@ def _source_table(rows: list[dict], top_n: int):
         hover=True,
         responsive=True,
         size="sm",
-        className="text-dark",
-        style={"color": "#000"},
     )
 
 
