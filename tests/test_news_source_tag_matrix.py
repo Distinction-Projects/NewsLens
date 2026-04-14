@@ -34,6 +34,22 @@ class NewsSourceTagMatrixTests(unittest.TestCase):
 
         self.assertEqual(rows, [("AI", 7), ("Policy", 5)])
 
+    def test_source_tag_counts_can_use_backend_lookup(self):
+        rows = _source_tag_counts(
+            source_tag_matrix=[],
+            source_name="Source A",
+            top_n=2,
+            source_tag_lookup={
+                "Source A": [
+                    {"tag": "Policy", "count": 5},
+                    {"tag": "AI", "count": 7},
+                    {"tag": "Economy", "count": 2},
+                ]
+            },
+        )
+
+        self.assertEqual(rows, [("AI", 7), ("Policy", 5)])
+
 
 if __name__ == "__main__":
     unittest.main()

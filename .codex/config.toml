@@ -1,0 +1,26 @@
+# Project-level Codex configuration for NewsLens.
+# Goal: prefer hierarchical repo docs and keep enough context budget
+# for root + subtree guidance in a larger codebase.
+
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+# Keep project docs selective but roomy enough for layered AGENTS.md files.
+project_doc_max_bytes = 131072
+project_doc_fallback_filenames = ["AGENTS.md", "README.md"]
+project_doc_paths = [
+  "README.md",
+  "AGENTS.md",
+  "src/AGENTS.md",
+  "src/pages/AGENTS.md",
+  "src/services/AGENTS.md",
+  "tests/AGENTS.md",
+  ".github/workflows/AGENTS.md",
+]
+
+# Delay compaction in longer sessions while staying bounded.
+model_auto_compact_token_limit = 240000
+
+[profiles.keep_full_context]
+project_doc_max_bytes = 262144
+model_auto_compact_token_limit = 320000

@@ -1,10 +1,16 @@
 import unittest
 
-from src.pages.news_lens_correlations import _matrix_payload, _pair_rows, _select_lens_correlations
+import src.app  # noqa: F401
+from src.pages.news_lens_correlations import (
+    _matrix_payload,
+    _pair_rows,
+    _pair_rows_from_backend,
+    _select_lens_correlations,
+)
 
 
 class NewsLensCorrelationsTests(unittest.TestCase):
-    def test_select_lens_correlations_prefers_upstream(self):
+    def test_select_lens_correlations_prefers_derived(self):
         selected, source = _select_lens_correlations(
             {
                 "analysis": {"lens_correlations": {"lenses": ["Evidence"], "correlation": {"raw": [[1.0]]}}},
@@ -12,19 +18,19 @@ class NewsLensCorrelationsTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(source, "upstream")
-        self.assertEqual(selected.get("lenses"), ["Evidence"])
+        self.assertEqual(source, "derived")
+        self.assertEqual(selected.get("lenses"), ["Impact"])
 
-    def test_select_lens_correlations_falls_back_to_derived(self):
+    def test_select_lens_correlations_falls_back_to_upstream(self):
         selected, source = _select_lens_correlations(
             {
-                "analysis": {"lens_correlations": {"lenses": []}},
-                "derived": {"lens_correlations": {"lenses": ["Impact"], "correlation": {"raw": [[1.0]]}}},
+                "analysis": {"lens_correlations": {"lenses": ["Evidence"], "correlation": {"raw": [[1.0]]}}},
+                "derived": {},
             }
         )
 
-        self.assertEqual(source, "derived")
-        self.assertEqual(selected.get("lenses"), ["Impact"])
+        self.assertEqual(source, "upstream")
+        self.assertEqual(selected.get("lenses"), ["Evidence"])
 
     def test_matrix_payload_normalizes_shape(self):
         lenses, matrix, label = _matrix_payload(
@@ -80,6 +86,28 @@ class NewsLensCorrelationsTests(unittest.TestCase):
         self.assertEqual(rows[0], ("Impact", "Novelty", 12.0))
         self.assertEqual(rows[1], ("Evidence", "Novelty", 8.0))
         self.assertEqual(rows[2], ("Evidence", "Impact", 3.0))
+
+    def test_pair_rows_from_backend_uses_precomputed_rankings(self):
+        rows = _pair_rows_from_backend(
+            {
+                "pair_rankings": {
+                    "corr_raw": [
+                        {"lens_a": "Evidence", "lens_b": "Novelty", "value": -0.85},
+                        {"lens_a": "Impact", "lens_b": "Novelty", "value": 0.55},
+                    ]
+                }
+            },
+            "corr_raw",
+        )
+
+        self.assertEqual(
+            rows,
+            [("Evidence", "Novelty", -0.85), ("Impact", "Novelty", 0.55)],
+        )
+
+    def test_pair_rows_from_backend_returns_none_when_unavailable(self):
+        rows = _pair_rows_from_backend({"lenses": ["Evidence"]}, "corr_raw")
+        self.assertIsNone(rows)
 
 
 if __name__ == "__main__":

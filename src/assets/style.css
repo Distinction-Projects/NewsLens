@@ -50,11 +50,44 @@
 
 /* Table styling */
 .table {
-    color: #e9ecef;
+    --bs-table-bg: rgba(4, 47, 51, 0.72);
+    --bs-table-color: #f3fbff;
+    --bs-table-striped-bg: rgba(6, 64, 70, 0.85);
+    --bs-table-striped-color: #f3fbff;
+    --bs-table-hover-bg: rgba(10, 92, 102, 0.95);
+    --bs-table-hover-color: #ffffff;
+    --bs-table-border-color: rgba(140, 216, 228, 0.28);
+    color: var(--bs-table-color) !important;
+    background-color: var(--bs-table-bg) !important;
+}
+
+.table > :not(caption) > * > * {
+    color: var(--bs-table-color) !important;
+    border-bottom-color: var(--bs-table-border-color) !important;
+}
+
+.table thead th {
+    background-color: rgba(3, 40, 44, 0.98) !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+.table tbody tr:nth-of-type(odd) > * {
+    background-color: var(--bs-table-striped-bg) !important;
+}
+
+.table tbody tr:nth-of-type(even) > * {
+    background-color: var(--bs-table-bg) !important;
 }
 
 .table-hover tbody tr:hover {
-    background-color: rgba(99, 110, 250, 0.1);
+    background-color: var(--bs-table-hover-bg) !important;
+    color: var(--bs-table-hover-color) !important;
+}
+
+.table-hover tbody tr:hover > * {
+    background-color: var(--bs-table-hover-bg) !important;
+    color: var(--bs-table-hover-color) !important;
 }
 
 /* Input styling */

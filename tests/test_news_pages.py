@@ -53,6 +53,11 @@ class NewsPageRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
 
+    def test_news_lens_pca_page_route(self):
+        response = self.client.get("/news/lens-pca")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.content_type)
+
     def test_news_source_differentiation_page_route(self):
         response = self.client.get("/news/source-differentiation")
         self.assertEqual(response.status_code, 200)
@@ -82,10 +87,6 @@ class NewsPageRouteTests(unittest.TestCase):
         response = self.client.get("/news/lens-explorer")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
-
-    def test_news_high_score_lenses_legacy_route(self):
-        response = self.client.get("/news/high-score-lenses")
-        self.assertIn(response.status_code, {200, 301, 302, 308})
 
     def test_news_lens_by_source_page_route(self):
         response = self.client.get("/news/lens-by-source")

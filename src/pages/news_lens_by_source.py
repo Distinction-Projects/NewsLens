@@ -63,53 +63,18 @@ def _full_score_lens_scores(article: dict) -> dict[str, float]:
     return normalized_scores
 
 
-def _legacy_high_score_lens_scores(article: dict, lens_maxima: dict[str, float]) -> dict[str, float]:
-    high_score = article.get("high_score")
-    if not isinstance(high_score, dict):
-        return {}
-    lens_scores = high_score.get("lens_scores")
-    if not isinstance(lens_scores, dict):
-        return {}
-
-    normalized_scores: dict[str, float] = {}
-    for lens_name, value in lens_scores.items():
-        if not isinstance(lens_name, str) or not isinstance(value, (int, float)):
-            continue
-        max_total = lens_maxima.get(lens_name)
-        if isinstance(max_total, (int, float)) and max_total > 0:
-            normalized_scores[lens_name] = (float(value) / float(max_total)) * 100.0
-        else:
-            normalized_scores[lens_name] = float(value)
-    return normalized_scores
-
-
 def _source_lens_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tuple[list[dict], list[str], str]:
     by_source_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    by_source_overall: dict[str, list[float]] = defaultdict(list)
     by_source_count: dict[str, int] = defaultdict(int)
-    data_modes: set[str] = set()
 
     for article in articles:
         lens_scores = _full_score_lens_scores(article)
-        row_mode = "full"
-        if not lens_scores:
-            lens_scores = _legacy_high_score_lens_scores(article, lens_maxima)
-            row_mode = "legacy"
         if not lens_scores:
             continue
 
-        data_modes.add(row_mode)
         source = article.get("source") if isinstance(article.get("source"), dict) else {}
         source_name = str(source.get("name") or "Unknown")
         by_source_count[source_name] += 1
-
-        score = article.get("score") if isinstance(article.get("score"), dict) else {}
-        high_score = article.get("high_score") if isinstance(article.get("high_score"), dict) else {}
-        overall_percent = score.get("percent")
-        if not isinstance(overall_percent, (int, float)):
-            overall_percent = high_score.get("overall_percent")
-        if isinstance(overall_percent, (int, float)):
-            by_source_overall[source_name].append(float(overall_percent))
 
         for lens_name, percent in lens_scores.items():
             if isinstance(percent, (int, float)):
@@ -132,24 +97,30 @@ def _source_lens_rows(articles: list[dict], lens_maxima: dict[str, float]) -> tu
             values = by_source_lens[source_name].get(lens_name, [])
             if values:
                 lens_means[lens_name] = sum(values) / len(values)
-        overall_values = by_source_overall.get(source_name, [])
+        ordered_lenses = sorted(
+            ((lens_name, value) for lens_name, value in lens_means.items() if isinstance(value, (int, float))),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        strongest_lens = ordered_lenses[0][0] if ordered_lenses else "n/a"
+        strongest_value = ordered_lenses[0][1] if ordered_lenses else None
+        runner_up_value = ordered_lenses[1][1] if len(ordered_lenses) > 1 else None
+        strongest_gap = (
+            float(strongest_value) - float(runner_up_value)
+            if isinstance(strongest_value, (int, float)) and isinstance(runner_up_value, (int, float))
+            else (float(strongest_value) if isinstance(strongest_value, (int, float)) else None)
+        )
         rows.append(
             {
                 "source": source_name,
                 "article_count": count,
-                "overall_avg": (sum(overall_values) / len(overall_values)) if overall_values else None,
                 "lens_means": lens_means,
+                "strongest_lens": strongest_lens,
+                "strongest_gap": strongest_gap,
             }
         )
 
-    if not rows:
-        coverage = "no lens data"
-    elif data_modes == {"full"}:
-        coverage = "all scored articles"
-    elif data_modes == {"legacy"}:
-        coverage = "high-score fallback"
-    else:
-        coverage = "mixed"
+    coverage = "all scored articles" if rows else "no lens data"
     return rows, lens_names, coverage
 
 
@@ -157,10 +128,27 @@ def _lens_options(lens_names: list[str]) -> list[dict]:
     return [{"label": lens_name, "value": lens_name} for lens_name in lens_names]
 
 
+def _selected_gap_details(row: dict, selected_lens: str) -> tuple[float | None, str, float | None]:
+    selected_value = row["lens_means"].get(selected_lens)
+    if not isinstance(selected_value, (int, float)):
+        return None, "n/a", None
+
+    runner_up_lens = "n/a"
+    runner_up_value = None
+    for lens_name, lens_value in row["lens_means"].items():
+        if lens_name == selected_lens or not isinstance(lens_value, (int, float)):
+            continue
+        if not isinstance(runner_up_value, (int, float)) or lens_value > runner_up_value:
+            runner_up_lens = lens_name
+            runner_up_value = float(lens_value)
+    baseline = float(runner_up_value) if isinstance(runner_up_value, (int, float)) else 0.0
+    return float(selected_value) - baseline, runner_up_lens, runner_up_value
+
+
 def _source_heatmap_figure(source_rows: list[dict], lens_names: list[str], top_n: int) -> go.Figure:
     rows = source_rows[:top_n]
     if not rows or not lens_names:
-        return _empty_figure("Average Lens Percent by Source")
+        return _empty_figure("Source-Lens Signal Matrix")
 
     z_values = []
     for row in rows:
@@ -175,14 +163,17 @@ def _source_heatmap_figure(source_rows: list[dict], lens_names: list[str], top_n
                 zmin=0,
                 zmax=100,
                 colorscale="YlOrRd",
-                colorbar={"title": "Avg Lens %"},
+                colorbar={"title": "Mean Lens Signal %"},
                 customdata=[
                     [
                         [
                             row.get("article_count"),
-                            f"{float(row.get('overall_avg')):.1f}"
-                            if isinstance(row.get("overall_avg"), (int, float))
-                            else "n/a",
+                            row.get("strongest_lens", "n/a"),
+                            (
+                                f"{float(row.get('strongest_gap')):.1f}"
+                                if isinstance(row.get("strongest_gap"), (int, float))
+                                else "n/a"
+                            ),
                         ]
                         for _ in lens_names
                     ]
@@ -191,15 +182,16 @@ def _source_heatmap_figure(source_rows: list[dict], lens_names: list[str], top_n
                 hovertemplate=(
                     "Source: %{y}<br>"
                     "Lens: %{x}<br>"
-                    "Avg Lens %: %{z:.1f}<br>"
+                    "Mean Lens Signal %: %{z:.1f}<br>"
                     "Articles: %{customdata[0]}<br>"
-                    "Avg Overall %: %{customdata[1]}<extra></extra>"
+                    "Strongest Lens: %{customdata[1]}<br>"
+                    "Strongest Gap vs Runner-up: %{customdata[2]}<extra></extra>"
                 ),
             )
         ]
     )
     figure.update_layout(
-        title="Average Lens Percent by Source",
+        title="Source-Lens Signal Matrix",
         template="plotly_white",
         xaxis_title="Lens",
         yaxis_title="Source",
@@ -209,58 +201,128 @@ def _source_heatmap_figure(source_rows: list[dict], lens_names: list[str], top_n
 
 def _selected_lens_figure(source_rows: list[dict], selected_lens: str | None, top_n: int) -> go.Figure:
     if not source_rows or not selected_lens:
-        return _empty_figure("Top Sources by Selected Lens")
+        return _empty_figure("Selected-Lens Source Separation")
 
-    rows = [
-        row
-        for row in sorted(
-            source_rows,
-            key=lambda source_row: (
-                float(source_row["lens_means"].get(selected_lens) or 0.0),
-                int(source_row.get("article_count") or 0),
-            ),
-            reverse=True,
+    rows = []
+    for row in source_rows:
+        selected_percent = row["lens_means"].get(selected_lens)
+        gap_percent, runner_up_lens, runner_up_percent = _selected_gap_details(row, selected_lens)
+        if not isinstance(selected_percent, (int, float)) or not isinstance(gap_percent, (int, float)):
+            continue
+        rows.append(
+            {
+                **row,
+                "selected_percent": float(selected_percent),
+                "gap_percent": float(gap_percent),
+                "runner_up_lens": runner_up_lens,
+                "runner_up_percent": runner_up_percent,
+            }
         )
-        if isinstance(row["lens_means"].get(selected_lens), (int, float))
-    ][:top_n]
+    rows = sorted(
+        rows,
+        key=lambda source_row: (
+            float(source_row.get("gap_percent") or 0.0),
+            int(source_row.get("article_count") or 0),
+        ),
+        reverse=True,
+    )[:top_n]
     if not rows:
-        return _empty_figure("Top Sources by Selected Lens")
+        return _empty_figure("Selected-Lens Source Separation")
 
     figure = go.Figure(
         data=[
             go.Bar(
                 x=[row["source"] for row in rows],
-                y=[row["lens_means"][selected_lens] for row in rows],
+                y=[row["gap_percent"] for row in rows],
                 marker_color="#0d6efd",
+                customdata=[
+                    [
+                        row["selected_percent"],
+                        row["runner_up_lens"],
+                        (
+                            f"{float(row['runner_up_percent']):.1f}"
+                            if isinstance(row.get("runner_up_percent"), (int, float))
+                            else "n/a"
+                        ),
+                        row.get("article_count"),
+                    ]
+                    for row in rows
+                ],
+                hovertemplate=(
+                    "Source: %{x}<br>"
+                    "Gap vs Runner-up: %{y:.1f}<br>"
+                    f"{selected_lens} Mean %: "
+                    "%{customdata[0]:.1f}<br>"
+                    "Runner-up Lens: %{customdata[1]}<br>"
+                    "Runner-up Mean %: %{customdata[2]}<br>"
+                    "Articles: %{customdata[3]}<extra></extra>"
+                ),
             )
         ]
     )
     figure.update_layout(
-        title=f"Top Sources by {selected_lens}",
+        title=f"{selected_lens} Source Separation vs Runner-up Lens",
         template="plotly_white",
-        yaxis={"range": [0, 100]},
-        yaxis_title="Avg Lens %",
+        yaxis_title="Gap % (Selected Lens - Runner-up Lens)",
     )
     return figure
 
 
-def _summary_cards(source_rows: list[dict], selected_lens: str | None) -> list:
+def _summary_cards(source_rows: list[dict], selected_lens: str | None, lens_summary: dict | None = None) -> list:
+    summary = lens_summary if isinstance(lens_summary, dict) else {}
+    source_count = int(summary.get("source_count")) if isinstance(summary.get("source_count"), (int, float)) else len(source_rows)
+    covered_articles = (
+        int(summary.get("covered_articles"))
+        if isinstance(summary.get("covered_articles"), (int, float))
+        else sum(int(row.get("article_count") or 0) for row in source_rows)
+    )
+
     selected_values = [
-        float(row["lens_means"][selected_lens])
+        float(row["lens_means"].get(selected_lens))
         for row in source_rows
         if selected_lens and isinstance(row["lens_means"].get(selected_lens), (int, float))
     ]
-    overall_values = [
-        float(row["overall_avg"]) for row in source_rows if isinstance(row.get("overall_avg"), (int, float))
-    ]
+    selected_count = len(selected_values)
+    selected_mean = (sum(selected_values) / selected_count) if selected_values else None
+    selected_spread = (
+        ((sum((value - selected_mean) ** 2 for value in selected_values) / selected_count) ** 0.5)
+        if selected_values and isinstance(selected_mean, (int, float))
+        else None
+    )
+    gap_values = []
+    selected_dominant = 0
+    for row in source_rows:
+        if not selected_lens:
+            continue
+        gap, _, _ = _selected_gap_details(row, selected_lens)
+        if isinstance(gap, (int, float)):
+            gap_values.append(float(gap))
+            if row.get("strongest_lens") == selected_lens:
+                selected_dominant += 1
+    average_gap = (sum(gap_values) / len(gap_values)) if gap_values else None
+    dominance_share = ((selected_dominant / len(gap_values)) * 100.0) if gap_values else None
+
     cards = [
-        ("Sources with Lens Data", len(source_rows)),
-        ("Avg Source Overall %", f"{(sum(overall_values) / len(overall_values)):.1f}" if overall_values else "n/a"),
+        ("Sources with Lens Data", source_count),
+        ("Covered Articles", covered_articles),
         (
-            f"Avg {selected_lens} %" if selected_lens else "Avg Selected Lens %",
-            f"{(sum(selected_values) / len(selected_values)):.1f}" if selected_values else "n/a",
+            f"{selected_lens} Coverage" if selected_lens else "Selected Lens Coverage",
+            f"{selected_count}/{source_count}" if source_count > 0 else "0/0",
         ),
-        ("Covered Articles", sum(int(row.get("article_count") or 0) for row in source_rows)),
+        (
+            f"{selected_lens} Dominance Share" if selected_lens else "Selected Lens Dominance Share",
+            f"{float(dominance_share):.1f}%"
+            if isinstance(dominance_share, (int, float))
+            else "n/a",
+        ),
+        (
+            f"{selected_lens} Spread (std dev)" if selected_lens else "Selected Lens Spread (std dev)",
+            f"{float(selected_spread):.1f}" if isinstance(selected_spread, (int, float)) else "n/a",
+        ),
+        (
+            f"{selected_lens} Avg Gap vs Runner-up" if selected_lens else "Selected Lens Avg Gap vs Runner-up",
+            f"{float(average_gap):.1f}" if isinstance(average_gap, (int, float)) else "n/a",
+        ),
     ]
     return [
         dbc.Col(
@@ -269,7 +331,7 @@ def _summary_cards(source_rows: list[dict], selected_lens: str | None) -> list:
                 className="shadow-sm",
             ),
             md=6,
-            lg=3,
+            lg=2,
             className="mb-3",
         )
         for label, value in cards
@@ -279,31 +341,48 @@ def _summary_cards(source_rows: list[dict], selected_lens: str | None) -> list:
 def _source_table(source_rows: list[dict], selected_lens: str | None, top_n: int):
     if not source_rows or not selected_lens:
         return dbc.Alert("No source lens breakdown is available.", color="warning", className="mb-0")
-    rows = [
-        row
-        for row in sorted(
-            source_rows,
-            key=lambda source_row: (
-                float(source_row["lens_means"].get(selected_lens) or 0.0),
-                int(source_row.get("article_count") or 0),
-            ),
-            reverse=True,
+    rows = []
+    for row in source_rows:
+        selected_percent = row["lens_means"].get(selected_lens)
+        gap_percent, runner_up_lens, runner_up_percent = _selected_gap_details(row, selected_lens)
+        if not isinstance(selected_percent, (int, float)) or not isinstance(gap_percent, (int, float)):
+            continue
+        rows.append(
+            {
+                **row,
+                "selected_percent": float(selected_percent),
+                "gap_percent": float(gap_percent),
+                "runner_up_lens": runner_up_lens,
+                "runner_up_percent": runner_up_percent,
+            }
         )
-        if isinstance(row["lens_means"].get(selected_lens), (int, float))
-    ][:top_n]
+    rows = sorted(
+        rows,
+        key=lambda source_row: (
+            float(source_row.get("gap_percent") or 0.0),
+            int(source_row.get("article_count") or 0),
+        ),
+        reverse=True,
+    )[:top_n]
     if not rows:
         return dbc.Alert("No rows are available for the selected lens.", color="warning", className="mb-0")
 
     table_rows = []
     for row in rows:
-        overall_avg = row.get("overall_avg")
         table_rows.append(
             html.Tr(
                 [
                     html.Td(row["source"]),
                     html.Td(row.get("article_count", 0)),
-                    html.Td(f"{float(overall_avg):.1f}" if isinstance(overall_avg, (int, float)) else "n/a"),
-                    html.Td(f"{float(row['lens_means'][selected_lens]):.1f}"),
+                    html.Td(f"{float(row['selected_percent']):.1f}"),
+                    html.Td(row["runner_up_lens"]),
+                    html.Td(
+                        f"{float(row['runner_up_percent']):.1f}"
+                        if isinstance(row.get("runner_up_percent"), (int, float))
+                        else "n/a"
+                    ),
+                    html.Td(f"{float(row['gap_percent']):.1f}"),
+                    html.Td(row.get("strongest_lens", "n/a")),
                 ]
             )
         )
@@ -315,8 +394,11 @@ def _source_table(source_rows: list[dict], selected_lens: str | None, top_n: int
                     [
                         html.Th("Source"),
                         html.Th("Articles"),
-                        html.Th("Avg Overall %"),
-                        html.Th(f"{selected_lens} Avg %"),
+                        html.Th(f"{selected_lens} Mean %"),
+                        html.Th("Runner-up Lens"),
+                        html.Th("Runner-up Mean %"),
+                        html.Th("Gap vs Runner-up"),
+                        html.Th("Strongest Lens"),
                     ]
                 )
             ),
@@ -338,8 +420,8 @@ layout = dbc.Container(
             [
                 dbc.Col(
                     html.P(
-                        "This page maps average lens performance to sources, using full per-article lens scores when "
-                        "available and falling back to legacy high-score lens fields.",
+                        "This page maps lens disambiguation by source: it highlights where a selected lens clearly "
+                        "separates from each source's runner-up lens, alongside a source-lens signal matrix.",
                         className="text-muted",
                     ),
                     width=12,
@@ -444,36 +526,38 @@ def load_news_lens_by_source(_load_tick, _refresh_clicks, selected_lens, data_mo
         "refresh": "true" if force_refresh else None,
     }
     stats_code, stats_payload = api_get("/api/news/stats", common_params)
-    digest_code, digest_payload = api_get("/api/news/digest", common_params)
     n_value = int(top_n) if isinstance(top_n, (int, float)) and top_n else 12
     n_value = max(3, min(50, n_value))
 
-    if stats_code != 200 or digest_code != 200:
+    if stats_code != 200:
         stats_error = stats_payload.get("error", "Unknown error")
-        digest_error = digest_payload.get("error", "Unknown error")
         empty = _empty_figure("No data")
         alert = dbc.Alert(
-            f"Lens-by-source data error: stats={stats_code} ({stats_error}); digest={digest_code} ({digest_error})",
+            f"Lens-by-source data error: stats={stats_code} ({stats_error})",
             color="danger",
         )
         return alert, [], None, _summary_cards([], None), empty, empty, dbc.Alert("No table data.", color="warning")
 
-    meta = digest_payload.get("meta", {})
-    analysis = stats_payload.get("data", {}).get("analysis", {})
-    lens_summary = analysis.get("lens_summary", {}) if isinstance(analysis, dict) else {}
-    lens_maxima = _lens_max_map(lens_summary)
-    digest_articles = digest_payload.get("data", []) if isinstance(digest_payload.get("data"), list) else []
-    source_rows, lens_names, coverage_mode = _source_lens_rows(digest_articles, lens_maxima)
+    meta = stats_payload.get("meta", {})
+    derived = stats_payload.get("data", {}).get("derived", {})
+    lens_views = derived.get("lens_views", {}) if isinstance(derived, dict) else {}
+    source_rows = lens_views.get("source_rows", []) if isinstance(lens_views.get("source_rows"), list) else []
+    coverage_mode = str(lens_views.get("coverage_mode") or "no lens data")
+    lens_summary = lens_views.get("summary", {}) if isinstance(lens_views.get("summary"), dict) else {}
+    source_count = int(lens_summary.get("source_count")) if isinstance(lens_summary.get("source_count"), (int, float)) else len(source_rows)
+    lens_names = [str(name) for name in lens_views.get("lens_names", []) if isinstance(name, str) and name.strip()]
+    if not lens_names:
+        lens_names = sorted({lens_name for row in source_rows for lens_name in row.get("lens_means", {}).keys()})
     effective_lens = selected_lens if selected_lens in lens_names else (lens_names[0] if lens_names else None)
 
     return (
         build_status_alert(
             meta,
-            leading_parts=[f"Sources with lens data: {len(source_rows)}", f"Coverage: {coverage_mode}"],
+            leading_parts=[f"Sources with lens data: {source_count}", f"Coverage: {coverage_mode}"],
         ),
         _lens_options(lens_names),
         effective_lens,
-        _summary_cards(source_rows, effective_lens),
+        _summary_cards(source_rows, effective_lens, lens_summary),
         _selected_lens_figure(source_rows, effective_lens, n_value),
         _source_heatmap_figure(source_rows, lens_names, n_value),
         _source_table(source_rows, effective_lens, n_value),

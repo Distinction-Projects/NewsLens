@@ -86,15 +86,15 @@ def _select_source_differentiation(data: dict) -> tuple[dict, str]:
     if not isinstance(data, dict):
         return {}, "missing"
 
-    analysis = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
-    upstream = analysis.get("source_differentiation")
-    if isinstance(upstream, dict) and upstream:
-        return upstream, "upstream"
-
     derived = data.get("derived") if isinstance(data.get("derived"), dict) else {}
     derived_source_diff = derived.get("source_differentiation")
     if isinstance(derived_source_diff, dict) and derived_source_diff:
         return derived_source_diff, "derived"
+
+    analysis = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
+    upstream = analysis.get("source_differentiation")
+    if isinstance(upstream, dict) and upstream:
+        return upstream, "upstream"
 
     return {}, "missing"
 
@@ -144,7 +144,7 @@ layout = dbc.Container(
                 dbc.Col(
                     html.P(
                         "These statistics estimate how separable sources are in lens-score space. "
-                        "Upstream source differentiation is used when available, with fallback to derived calculations.",
+                        "Backend-derived source differentiation is preferred, with upstream analysis as fallback.",
                         className="text-muted",
                     ),
                     width=12,

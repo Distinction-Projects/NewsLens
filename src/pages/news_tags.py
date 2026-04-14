@@ -75,6 +75,11 @@ def _source_tag_heatmap(source_tag_matrix: list[dict], top_sources: int = 10, to
     tag_labels = [name for name, _ in tag_counter.most_common(top_tags)]
     if not source_labels or not tag_labels:
         return _empty_figure("Source x Tag Intensity")
+    return _source_tag_heatmap_with_labels(source_tag_matrix, source_labels, tag_labels)
+
+def _source_tag_heatmap_with_labels(source_tag_matrix: list[dict], source_labels: list[str], tag_labels: list[str]) -> go.Figure:
+    if not source_tag_matrix or not source_labels or not tag_labels:
+        return _empty_figure("Source x Tag Intensity")
 
     value_map = {(str(row.get("source", "Unknown")), str(row.get("tag", ""))): int(row.get("count", 0) or 0) for row in source_tag_matrix}
     z_values = []
@@ -188,12 +193,48 @@ def load_news_tags(_load_tick, _refresh_clicks, data_mode, snapshot_date, top_n)
     tag_counts = derived.get("tag_counts", [])
     tag_distribution = chart_aggregates.get("tag_count_distribution", [])
     source_tag_matrix = chart_aggregates.get("source_tag_matrix", [])
+    source_totals = chart_aggregates.get("source_tag_totals", [])
+    tag_totals = chart_aggregates.get("tag_totals", [])
+    source_tag_views = derived.get("source_tag_views", {}) if isinstance(derived.get("source_tag_views"), dict) else {}
+    source_tag_summary = source_tag_views.get("summary", {}) if isinstance(source_tag_views.get("summary"), dict) else {}
+    source_labels = [
+        str(label).strip()
+        for label in source_tag_views.get("source_labels", [])
+        if isinstance(label, str) and label.strip()
+    ][:10]
+    tag_labels = [
+        str(label).strip()
+        for label in source_tag_views.get("tag_labels", [])
+        if isinstance(label, str) and label.strip()
+    ][:12]
+    if not source_labels:
+        source_labels = [
+            str(row.get("source")).strip()
+            for row in source_totals
+            if isinstance(row, dict) and str(row.get("source")).strip() and isinstance(row.get("count"), (int, float))
+        ][:10]
+    if not tag_labels:
+        tag_labels = [
+            str(row.get("tag")).strip()
+            for row in tag_totals
+            if isinstance(row, dict) and str(row.get("tag")).strip() and isinstance(row.get("count"), (int, float))
+        ][:12]
+    source_tag_figure = (
+        _source_tag_heatmap_with_labels(source_tag_matrix, source_labels, tag_labels)
+        if source_labels and tag_labels
+        else _source_tag_heatmap(source_tag_matrix)
+    )
+    unique_tags = (
+        int(source_tag_summary.get("tag_count"))
+        if isinstance(source_tag_summary.get("tag_count"), (int, float))
+        else len(tag_counts)
+    )
 
     return (
-        build_status_alert(meta, leading_parts=[f"Unique tags: {len(tag_counts)}"]),
+        build_status_alert(meta, leading_parts=[f"Unique tags: {unique_tags}"]),
         _top_tags_figure(tag_counts, n_value),
         _tag_count_distribution_figure(tag_distribution),
-        _source_tag_heatmap(source_tag_matrix),
+        source_tag_figure,
     )
 
 

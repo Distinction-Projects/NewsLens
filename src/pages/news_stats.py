@@ -108,14 +108,24 @@ def _daily_figure(daily_counts: list[dict]) -> go.Figure:
 
 
 def _summary_cards(derived: dict) -> list:
-    high_score_ratio = derived.get("high_score_ratio")
-    ratio_text = f"{high_score_ratio * 100:.1f}%" if isinstance(high_score_ratio, (int, float)) else "n/a"
+    score_coverage_ratio = derived.get("score_coverage_ratio")
+    ratio_text = f"{score_coverage_ratio * 100:.1f}%" if isinstance(score_coverage_ratio, (int, float)) else "n/a"
+    total_articles = derived.get("total_articles", 0)
+    scored_articles = derived.get("scored_articles", 0)
+    zero_score_articles = derived.get("zero_score_articles", 0)
+    unscorable_articles = derived.get("unscorable_articles")
+    if not isinstance(unscorable_articles, int):
+        if isinstance(total_articles, int) and isinstance(scored_articles, int):
+            unscorable_articles = max(total_articles - scored_articles, 0)
+        else:
+            unscorable_articles = "n/a"
 
     cards = [
-        ("Total Articles", derived.get("total_articles", 0), "primary"),
-        ("Scored Articles", derived.get("scored_articles", 0), "info"),
-        ("High Scoring", derived.get("high_scoring_articles", 0), "success"),
-        ("High Score Ratio", ratio_text, "warning"),
+        ("Total Articles", total_articles, "primary"),
+        ("Scored Articles", scored_articles, "info"),
+        ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a", "secondary"),
+        ("Unscorable", unscorable_articles, "warning"),
+        ("Score Coverage", ratio_text, "success"),
     ]
     return [
         dbc.Col(
@@ -125,7 +135,7 @@ def _summary_cards(derived: dict) -> list:
                 inverse=False,
                 className="shadow-sm",
             ),
-            md=3,
+            md=2,
             className="mb-3",
         )
         for label, value, color in cards

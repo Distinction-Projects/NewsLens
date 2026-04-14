@@ -15,86 +15,34 @@ dash.register_page(
 )
 
 
-def _is_populated(value) -> bool:
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, list):
-        return len(value) > 0
-    if isinstance(value, dict):
-        return len(value) > 0
-    return value is not None
-
-
-def _field_coverage_rows(records: list[dict]) -> list[dict]:
-    fields = [
-        ("Title", lambda row: row.get("title")),
-        ("Link", lambda row: row.get("link")),
-        ("Published At", lambda row: row.get("published_at")),
-        ("Source Name", lambda row: (row.get("source") or {}).get("name") if isinstance(row.get("source"), dict) else None),
-        ("AI Summary", lambda row: row.get("ai_summary")),
-        ("Summary", lambda row: row.get("summary")),
-        ("Tags", lambda row: row.get("tags")),
-        ("Score Percent", lambda row: (row.get("score") or {}).get("percent") if isinstance(row.get("score"), dict) else None),
-        (
-            "Lens Scores",
-            lambda row: (row.get("score") or {}).get("lens_scores") if isinstance(row.get("score"), dict) else None,
-        ),
-    ]
-
-    total = len(records)
-    rows: list[dict] = []
-    for label, getter in fields:
-        present = 0
-        for record in records:
-            if _is_populated(getter(record)):
-                present += 1
-        missing = max(total - present, 0)
-        coverage_percent = (present / total * 100.0) if total else 0.0
-        rows.append(
-            {
-                "field": label,
-                "present": present,
-                "missing": missing,
-                "coverage_percent": coverage_percent,
-            }
-        )
-    return rows
-
-
-def _quality_summary(records: list[dict]) -> dict:
-    total = len(records)
-    tag_counts = [len(record.get("tags", [])) for record in records if isinstance(record.get("tags"), list)]
-    average_tags = (sum(tag_counts) / len(tag_counts)) if tag_counts else 0.0
-    missing_ai_summary = sum(1 for record in records if not _is_populated(record.get("ai_summary")))
-    missing_published = sum(1 for record in records if not _is_populated(record.get("published_at")))
-    missing_source = sum(
-        1
-        for record in records
-        if not _is_populated((record.get("source") or {}).get("name") if isinstance(record.get("source"), dict) else None)
-    )
-    scored = sum(
-        1
-        for record in records
-        if isinstance(record.get("score"), dict) and isinstance(record["score"].get("percent"), (int, float))
-    )
-
+def _data_quality_from_stats(derived: dict) -> dict:
+    quality = derived.get("data_quality") if isinstance(derived, dict) else None
+    quality_obj = quality if isinstance(quality, dict) else {}
+    summary = quality_obj.get("summary") if isinstance(quality_obj.get("summary"), dict) else {}
+    field_coverage = quality_obj.get("field_coverage") if isinstance(quality_obj.get("field_coverage"), list) else []
     return {
-        "total": total,
-        "scored": scored,
-        "missing_ai_summary": missing_ai_summary,
-        "missing_published": missing_published,
-        "missing_source": missing_source,
-        "average_tags": average_tags,
+        "summary": summary,
+        "field_coverage": field_coverage,
     }
 
 
 def _summary_cards(meta: dict, stats_derived: dict, quality: dict):
+    score_coverage_ratio = stats_derived.get("score_coverage_ratio")
+    score_coverage_text = (
+        f"{score_coverage_ratio * 100:.1f}%"
+        if isinstance(score_coverage_ratio, (int, float))
+        else "n/a"
+    )
+    zero_score_articles = stats_derived.get("zero_score_articles", "n/a")
+    unscorable_articles = stats_derived.get("unscorable_articles", "n/a")
     cards = [
         ("Input Articles", meta.get("input_articles_count", "n/a")),
         ("Excluded Unscraped", meta.get("excluded_unscraped_articles", "n/a")),
         ("Included (Digest)", quality.get("total", "n/a")),
         ("Scored (Digest)", quality.get("scored", "n/a")),
-        ("High Scoring", stats_derived.get("high_scoring_articles", "n/a")),
+        ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a"),
+        ("Unscorable", unscorable_articles if isinstance(unscorable_articles, int) else "n/a"),
+        ("Score Coverage", score_coverage_text),
         ("Avg Tags / Article", f"{quality.get('average_tags', 0.0):.2f}"),
     ]
     return [
@@ -103,8 +51,8 @@ def _summary_cards(meta: dict, stats_derived: dict, quality: dict):
                 dbc.CardBody([html.P(label, className="text-muted mb-1"), html.H4(str(value), className="mb-0")]),
                 className="shadow-sm",
             ),
-            md=4,
-            lg=2,
+            md=3,
+            lg=3,
             className="mb-3",
         )
         for label, value in cards
@@ -173,7 +121,8 @@ layout = dbc.Container(
             [
                 dbc.Col(
                     html.P(
-                        "Notebook bootstrap parity page for quick data diagnostics and field completeness checks.",
+                        "Notebook bootstrap parity page for quick data diagnostics and field completeness checks. "
+                        "Metrics are backend-derived and served through /api/news/stats.",
                         className="text-muted",
                     ),
                     width=12,
@@ -201,13 +150,6 @@ layout = dbc.Container(
                     [
                         dbc.Label("Snapshot date (UTC)"),
                         dcc.Input(id="news-quality-snapshot-date", type="date", className="form-control", disabled=True),
-                    ],
-                    md=2,
-                ),
-                dbc.Col(
-                    [
-                        dbc.Label("Digest limit"),
-                        dcc.Input(id="news-quality-limit", type="number", min=25, max=500, step=25, value=500, className="form-control"),
                     ],
                     md=2,
                 ),
@@ -244,22 +186,11 @@ layout = dbc.Container(
     Input("news-quality-refresh", "n_clicks"),
     State("news-quality-mode", "value"),
     State("news-quality-snapshot-date", "value"),
-    State("news-quality-limit", "value"),
 )
-def load_news_data_quality(_load_tick, _refresh_clicks, data_mode, snapshot_date, limit_value):
+def load_news_data_quality(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     force_refresh = ctx.triggered_id == "news-quality-refresh"
-    limit = int(limit_value) if isinstance(limit_value, (int, float)) else 500
-    limit = max(25, min(limit, 500))
     snapshot = snapshot_param(data_mode, snapshot_date)
 
-    digest_status, digest_payload = api_get(
-        "/api/news/digest",
-        {
-            "snapshot_date": snapshot,
-            "limit": limit,
-            "refresh": "true" if force_refresh else None,
-        },
-    )
     stats_status, stats_payload = api_get(
         "/api/news/stats",
         {
@@ -267,32 +198,27 @@ def load_news_data_quality(_load_tick, _refresh_clicks, data_mode, snapshot_date
             "refresh": "true" if force_refresh else None,
         },
     )
-
-    if digest_status != 200:
-        error = digest_payload.get("error", "Unknown error")
-        alert = dbc.Alert(f"Digest error ({digest_status}): {error}", color="danger")
+    if stats_status != 200:
+        error = stats_payload.get("error", "Unknown error")
+        alert = dbc.Alert(f"Stats error ({stats_status}): {error}", color="danger")
         return alert, [], alert, alert
 
-    records = digest_payload.get("data", [])
-    records_list = records if isinstance(records, list) else []
-    meta = digest_payload.get("meta", {}) if isinstance(digest_payload.get("meta"), dict) else {}
-
     stats_data = stats_payload.get("data", {}) if isinstance(stats_payload, dict) else {}
+    meta = stats_payload.get("meta", {}) if isinstance(stats_payload.get("meta"), dict) else {}
     derived = stats_data.get("derived", {}) if isinstance(stats_data, dict) else {}
     derived_stats = derived if isinstance(derived, dict) else {}
-
-    coverage_rows = _field_coverage_rows(records_list)
-    quality = _quality_summary(records_list)
+    quality_payload = _data_quality_from_stats(derived_stats)
+    coverage_rows = quality_payload.get("field_coverage", [])
+    quality = quality_payload.get("summary", {})
 
     return (
         build_status_alert(
             meta,
             leading_parts=[
-                f"Digest HTTP: {digest_status}",
                 f"Stats HTTP: {stats_status}",
-                f"Digest limit: {limit}",
+                f"Included articles: {quality.get('total', derived_stats.get('total_articles', 0))}",
             ],
-            color="info" if stats_status == 200 else "warning",
+            color="info",
         ),
         _summary_cards(meta, derived_stats, quality),
         _coverage_table(coverage_rows),
