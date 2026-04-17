@@ -117,8 +117,8 @@ def _export_rows_for_artifact(bundle: dict[str, Any], artifact: str) -> list[dic
     if artifact == "source_tag_matrix":
         rows = chart_aggregates.get("source_tag_matrix")
         return rows if isinstance(rows, list) else []
-    if artifact == "source_score_summary":
-        rows = chart_aggregates.get("source_score_summary")
+    if artifact == "source_score_status":
+        rows = chart_aggregates.get("score_status_by_source")
         return rows if isinstance(rows, list) else []
     if artifact == "lens_pair_metrics":
         return _matrix_pair_rows(_select_lens_correlations(bundle))
@@ -352,7 +352,7 @@ def register_news_endpoints(server) -> None:
 
         allowed_artifacts = {
             "source_tag_matrix",
-            "source_score_summary",
+            "source_score_status",
             "lens_pair_metrics",
             "source_lens_effects",
             "source_differentiation_summary",

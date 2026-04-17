@@ -73,20 +73,23 @@ def _tag_figure(tag_counts: list[dict]) -> go.Figure:
     return figure
 
 
-def _score_figure(score_distribution: dict) -> go.Figure:
-    bins = score_distribution.get("bins", []) if isinstance(score_distribution, dict) else []
-    if not bins:
-        return _empty_figure("Score Distribution")
+def _score_status_figure(score_status: dict) -> go.Figure:
+    status = score_status if isinstance(score_status, dict) else {}
+    rows = [
+        ("Scored", int(status.get("scored", 0) or 0), "#198754"),
+        ("Zero (Lens-Level)", int(status.get("zero", 0) or 0), "#6c757d"),
+        ("Unscorable", int(status.get("unscorable", 0) or 0), "#dc3545"),
+    ]
     figure = go.Figure(
         data=[
             go.Bar(
-                x=[row.get("label", "") for row in bins],
-                y=[row.get("count", 0) for row in bins],
-                marker_color="#6f42c1",
+                x=[row[0] for row in rows],
+                y=[row[1] for row in rows],
+                marker_color=[row[2] for row in rows],
             )
         ]
     )
-    figure.update_layout(title="Score Distribution (%)", template="plotly_white")
+    figure.update_layout(title="Scoring Status", template="plotly_white")
     return figure
 
 
@@ -243,7 +246,7 @@ def load_news_stats(_load_tick, _refresh_clicks, data_mode, snapshot_date):
 
     source_counts = derived.get("source_counts", [])
     tag_counts = derived.get("tag_counts", [])
-    score_distribution = derived.get("score_distribution", {})
+    score_status = derived.get("score_status", {})
     daily_counts = derived.get("daily_counts_utc", [])
 
     return (
@@ -251,7 +254,7 @@ def load_news_stats(_load_tick, _refresh_clicks, data_mode, snapshot_date):
         _summary_cards(derived),
         _source_figure(source_counts),
         _tag_figure(tag_counts),
-        _score_figure(score_distribution),
+        _score_status_figure(score_status),
         _daily_figure(daily_counts),
     )
 

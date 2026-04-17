@@ -188,10 +188,6 @@ def _render_digest_rows(records: list[dict]) -> list:
         source = source_raw if isinstance(source_raw, dict) else {}
         source_name = source.get("name") or source.get("id") or "Unknown source"
         published_at = row.get("published_at") or row.get("published") or "Unknown date"
-        score_raw = row.get("score")
-        score = score_raw if isinstance(score_raw, dict) else {}
-        percent = score.get("percent")
-        percent_text = f"{percent:.1f}%" if isinstance(percent, (int, float)) else "n/a"
 
         rows.append(
             dbc.ListGroupItem(
@@ -206,7 +202,7 @@ def _render_digest_rows(records: list[dict]) -> list:
                     html.Div(
                         [
                             html.Span(f"Published: {published_at}", className="me-3"),
-                            html.Span(f"Score: {percent_text}"),
+                            html.Span("Lens-level scoring available in Lens Explorer pages."),
                         ],
                         className="small text-muted mb-2",
                     ),

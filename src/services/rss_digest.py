@@ -281,18 +281,25 @@ def normalize_article(article: dict[str, Any]) -> dict[str, Any]:
     published_at = _as_iso_utc(published_dt)
 
     score = article.get("score")
-    score_obj = score if isinstance(score, dict) else {}
-    score_value = _coerce_float(score_obj.get("value"))
-    score_max_value = _coerce_float(score_obj.get("max_value"))
-    score_percent = _coerce_float(score_obj.get("percent"))
-    if score_percent is None and score_value is not None and score_max_value and score_max_value > 0:
-        score_percent = (score_value / score_max_value) * 100
+    has_input_score_object = isinstance(score, dict)
+    score_obj = score if has_input_score_object else {}
 
     rubric_count_raw = score_obj.get("rubric_count")
     try:
         rubric_count = int(rubric_count_raw) if rubric_count_raw is not None else None
     except (TypeError, ValueError):
         rubric_count = None
+
+    legacy_value = _coerce_float(score_obj.get("value"))
+    legacy_max_value = _coerce_float(score_obj.get("max_value"))
+    legacy_percent = _coerce_float(score_obj.get("percent"))
+    if (
+        legacy_percent is None
+        and isinstance(legacy_value, (int, float))
+        and isinstance(legacy_max_value, (int, float))
+        and legacy_max_value > 0
+    ):
+        legacy_percent = (legacy_value / legacy_max_value) * 100.0
 
     normalized = {
         "id": _clean_text(article.get("id")),
@@ -314,11 +321,14 @@ def normalize_article(article: dict[str, Any]) -> dict[str, Any]:
             "url": _clean_text(feed_obj.get("url")),
         },
         "score": {
-            "value": score_value,
-            "max_value": score_max_value,
-            "percent": score_percent,
+            "present": has_input_score_object,
             "rubric_count": rubric_count,
             "lens_scores": _normalize_score_lens_scores(score_obj.get("lens_scores")),
+            "legacy_total": {
+                "value": legacy_value,
+                "max_value": legacy_max_value,
+                "percent": legacy_percent,
+            },
         },
         "scraped": article.get("scraped"),
         "scrape_error": article.get("scrape_error"),
@@ -406,42 +416,11 @@ def sort_records_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(records, key=lambda row: _record_datetime(row) or epoch, reverse=True)
 
 
-_SCORE_DISTRIBUTION_BINS = (
-    {"label": "0-20", "min": 0, "max": 20},
-    {"label": "20-40", "min": 20, "max": 40},
-    {"label": "40-60", "min": 40, "max": 60},
-    {"label": "60-80", "min": 60, "max": 80},
-    {"label": "80-100", "min": 80, "max": 100},
-)
-_SCORE_HISTOGRAM_BIN_LABELS = tuple(f"{start}-{start + 10}" for start in range(0, 100, 10))
 _TAG_COUNT_DISTRIBUTION_LABELS = ("0", "1", "2", "3", "4", "5+")
-_TAG_COUNT_HEATMAP_LABELS = ("0", "1", "2", "3", "4+")
-_SCORE_HEATMAP_LABELS = tuple(bin_def["label"] for bin_def in _SCORE_DISTRIBUTION_BINS)
 _SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=200, minimum=0)
 _SOURCE_EFFECT_RANDOM_SEED = 17
 _PCA_MAX_COMPONENTS = _coerce_int(os.getenv("RSS_PCA_MAX_COMPONENTS"), default=6, minimum=1)
 _MDS_MAX_DIMENSIONS = _coerce_int(os.getenv("RSS_MDS_MAX_DIMENSIONS"), default=3, minimum=1)
-
-
-def _score_distribution_bin_index(score_percent: float) -> int:
-    if score_percent < 20:
-        return 0
-    if score_percent < 40:
-        return 1
-    if score_percent < 60:
-        return 2
-    if score_percent < 80:
-        return 3
-    return 4
-
-
-def _score_histogram_label(score_percent: float) -> str:
-    bounded = min(max(score_percent, 0.0), 100.0)
-    if bounded >= 100.0:
-        return "90-100"
-    lower = int(bounded // 10) * 10
-    upper = lower + 10
-    return f"{lower}-{upper}"
 
 
 def _tag_count_distribution_label(tag_count: int) -> str:
@@ -458,10 +437,6 @@ def _tag_count_heatmap_label(tag_count: int) -> str:
     if tag_count >= 4:
         return "4+"
     return str(tag_count)
-
-
-def _score_heatmap_label(score_percent: float) -> str:
-    return _SCORE_DISTRIBUTION_BINS[_score_distribution_bin_index(score_percent)]["label"]
 
 
 def _lens_max_map_from_analysis(analysis: Any) -> dict[str, float]:
@@ -532,71 +507,61 @@ def _ordered_lenses(preferred: list[str], discovered: set[str]) -> list[str]:
     return ordered
 
 
-def _overall_percent_for_record(record: dict[str, Any]) -> float | None:
-    score = record.get("score")
-    score_obj = score if isinstance(score, dict) else {}
-    percent = _coerce_float(score_obj.get("percent"))
-    if percent is not None:
-        return min(max(percent, 0.0), 100.0)
-    return None
-
-
 def _score_details_for_record(record: dict[str, Any]) -> dict[str, Any]:
     score = record.get("score")
     score_obj = score if isinstance(score, dict) else {}
-    has_score_object = isinstance(score, dict)
-
-    max_value = _coerce_float(score_obj.get("max_value"))
-    value = _coerce_float(score_obj.get("value"))
-    percent = _coerce_float(score_obj.get("percent"))
-    has_positive_scale = max_value is not None and max_value > 0
-    if percent is None and value is not None and has_positive_scale:
-        percent = (value / max_value) * 100.0
+    present_raw = score_obj.get("present")
+    has_score_object = bool(present_raw) if isinstance(present_raw, bool) else isinstance(score, dict)
 
     lens_scores = score_obj.get("lens_scores")
     lens_scores_obj = lens_scores if isinstance(lens_scores, dict) else {}
-    has_numeric_lens_signal = False
+    lens_percent_values: list[float] = []
     for lens_payload in lens_scores_obj.values():
         if isinstance(lens_payload, dict):
-            if any(_coerce_float(lens_payload.get(key)) is not None for key in ("value", "percent", "max_value")):
-                has_numeric_lens_signal = True
-                break
+            percent = _coerce_float(lens_payload.get("percent"))
+            if percent is None:
+                value = _coerce_float(lens_payload.get("value"))
+                max_value = _coerce_float(lens_payload.get("max_value"))
+                if value is not None and max_value is not None and max_value > 0:
+                    percent = (value / max_value) * 100.0
+            if percent is None:
+                continue
+            lens_percent_values.append(min(max(percent, 0.0), 100.0))
             continue
         if isinstance(lens_payload, (int, float)):
-            has_numeric_lens_signal = True
-            break
+            lens_percent_values.append(min(max(float(lens_payload), 0.0), 100.0))
 
-    has_value = value is not None
-    has_percent = percent is not None
-    bounded_percent = min(max(percent, 0.0), 100.0) if has_percent else None
-    is_zero_percent = isinstance(bounded_percent, (int, float)) and abs(float(bounded_percent)) < 1e-9
-    is_positive_percent = isinstance(bounded_percent, (int, float)) and float(bounded_percent) > 0.0
+    has_numeric_lens_signal = bool(lens_percent_values)
+    legacy_total = score_obj.get("legacy_total")
+    legacy_total_obj = legacy_total if isinstance(legacy_total, dict) else {}
+    legacy_value = _coerce_float(legacy_total_obj.get("value"))
+    legacy_max_value = _coerce_float(legacy_total_obj.get("max_value"))
+    legacy_percent = _coerce_float(legacy_total_obj.get("percent"))
+    legacy_fields = [legacy_value, legacy_max_value, legacy_percent]
+    has_any_legacy_numeric = any(isinstance(value, (int, float)) for value in legacy_fields)
+    has_positive_legacy_signal = any(
+        isinstance(value, (int, float)) and float(value) > 0.0 for value in legacy_fields
+    )
 
-    positive_percent = isinstance(bounded_percent, (int, float)) and float(bounded_percent) > 0.0
-    positive_value = isinstance(value, (int, float)) and float(value) > 0.0
-
-    scored = False
-    if has_positive_scale and (has_value or has_percent):
+    if has_numeric_lens_signal:
+        is_zero_percent = all(abs(value) < 1e-9 for value in lens_percent_values)
+        is_positive_percent = any(value > 0.0 for value in lens_percent_values)
         scored = True
-    elif has_numeric_lens_signal:
-        scored = True
-    elif positive_percent:
-        scored = True
-    elif has_percent and positive_value:
-        scored = True
+    else:
+        is_zero_percent = False
+        is_positive_percent = False
+        scored = False
 
     likely_placeholder_zero = (
         has_score_object
         and not scored
-        and is_zero_percent
-        and not has_positive_scale
-        and not positive_value
         and not has_numeric_lens_signal
+        and (not has_any_legacy_numeric or not has_positive_legacy_signal)
     )
 
     return {
         "status": "scored" if scored else "unscorable",
-        "percent": bounded_percent if scored else None,
+        "percent": None,
         "has_score_object": has_score_object,
         "is_zero_percent": bool(scored and is_zero_percent),
         "is_positive_percent": bool(scored and is_positive_percent),
@@ -635,7 +600,6 @@ def _data_quality_from_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         ("AI Summary", lambda row: row.get("ai_summary")),
         ("Summary", lambda row: row.get("summary")),
         ("Tags", lambda row: row.get("tags")),
-        ("Score Percent", lambda row: (row.get("score") or {}).get("percent") if isinstance(row.get("score"), dict) else None),
         ("Lens Scores", lambda row: (row.get("score") or {}).get("lens_scores") if isinstance(row.get("score"), dict) else None),
     ]
 
@@ -688,7 +652,6 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
                 "title": _clean_text(record.get("title")) or "Untitled",
                 "source": source_name,
                 "published": _clean_text(record.get("published")) or _clean_text(record.get("published_at")),
-                "overall_percent": _overall_percent_for_record(record),
                 "lens_scores": lens_scores,
                 "strongest_lens": strongest_lens,
                 "strongest_percent": strongest_percent,
@@ -704,14 +667,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
     lens_names = _ordered_lenses(list(lens_maxima.keys()), discovered_lenses)
 
     by_source_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    by_source_overall: dict[str, list[float]] = defaultdict(list)
     by_source_count: Counter[str] = Counter()
     for row in article_rows:
         source_name = str(row.get("source") or "Unknown")
         by_source_count[source_name] += 1
-        overall_percent = row.get("overall_percent")
-        if isinstance(overall_percent, (int, float)):
-            by_source_overall[source_name].append(float(overall_percent))
 
         lens_scores = row.get("lens_scores")
         lens_score_obj = lens_scores if isinstance(lens_scores, dict) else {}
@@ -726,21 +685,14 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
             values = by_source_lens[source_name].get(lens_name, [])
             if values:
                 lens_means[lens_name] = sum(values) / len(values)
-        overall_values = by_source_overall.get(source_name, [])
         source_rows.append(
             {
                 "source": source_name,
                 "article_count": count,
-                "overall_avg": (sum(overall_values) / len(overall_values)) if overall_values else None,
                 "lens_means": lens_means,
             }
         )
 
-    source_overall_values = [
-        float(row["overall_avg"])
-        for row in source_rows
-        if isinstance(row.get("overall_avg"), (int, float))
-    ]
     source_lens_average_rows: list[dict[str, Any]] = []
     for lens_name in lens_names:
         values = [
@@ -804,14 +756,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
     )
 
     dominant_counter: Counter[str] = Counter()
-    overall_values: list[float] = []
     for row in article_rows:
         strongest_lens = row.get("strongest_lens")
         if isinstance(strongest_lens, str) and strongest_lens:
             dominant_counter[strongest_lens] += 1
-        overall_percent = row.get("overall_percent")
-        if isinstance(overall_percent, (int, float)):
-            overall_values.append(float(overall_percent))
 
     lens_average_rows: list[dict[str, Any]] = []
     for lens_name in lens_names:
@@ -844,16 +792,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
         "stability_rows": stability_rows,
         "summary": {
             "article_count": len(article_rows),
-            "overall_avg": (sum(overall_values) / len(overall_values)) if overall_values else None,
             "dominant_lens_counts": dominant_lens_counts,
             "lens_average_rows": lens_average_rows,
             "source_count": len(source_rows),
             "covered_articles": sum(int(row.get("article_count") or 0) for row in source_rows),
-            "source_overall_avg": (
-                sum(source_overall_values) / len(source_overall_values)
-                if source_overall_values
-                else None
-            ),
             "source_lens_average_rows": source_lens_average_rows,
             "stability_lens_count": len(stability_rows),
             "stability_avg_stddev": stability_avg_stddev,
@@ -1451,7 +1393,6 @@ def _lens_pca_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
-                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "pc1": float(scores_np[row_offset][0]) if component_count >= 1 else None,
@@ -1689,7 +1630,6 @@ def _lens_mds_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
-                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "mds1": float(coords_np[row_offset][0]) if dimension_count >= 1 else None,
@@ -2225,19 +2165,15 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     daily_counter: Counter[str] = Counter()
     publish_hour_counter: Counter[int] = Counter()
     tag_count_distribution_counter: Counter[str] = Counter()
-    score_histogram_counter: Counter[str] = Counter()
     source_tag_counter: Counter[tuple[str, str]] = Counter()
-    score_tag_heatmap_counter: Counter[tuple[str, str]] = Counter()
     scored_source_counter: Counter[str] = Counter()
     unscorable_source_counter: Counter[str] = Counter()
     zero_score_source_counter: Counter[str] = Counter()
     placeholder_zero_source_counter: Counter[str] = Counter()
-    source_score_values: dict[str, list[float]] = {}
     article_lens_percentages: list[dict[str, float]] = []
     source_labels_for_lens_rows: list[str] = []
     article_meta_for_lens_rows: list[dict[str, Any]] = []
 
-    score_percents: list[float] = []
     scored_articles = 0
     zero_score_articles = 0
     positive_score_articles = 0
@@ -2245,7 +2181,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     score_object_present_articles = 0
     score_object_missing_articles = 0
     placeholder_zero_unscorable_articles = 0
-    score_bins = [{**bin_def, "count": 0} for bin_def in _SCORE_DISTRIBUTION_BINS]
 
     for record in records:
         source = record.get("source")
@@ -2289,14 +2224,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
                 placeholder_zero_unscorable_articles += 1
                 placeholder_zero_source_counter[source_label] += 1
 
-        bounded_percent = score_details["percent"]
-        if isinstance(bounded_percent, (int, float)):
-            score_percents.append(float(bounded_percent))
-            source_score_values.setdefault(source_label, []).append(float(bounded_percent))
-            score_bins[_score_distribution_bin_index(float(bounded_percent))]["count"] += 1
-            score_histogram_counter[_score_histogram_label(float(bounded_percent))] += 1
-            score_tag_heatmap_counter[(_score_heatmap_label(float(bounded_percent)), _tag_count_heatmap_label(tag_count))] += 1
-
         lens_percentages = _record_lens_percentages(record, lens_maxima)
         if lens_percentages:
             strongest_lens, strongest_percent = max(lens_percentages.items(), key=lambda item: item[1])
@@ -2307,7 +2234,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
                     "id": _clean_text(record.get("id")),
                     "title": _clean_text(record.get("title")),
                     "source": source_label,
-                    "overall_percent": _overall_percent_for_record(record),
                     "strongest_lens": strongest_lens,
                     "strongest_percent": strongest_percent,
                 }
@@ -2317,32 +2243,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     tag_counts = [{"tag": tag, "count": count} for tag, count in tag_counter.most_common()]
     daily_counts = [{"date": day, "count": daily_counter[day]} for day in sorted(daily_counter.keys())]
     publish_hour_counts = [{"hour": hour, "count": publish_hour_counter.get(hour, 0)} for hour in range(24)]
-
-    source_score_summary: list[dict[str, Any]] = []
-    for source_name, source_count in source_counter.most_common():
-        values = source_score_values.get(source_name, [])
-        source_score_summary.append(
-            {
-                "source": source_name,
-                "count": source_count,
-                "scored_count": len(values),
-                "avg_percent": (sum(values) / len(values)) if values else None,
-                "min_percent": min(values) if values else None,
-                "max_percent": max(values) if values else None,
-            }
-        )
-
-    score_histogram_bins = []
-    for label in _SCORE_HISTOGRAM_BIN_LABELS:
-        lower, upper = label.split("-", 1)
-        score_histogram_bins.append(
-            {
-                "label": label,
-                "min": int(lower),
-                "max": int(upper),
-                "count": score_histogram_counter.get(label, 0),
-            }
-        )
 
     tag_count_distribution = []
     for label in _TAG_COUNT_DISTRIBUTION_LABELS:
@@ -2374,16 +2274,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         tag_totals_counter[tag_name] += count
     source_tag_totals = [{"source": source_name, "count": count} for source_name, count in source_tag_totals_counter.most_common()]
     tag_totals = [{"tag": tag_name, "count": count} for tag_name, count in tag_totals_counter.most_common()]
-
-    score_tag_count_heatmap = [
-        {
-            "score_bin": score_bin,
-            "tag_count_bin": tag_count_bin,
-            "count": score_tag_heatmap_counter.get((score_bin, tag_count_bin), 0),
-        }
-        for tag_count_bin in _TAG_COUNT_HEATMAP_LABELS
-        for score_bin in _SCORE_HEATMAP_LABELS
-    ]
 
     scored_by_source = [
         {"source": source_name, "count": count}
@@ -2443,9 +2333,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     )
 
     total_articles = len(records)
-    average_percent = sum(score_percents) / len(score_percents) if score_percents else None
     score_coverage_ratio = (scored_articles / total_articles) if total_articles else 0.0
-    scored_without_percent_articles = max(scored_articles - zero_score_articles - positive_score_articles, 0)
 
     return {
         "input_articles": len(input_records),
@@ -2455,7 +2343,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "zero_score_articles": zero_score_articles,
         "positive_score_articles": positive_score_articles,
         "unscorable_articles": unscorable_articles,
-        "scored_without_percent_articles": scored_without_percent_articles,
         "score_object_present_articles": score_object_present_articles,
         "score_object_missing_articles": score_object_missing_articles,
         "placeholder_zero_unscorable_articles": placeholder_zero_unscorable_articles,
@@ -2463,7 +2350,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
             "scored": scored_articles,
             "positive": positive_score_articles,
             "zero": zero_score_articles,
-            "scored_without_percent": scored_without_percent_articles,
             "unscorable": unscorable_articles,
             "score_object_present": score_object_present_articles,
             "score_object_missing": score_object_missing_articles,
@@ -2482,22 +2368,12 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "data_quality": data_quality,
         "lens_inventory": lens_inventory,
         "daily_counts_utc": daily_counts,
-        "score_distribution": {
-            "bins": score_bins,
-            "average_percent": average_percent,
-            "min_percent": min(score_percents) if score_percents else None,
-            "max_percent": max(score_percents) if score_percents else None,
-            "count": len(score_percents),
-        },
         "chart_aggregates": {
-            "score_histogram_bins": score_histogram_bins,
             "tag_count_distribution": tag_count_distribution,
             "publish_hour_counts_utc": publish_hour_counts,
-            "source_score_summary": source_score_summary,
             "source_tag_matrix": source_tag_matrix,
             "source_tag_totals": source_tag_totals,
             "tag_totals": tag_totals,
-            "score_tag_count_heatmap": score_tag_count_heatmap,
             "scored_by_source": scored_by_source,
             "score_status_by_source": score_status_by_source,
         },

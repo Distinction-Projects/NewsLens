@@ -22,19 +22,33 @@ def _empty_figure(title: str) -> go.Figure:
     return figure
 
 
-def _score_histogram_figure(histogram_bins: list[dict]) -> go.Figure:
-    if not histogram_bins:
-        return _empty_figure("Score Histogram (%)")
+def _scoring_status_source_figure(score_status_rows: list[dict], top_n: int = 12) -> go.Figure:
+    rows = score_status_rows[:top_n]
+    if not rows:
+        return _empty_figure("Scoring Status by Source")
     figure = go.Figure(
         data=[
             go.Bar(
-                x=[row.get("label", "") for row in histogram_bins],
-                y=[row.get("count", 0) for row in histogram_bins],
-                marker_color="#6f42c1",
+                x=[row.get("source", "Unknown") for row in rows],
+                y=[int(row.get("unscorable", 0) or 0) for row in rows],
+                marker_color="#dc3545",
+                name="Unscorable",
+            ),
+            go.Bar(
+                x=[row.get("source", "Unknown") for row in rows],
+                y=[int(row.get("zero_score", 0) or 0) for row in rows],
+                marker_color="#6c757d",
+                name="Zero (Lens-Level)",
+            ),
+            go.Bar(
+                x=[row.get("source", "Unknown") for row in rows],
+                y=[int(row.get("scored", 0) or 0) for row in rows],
+                marker_color="#198754",
+                name="Scored",
             )
         ]
     )
-    figure.update_layout(title="Score Histogram (%)", template="plotly_white")
+    figure.update_layout(title="Scoring Status by Source", template="plotly_white", barmode="group")
     return figure
 
 
@@ -57,42 +71,34 @@ def _scored_source_figure(scored_by_source: list[dict], top_n: int = 12) -> go.F
 
 def _score_tag_heatmap_figure(heatmap_rows: list[dict]) -> go.Figure:
     if not heatmap_rows:
-        return _empty_figure("Score Bin x Tag Count Bin")
-
-    score_bins = sorted({str(row.get("score_bin", "")) for row in heatmap_rows})
-    tag_bins = sorted({str(row.get("tag_count_bin", "")) for row in heatmap_rows})
-    value_map = {(str(row.get("tag_count_bin", "")), str(row.get("score_bin", ""))): int(row.get("count", 0) or 0) for row in heatmap_rows}
-
-    z_values = []
-    for tag_bin in tag_bins:
-        z_values.append([value_map.get((tag_bin, score_bin), 0) for score_bin in score_bins])
-
+        return _empty_figure("Tag Count Distribution")
     figure = go.Figure(
         data=[
-            go.Heatmap(
-                z=z_values,
-                x=score_bins,
-                y=tag_bins,
-                colorscale="Viridis",
+            go.Bar(
+                x=[row.get("label", "") for row in heatmap_rows],
+                y=[int(row.get("count", 0) or 0) for row in heatmap_rows],
+                marker_color="#0d6efd",
             )
         ]
     )
-    figure.update_layout(title="Score Bin x Tag Count Bin", xaxis_title="Score Bin", yaxis_title="Tag Count Bin", template="plotly_white")
+    figure.update_layout(title="Tag Count Distribution", xaxis_title="Tags per Article", yaxis_title="Articles", template="plotly_white")
     return figure
 
 
 def _score_cards(derived: dict) -> list:
-    distribution = derived.get("score_distribution", {}) if isinstance(derived, dict) else {}
-    average = distribution.get("average_percent")
     score_coverage_ratio = derived.get("score_coverage_ratio")
     scored_articles = derived.get("scored_articles", 0)
     zero_score_articles = derived.get("zero_score_articles", 0)
     unscorable_articles = derived.get("unscorable_articles", "n/a")
+    score_object_missing_articles = derived.get("score_object_missing_articles", "n/a")
     cards = [
         ("Scored Articles", scored_articles),
         ("Zero Scores", zero_score_articles if isinstance(zero_score_articles, int) else "n/a"),
         ("Unscorable", unscorable_articles if isinstance(unscorable_articles, int) else "n/a"),
-        ("Average Score %", f"{average:.1f}" if isinstance(average, (int, float)) else "n/a"),
+        (
+            "Missing Score Objects",
+            score_object_missing_articles if isinstance(score_object_missing_articles, int) else "n/a",
+        ),
         (
             "Score Coverage",
             f"{score_coverage_ratio * 100:.1f}%"
@@ -195,9 +201,9 @@ def load_news_score_lab(_load_tick, _refresh_clicks, data_mode, snapshot_date):
     meta = payload.get("meta", {})
     derived = payload.get("data", {}).get("derived", {})
     chart_aggregates = derived.get("chart_aggregates", {})
-    histogram_bins = chart_aggregates.get("score_histogram_bins", [])
+    score_status_by_source = chart_aggregates.get("score_status_by_source", [])
     scored_by_source = chart_aggregates.get("scored_by_source", [])
-    score_tag_heatmap = chart_aggregates.get("score_tag_count_heatmap", [])
+    tag_count_distribution = chart_aggregates.get("tag_count_distribution", [])
 
     return (
         build_status_alert(
@@ -208,9 +214,9 @@ def load_news_score_lab(_load_tick, _refresh_clicks, data_mode, snapshot_date):
             ],
         ),
         _score_cards(derived),
-        _score_histogram_figure(histogram_bins),
+        _scoring_status_source_figure(score_status_by_source),
         _scored_source_figure(scored_by_source),
-        _score_tag_heatmap_figure(score_tag_heatmap),
+        _score_tag_heatmap_figure(tag_count_distribution),
     )
 
 

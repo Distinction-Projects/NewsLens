@@ -127,39 +127,32 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(stats["input_articles"], 3)
         self.assertEqual(stats["excluded_unscraped_articles"], 1)
         self.assertEqual(stats["total_articles"], 2)
-        self.assertEqual(stats["scored_articles"], 2)
+        self.assertEqual(stats["scored_articles"], 1)
         self.assertEqual(stats["zero_score_articles"], 0)
-        self.assertEqual(stats["positive_score_articles"], 2)
-        self.assertEqual(stats["unscorable_articles"], 0)
-        self.assertEqual(stats["scored_without_percent_articles"], 0)
+        self.assertEqual(stats["positive_score_articles"], 1)
+        self.assertEqual(stats["unscorable_articles"], 1)
         self.assertEqual(stats["score_object_present_articles"], 2)
         self.assertEqual(stats["score_object_missing_articles"], 0)
         self.assertEqual(stats["placeholder_zero_unscorable_articles"], 0)
         self.assertIn("score_status", stats)
-        self.assertEqual(stats["score_status"]["scored"], 2)
-        self.assertEqual(stats["score_status"]["unscorable"], 0)
-        self.assertEqual(stats["score_coverage_ratio"], 1.0)
+        self.assertEqual(stats["score_status"]["scored"], 1)
+        self.assertEqual(stats["score_status"]["unscorable"], 1)
+        self.assertEqual(stats["score_coverage_ratio"], 0.5)
         self.assertTrue(stats["source_counts"])
         self.assertTrue(stats["tag_counts"])
-        self.assertEqual(stats["score_distribution"]["count"], 2)
 
         chart_aggregates = stats["chart_aggregates"]
-        self.assertIn("score_histogram_bins", chart_aggregates)
         self.assertIn("tag_count_distribution", chart_aggregates)
         self.assertIn("publish_hour_counts_utc", chart_aggregates)
-        self.assertIn("source_score_summary", chart_aggregates)
         self.assertIn("source_tag_matrix", chart_aggregates)
         self.assertIn("source_tag_totals", chart_aggregates)
         self.assertIn("tag_totals", chart_aggregates)
-        self.assertIn("score_tag_count_heatmap", chart_aggregates)
         self.assertIn("scored_by_source", chart_aggregates)
         self.assertIn("score_status_by_source", chart_aggregates)
         self.assertIn("source_tag_views", stats)
 
-        self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
         self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
         self.assertEqual(len(chart_aggregates["publish_hour_counts_utc"]), 24)
-        self.assertEqual(len(chart_aggregates["score_tag_count_heatmap"]), 25)
         self.assertEqual(chart_aggregates["source_tag_totals"][0]["source"], "PBS NewsHour")
         self.assertEqual(chart_aggregates["source_tag_totals"][0]["count"], 3)
         self.assertEqual(chart_aggregates["source_tag_totals"][1]["source"], "NPR")
@@ -181,10 +174,6 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(source_tag_views["summary"]["non_zero_cells"], 5)
         self.assertEqual(source_tag_views["summary"]["total_assignments"], 5)
 
-        self.assertEqual(
-            sum(item["count"] for item in chart_aggregates["score_histogram_bins"]),
-            stats["score_distribution"]["count"],
-        )
         self.assertEqual(
             sum(item["count"] for item in chart_aggregates["tag_count_distribution"]),
             stats["total_articles"],
@@ -240,7 +229,6 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIsInstance(lens_views["stability_rows"], list)
         self.assertIsInstance(lens_views["summary"], dict)
         self.assertEqual(lens_views["summary"]["article_count"], 1)
-        self.assertEqual(lens_views["summary"]["overall_avg"], 70.0)
         self.assertIsInstance(lens_views["summary"]["dominant_lens_counts"], list)
         self.assertEqual(lens_views["summary"]["dominant_lens_counts"][0]["lens"], "L1")
         self.assertEqual(lens_views["summary"]["dominant_lens_counts"][0]["count"], 1)
@@ -250,7 +238,6 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(lens_views["summary"]["lens_average_rows"][0]["mean"], 70.0)
         self.assertEqual(lens_views["summary"]["source_count"], 1)
         self.assertEqual(lens_views["summary"]["covered_articles"], 1)
-        self.assertEqual(lens_views["summary"]["source_overall_avg"], 70.0)
         self.assertIsInstance(lens_views["summary"]["source_lens_average_rows"], list)
         self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["lens"], "L1")
         self.assertEqual(lens_views["summary"]["source_lens_average_rows"][0]["count"], 1)
@@ -272,14 +259,13 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("field_coverage", data_quality)
         self.assertIsInstance(data_quality["field_coverage"], list)
         self.assertEqual(data_quality["summary"]["total"], 2)
-        self.assertEqual(data_quality["summary"]["scored"], 2)
+        self.assertEqual(data_quality["summary"]["scored"], 1)
         self.assertEqual(data_quality["summary"]["missing_ai_summary"], 0)
         self.assertEqual(data_quality["summary"]["missing_published"], 0)
         self.assertEqual(data_quality["summary"]["missing_source"], 0)
         self.assertAlmostEqual(float(data_quality["summary"]["average_tags"]), 2.5, places=6)
         coverage_by_field = {row["field"]: row for row in data_quality["field_coverage"]}
         self.assertEqual(coverage_by_field["Title"]["present"], 2)
-        self.assertEqual(coverage_by_field["Score Percent"]["present"], 2)
         self.assertEqual(coverage_by_field["Lens Scores"]["present"], 1)
 
         lenses = lens_correlations["lenses"]
@@ -448,7 +434,7 @@ class RssDigestServiceTests(unittest.TestCase):
                     "feed": {"name": "Feed", "url": "https://example.com/feed"},
                     "scraped": {"title": "Scored zero", "body_text": "Body"},
                     "scrape_error": None,
-                    "score": {"value": 0.0, "max_value": 20.0, "percent": 0.0},
+                    "score": {"lens_scores": {"L1": {"percent": 0.0}}},
                 },
                 {
                     "id": "placeholder-zero",

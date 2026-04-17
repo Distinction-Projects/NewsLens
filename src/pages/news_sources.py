@@ -39,20 +39,25 @@ def _source_count_figure(source_counts: list[dict], top_n: int) -> go.Figure:
     return figure
 
 
-def _source_score_figure(source_score_summary: list[dict], top_n: int) -> go.Figure:
-    rows = source_score_summary[:top_n]
+def _source_scoring_figure(score_status_rows: list[dict], top_n: int) -> go.Figure:
+    rows = score_status_rows[:top_n]
     if not rows:
-        return _empty_figure("Average Score by Source")
+        return _empty_figure("Scoring Coverage by Source")
     figure = go.Figure(
         data=[
             go.Bar(
                 x=[row.get("source", "Unknown") for row in rows],
-                y=[row.get("avg_percent") if row.get("avg_percent") is not None else 0 for row in rows],
-                marker_color="#198754",
+                y=[
+                    ((int(row.get("scored", 0) or 0) / int(row.get("total", 0) or 1)) * 100.0)
+                    if int(row.get("total", 0) or 0) > 0
+                    else 0.0
+                    for row in rows
+                ],
+                marker_color="#198754"
             )
         ]
     )
-    figure.update_layout(title="Average Score by Source (%)", template="plotly_white")
+    figure.update_layout(title="Scoring Coverage by Source (%)", template="plotly_white")
     return figure
 
 
@@ -67,27 +72,29 @@ def _source_table(rows: list[dict], top_n: int):
                 html.Th("Source"),
                 html.Th("Articles"),
                 html.Th("Scored"),
-                html.Th("Avg %"),
-                html.Th("Min %"),
-                html.Th("Max %"),
+                html.Th("Zero"),
+                html.Th("Unscorable"),
+                html.Th("Coverage %"),
             ]
         )
     )
 
     body_rows = []
     for row in visible:
-        avg_percent = row.get("avg_percent")
-        min_percent = row.get("min_percent")
-        max_percent = row.get("max_percent")
+        total = int(row.get("total", 0) or 0)
+        scored = int(row.get("scored", 0) or 0)
+        zero_score = int(row.get("zero_score", 0) or 0)
+        unscorable = int(row.get("unscorable", 0) or 0)
+        coverage = (scored / total * 100.0) if total > 0 else None
         body_rows.append(
             html.Tr(
                 [
                     html.Td(row.get("source", "Unknown")),
-                    html.Td(row.get("count", 0)),
-                    html.Td(row.get("scored_count", 0)),
-                    html.Td(f"{avg_percent:.1f}" if isinstance(avg_percent, (int, float)) else "n/a"),
-                    html.Td(f"{min_percent:.1f}" if isinstance(min_percent, (int, float)) else "n/a"),
-                    html.Td(f"{max_percent:.1f}" if isinstance(max_percent, (int, float)) else "n/a"),
+                    html.Td(total),
+                    html.Td(scored),
+                    html.Td(zero_score),
+                    html.Td(unscorable),
+                    html.Td(f"{coverage:.1f}" if isinstance(coverage, (int, float)) else "n/a"),
                 ]
             )
         )
@@ -195,13 +202,13 @@ def load_news_sources(_load_tick, _refresh_clicks, data_mode, snapshot_date, top
     derived = payload.get("data", {}).get("derived", {})
     source_counts = derived.get("source_counts", [])
     chart_aggregates = derived.get("chart_aggregates", {})
-    source_score_summary = chart_aggregates.get("source_score_summary", [])
+    score_status_by_source = chart_aggregates.get("score_status_by_source", [])
 
     return (
         build_status_alert(meta, leading_parts=[f"Sources: {len(source_counts)}"]),
         _source_count_figure(source_counts, n_value),
-        _source_score_figure(source_score_summary, n_value),
-        _source_table(source_score_summary, n_value),
+        _source_scoring_figure(score_status_by_source, n_value),
+        _source_table(score_status_by_source, n_value),
     )
 
 
