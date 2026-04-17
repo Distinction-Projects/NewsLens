@@ -6,6 +6,8 @@ from src.pages.news_lens_pca import (
     _select_lens_mds,
     _select_lens_pca,
     _select_lens_separation,
+    _select_lens_temporal_embedding,
+    _select_lens_time_series,
     _variance_driver_figure,
 )
 
@@ -52,6 +54,30 @@ class NewsLensPcaTests(unittest.TestCase):
         self.assertEqual(source, "derived")
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("separation_ratio"), 1.5)
+
+    def test_select_lens_time_series_prefers_derived(self):
+        payload, source = _select_lens_time_series(
+            {
+                "derived": {"lens_time_series": {"status": "ok", "dates": ["2026-03-01"]}},
+                "analysis": {"lens_time_series": {"status": "legacy"}},
+            }
+        )
+
+        self.assertEqual(source, "derived")
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("dates"), ["2026-03-01"])
+
+    def test_select_lens_temporal_embedding_prefers_derived(self):
+        payload, source = _select_lens_temporal_embedding(
+            {
+                "derived": {"lens_temporal_embedding": {"status": "ok", "points": []}},
+                "analysis": {"lens_temporal_embedding": {"status": "legacy"}},
+            }
+        )
+
+        self.assertEqual(source, "derived")
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("points"), [])
 
     def test_mds_scatter_figure_renders_points_and_centroids(self):
         figure = _mds_scatter_figure(

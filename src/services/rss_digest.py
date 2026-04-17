@@ -1393,6 +1393,7 @@ def _lens_pca_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
+                "published_at": _clean_text(meta_row.get("published_at")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "pc1": float(scores_np[row_offset][0]) if component_count >= 1 else None,
@@ -1909,6 +1910,216 @@ def _lens_separation_from_records(
         "silhouette_like_by_source": silhouette_like_by_source,
         "source_centroids": source_rows,
         "centroid_distances": centroid_distances[:25],
+    }
+
+
+def _lens_time_series_from_records(
+    records: list[dict[str, Any]],
+    lens_maxima: OrderedDict[str, float],
+) -> dict[str, Any]:
+    if not records:
+        return {
+            "status": "unavailable",
+            "reason": "No records available for lens time series.",
+            "basis": "daily_mean_lens_percentages",
+            "coverage_mode": "none",
+            "lenses": [],
+            "dates": [],
+            "series": [],
+            "summary": {"articles_with_time_and_lens_scores": 0, "days": 0},
+        }
+
+    per_day_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    article_count = 0
+    for record in records:
+        published_dt = _record_datetime(record)
+        if published_dt is None:
+            continue
+        lens_percentages = _record_lens_percentages(record, lens_maxima)
+        if not lens_percentages:
+            continue
+        day_key = published_dt.date().isoformat()
+        article_count += 1
+        for lens_name, lens_value in lens_percentages.items():
+            if isinstance(lens_name, str) and isinstance(lens_value, (int, float)) and math.isfinite(float(lens_value)):
+                per_day_lens[day_key][lens_name].append(float(lens_value))
+
+    if not per_day_lens:
+        return {
+            "status": "unavailable",
+            "reason": "No records with both valid publication time and lens percentages.",
+            "basis": "daily_mean_lens_percentages",
+            "coverage_mode": "none",
+            "lenses": [],
+            "dates": [],
+            "series": [],
+            "summary": {"articles_with_time_and_lens_scores": 0, "days": 0},
+        }
+
+    dates = sorted(per_day_lens.keys())
+    discovered_lenses = sorted(
+        {
+            lens_name
+            for day_map in per_day_lens.values()
+            for lens_name in day_map.keys()
+            if isinstance(lens_name, str)
+        }
+    )
+
+    preferred = list(lens_maxima.keys())
+    ordered_lenses = [lens_name for lens_name in preferred if lens_name in discovered_lenses]
+    ordered_lenses.extend([lens_name for lens_name in discovered_lenses if lens_name not in set(ordered_lenses)])
+
+    series: list[dict[str, Any]] = []
+    for lens_name in ordered_lenses:
+        points: list[dict[str, Any]] = []
+        for day_key in dates:
+            values = per_day_lens.get(day_key, {}).get(lens_name, [])
+            if not values:
+                continue
+            points.append(
+                {
+                    "date": day_key,
+                    "mean": (sum(values) / len(values)),
+                    "median": statistics.median(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "count": len(values),
+                }
+            )
+        series.append({"lens": lens_name, "points": points})
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "daily_mean_lens_percentages",
+        "coverage_mode": "records_with_datetime_and_lens_scores",
+        "lenses": ordered_lenses,
+        "dates": dates,
+        "series": series,
+        "summary": {
+            "articles_with_time_and_lens_scores": article_count,
+            "days": len(dates),
+        },
+    }
+
+
+def _lens_temporal_embedding_from_pca(pca_payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(pca_payload, dict):
+        return {
+            "status": "unavailable",
+            "reason": "PCA payload missing.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    if str(pca_payload.get("status") or "") != "ok":
+        reason = str(pca_payload.get("reason") or "").strip() or "PCA is unavailable."
+        return {
+            "status": "unavailable",
+            "reason": reason,
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    article_points = pca_payload.get("article_points")
+    if not isinstance(article_points, list):
+        return {
+            "status": "unavailable",
+            "reason": "PCA article points are missing.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    valid_rows: list[dict[str, Any]] = []
+    for row in article_points:
+        if not isinstance(row, dict):
+            continue
+        pc1 = row.get("pc1")
+        pc2 = row.get("pc2")
+        published_at = row.get("published_at")
+        if not isinstance(pc1, (int, float)) or not isinstance(pc2, (int, float)):
+            continue
+        dt = parse_datetime(published_at)
+        if dt is None:
+            continue
+        valid_rows.append(
+            {
+                "id": _clean_text(row.get("id")),
+                "title": _clean_text(row.get("title")) or "Untitled",
+                "source": _clean_text(row.get("source")) or "Unknown",
+                "strongest_lens": _clean_text(row.get("strongest_lens")) or "Unknown",
+                "strongest_percent": _coerce_float(row.get("strongest_percent")),
+                "published_at": _as_iso_utc(dt),
+                "date": dt.date().isoformat(),
+                "pc1": float(pc1),
+                "pc2": float(pc2),
+            }
+        )
+
+    if not valid_rows:
+        return {
+            "status": "unavailable",
+            "reason": "No PCA article points have valid publication timestamps.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    day_values = sorted({row["date"] for row in valid_rows if isinstance(row.get("date"), str)})
+    day_index_map = {day: idx for idx, day in enumerate(day_values)}
+    day_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    points: list[dict[str, Any]] = []
+    for row in valid_rows:
+        day = row["date"]
+        day_index = day_index_map.get(day)
+        if day_index is None:
+            continue
+        enriched = dict(row)
+        enriched["day_index"] = day_index
+        points.append(enriched)
+        day_groups[day].append(enriched)
+
+    day_centroids: list[dict[str, Any]] = []
+    for day in day_values:
+        rows = day_groups.get(day, [])
+        if not rows:
+            continue
+        day_centroids.append(
+            {
+                "date": day,
+                "day_index": day_index_map[day],
+                "count": len(rows),
+                "pc1": sum(float(row["pc1"]) for row in rows) / len(rows),
+                "pc2": sum(float(row["pc2"]) for row in rows) / len(rows),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "pc1_pc2_with_day_index",
+        "coverage_mode": "pca_points_with_datetime",
+        "points": points,
+        "day_centroids": day_centroids,
+        "summary": {
+            "articles": len(points),
+            "days": len(day_centroids),
+            "start_date": day_values[0] if day_values else None,
+            "end_date": day_values[-1] if day_values else None,
+        },
     }
 
 
@@ -2470,6 +2681,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
                     "id": _clean_text(record.get("id")),
                     "title": _clean_text(record.get("title")),
                     "source": source_label,
+                    "published_at": _clean_text(record.get("published_at")),
                     "strongest_lens": strongest_lens,
                     "strongest_percent": strongest_percent,
                 }
@@ -2549,6 +2761,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         source_labels_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    lens_time_series = _lens_time_series_from_records(records, lens_maxima)
+    lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -2603,6 +2817,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_pca": lens_pca,
         "lens_mds": lens_mds,
         "lens_separation": lens_separation,
+        "lens_time_series": lens_time_series,
+        "lens_temporal_embedding": lens_temporal_embedding,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "lens_views": lens_views,

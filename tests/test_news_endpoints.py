@@ -187,6 +187,8 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("lens_pca", stats_payload["data"]["derived"])
         self.assertIn("lens_mds", stats_payload["data"]["derived"])
         self.assertIn("lens_separation", stats_payload["data"]["derived"])
+        self.assertIn("lens_time_series", stats_payload["data"]["derived"])
+        self.assertIn("lens_temporal_embedding", stats_payload["data"]["derived"])
         lens_correlations = stats_payload["data"]["derived"]["lens_correlations"]
         self.assertIn("lenses", lens_correlations)
         self.assertIn("correlation", lens_correlations)
@@ -229,6 +231,16 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("n_sources", lens_separation)
         self.assertIn("separation_ratio", lens_separation)
         self.assertIn("silhouette_like_mean", lens_separation)
+        lens_time_series = stats_payload["data"]["derived"]["lens_time_series"]
+        self.assertIn("status", lens_time_series)
+        self.assertIn("reason", lens_time_series)
+        self.assertIn("series", lens_time_series)
+        self.assertIn("summary", lens_time_series)
+        lens_temporal_embedding = stats_payload["data"]["derived"]["lens_temporal_embedding"]
+        self.assertIn("status", lens_temporal_embedding)
+        self.assertIn("reason", lens_temporal_embedding)
+        self.assertIn("points", lens_temporal_embedding)
+        self.assertIn("summary", lens_temporal_embedding)
         lens_views = stats_payload["data"]["derived"]["lens_views"]
         self.assertIn("coverage_mode", lens_views)
         self.assertIn("lens_names", lens_views)

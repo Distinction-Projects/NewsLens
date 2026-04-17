@@ -46,6 +46,26 @@ def _select_lens_separation(data: dict) -> tuple[dict, str]:
     return {}, "missing"
 
 
+def _select_lens_time_series(data: dict) -> tuple[dict, str]:
+    if not isinstance(data, dict):
+        return {}, "missing"
+    derived = data.get("derived")
+    derived_time = derived.get("lens_time_series") if isinstance(derived, dict) else None
+    if isinstance(derived_time, dict):
+        return derived_time, "derived"
+    return {}, "missing"
+
+
+def _select_lens_temporal_embedding(data: dict) -> tuple[dict, str]:
+    if not isinstance(data, dict):
+        return {}, "missing"
+    derived = data.get("derived")
+    derived_embedding = derived.get("lens_temporal_embedding") if isinstance(derived, dict) else None
+    if isinstance(derived_embedding, dict):
+        return derived_embedding, "derived"
+    return {}, "missing"
+
+
 def _empty_figure(title: str) -> go.Figure:
     figure = go.Figure()
     figure.update_layout(
@@ -189,6 +209,7 @@ def _article_scatter_figure(pca_payload: dict, color_by: str, max_points: int) -
                     [
                         row.get("source"),
                         row.get("strongest_lens"),
+                        row.get("published_at"),
                     ]
                     for row in rows
                 ],
@@ -197,7 +218,8 @@ def _article_scatter_figure(pca_payload: dict, color_by: str, max_points: int) -
                     "PC1: %{x:.3f}<br>"
                     "PC2: %{y:.3f}<br>"
                     "Source: %{customdata[0]}<br>"
-                    "Strongest Lens: %{customdata[1]}<extra></extra>"
+                    "Strongest Lens: %{customdata[1]}<br>"
+                    "Published: %{customdata[2]}<extra></extra>"
                 ),
                 marker={"size": 8, "opacity": 0.75},
             )
@@ -230,6 +252,131 @@ def _article_scatter_figure(pca_payload: dict, color_by: str, max_points: int) -
         xaxis_title="PC1",
         yaxis_title="PC2",
         legend={"orientation": "v"},
+    )
+    return figure
+
+
+def _lens_time_series_figure(time_series_payload: dict, top_n: int = 8) -> go.Figure:
+    if not isinstance(time_series_payload, dict) or str(time_series_payload.get("status") or "") != "ok":
+        return _empty_figure("Lens Time Series (Daily Means)")
+
+    series = time_series_payload.get("series") if isinstance(time_series_payload.get("series"), list) else []
+    rows = [row for row in series if isinstance(row, dict) and isinstance(row.get("lens"), str)]
+    if not rows:
+        return _empty_figure("Lens Time Series (Daily Means)")
+
+    ranked = sorted(
+        rows,
+        key=lambda row: max(
+            (float(point.get("count") or 0.0) for point in (row.get("points") or []) if isinstance(point, dict)),
+            default=0.0,
+        ),
+        reverse=True,
+    )[: max(3, int(top_n))]
+
+    figure = go.Figure()
+    for row in ranked:
+        lens_name = str(row.get("lens"))
+        points = row.get("points") if isinstance(row.get("points"), list) else []
+        usable = [
+            point
+            for point in points
+            if isinstance(point, dict) and isinstance(point.get("date"), str) and isinstance(point.get("mean"), (int, float))
+        ]
+        if not usable:
+            continue
+        figure.add_trace(
+            go.Scatter(
+                x=[str(point["date"]) for point in usable],
+                y=[float(point["mean"]) for point in usable],
+                mode="lines+markers",
+                name=lens_name,
+                customdata=[[point.get("count"), point.get("median"), point.get("min"), point.get("max")] for point in usable],
+                hovertemplate=(
+                    "Lens: "
+                    + lens_name
+                    + "<br>Date: %{x}<br>Mean: %{y:.2f}<br>N: %{customdata[0]}<br>"
+                    + "Median: %{customdata[1]:.2f}<br>Min/Max: %{customdata[2]:.2f} / %{customdata[3]:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    figure.update_layout(
+        title="Lens Time Series (Daily Mean Percent)",
+        template="plotly_white",
+        xaxis_title="Date (UTC)",
+        yaxis_title="Lens Percent",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "left", "x": 0.0},
+    )
+    return figure
+
+
+def _temporal_embedding_figure(temporal_payload: dict) -> go.Figure:
+    if not isinstance(temporal_payload, dict) or str(temporal_payload.get("status") or "") != "ok":
+        return _empty_figure("Temporal Trajectory in PC1/PC2")
+
+    points = temporal_payload.get("points") if isinstance(temporal_payload.get("points"), list) else []
+    usable = [
+        row
+        for row in points
+        if isinstance(row, dict)
+        and isinstance(row.get("pc1"), (int, float))
+        and isinstance(row.get("pc2"), (int, float))
+        and isinstance(row.get("day_index"), (int, float))
+    ]
+    if not usable:
+        return _empty_figure("Temporal Trajectory in PC1/PC2")
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=[float(row["pc1"]) for row in usable],
+            y=[float(row["pc2"]) for row in usable],
+            mode="markers",
+            name="Articles",
+            text=[str(row.get("title") or "Untitled") for row in usable],
+            customdata=[[row.get("source"), row.get("date"), row.get("strongest_lens")] for row in usable],
+            marker={
+                "size": 8,
+                "opacity": 0.7,
+                "color": [float(row["day_index"]) for row in usable],
+                "colorscale": "Viridis",
+                "showscale": True,
+                "colorbar": {"title": "Day Index"},
+            },
+            hovertemplate=(
+                "Title: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<br>"
+                "Source: %{customdata[0]}<br>Date: %{customdata[1]}<br>"
+                "Strongest Lens: %{customdata[2]}<extra></extra>"
+            ),
+        )
+    )
+
+    centroids = temporal_payload.get("day_centroids") if isinstance(temporal_payload.get("day_centroids"), list) else []
+    centroid_rows = [
+        row
+        for row in centroids
+        if isinstance(row, dict) and isinstance(row.get("pc1"), (int, float)) and isinstance(row.get("pc2"), (int, float))
+    ]
+    if centroid_rows:
+        figure.add_trace(
+            go.Scatter(
+                x=[float(row["pc1"]) for row in centroid_rows],
+                y=[float(row["pc2"]) for row in centroid_rows],
+                mode="lines+markers",
+                name="Daily Centroid Path",
+                text=[str(row.get("date") or "") for row in centroid_rows],
+                marker={"size": 9, "symbol": "diamond", "color": "#111111"},
+                line={"width": 2, "color": "#111111"},
+                hovertemplate="Date: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>",
+            )
+        )
+
+    figure.update_layout(
+        title="Temporal Trajectory in PC1/PC2",
+        template="plotly_white",
+        xaxis_title="PC1",
+        yaxis_title="PC2",
     )
     return figure
 
@@ -709,6 +856,12 @@ layout = dbc.Container(
             ]
         ),
         dbc.Row([dbc.Col(dcc.Graph(id="news-lens-mds-scatter"), width=12, className="mb-3")]),
+        dbc.Row(
+            [
+                dbc.Col(dcc.Graph(id="news-lens-time-series"), lg=6, className="mb-3"),
+                dbc.Col(dcc.Graph(id="news-lens-temporal-embedding"), lg=6, className="mb-3"),
+            ]
+        ),
         dbc.Row([dbc.Col(dcc.Graph(id="news-lens-pca-drivers"), width=12, className="mb-3")]),
         dbc.Row([dbc.Col(dcc.Graph(id="news-lens-pca-loadings"), width=12, className="mb-3")]),
         dbc.Row(
@@ -738,6 +891,8 @@ layout = dbc.Container(
     Output("news-lens-pca-explained", "figure"),
     Output("news-lens-pca-scatter", "figure"),
     Output("news-lens-mds-scatter", "figure"),
+    Output("news-lens-time-series", "figure"),
+    Output("news-lens-temporal-embedding", "figure"),
     Output("news-lens-pca-drivers", "figure"),
     Output("news-lens-pca-loadings", "figure"),
     Output("news-lens-pca-component", "options"),
@@ -766,13 +921,30 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
         error = payload.get("error", "Unknown error")
         alert = dbc.Alert(f"Stats error ({status_code}): {error}", color="danger")
         empty = _empty_figure("No data")
-        return alert, _summary_cards({}), dbc.Alert("No separation data", color="warning"), empty, empty, empty, empty, empty, [], None, empty, alert
+        return (
+            alert,
+            _summary_cards({}),
+            dbc.Alert("No separation data", color="warning"),
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            [],
+            None,
+            empty,
+            alert,
+        )
 
     meta = payload.get("meta", {})
     data = payload.get("data", {})
     pca_payload, source = _select_lens_pca(data)
     mds_payload, mds_source = _select_lens_mds(data)
     separation_payload, separation_source = _select_lens_separation(data)
+    time_series_payload, time_series_source = _select_lens_time_series(data)
+    temporal_embedding_payload, temporal_embedding_source = _select_lens_temporal_embedding(data)
     pca_status = str(pca_payload.get("status") or "missing")
     pca_reason = str(pca_payload.get("reason") or "").strip()
     mds_status = str(mds_payload.get("status") or "missing")
@@ -785,6 +957,10 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
         f"Basis: {pca_payload.get('basis', 'n/a')}",
         f"MDS source: {mds_source}",
         f"MDS status: {mds_status}",
+        f"Time-series source: {time_series_source}",
+        f"Time-series status: {time_series_payload.get('status', 'missing')}",
+        f"Temporal embedding source: {temporal_embedding_source}",
+        f"Temporal embedding status: {temporal_embedding_payload.get('status', 'missing')}",
         f"Separation source: {separation_source}",
         f"Separation status: {separation_payload.get('status', 'missing')}",
     ]
@@ -808,6 +984,8 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
         _explained_variance_figure(pca_payload),
         _article_scatter_figure(pca_payload, color_mode, point_limit),
         _mds_scatter_figure(mds_payload, color_mode, point_limit),
+        _lens_time_series_figure(time_series_payload),
+        _temporal_embedding_figure(temporal_embedding_payload),
         _variance_driver_figure(pca_payload),
         _loadings_heatmap_figure(pca_payload),
         component_options,

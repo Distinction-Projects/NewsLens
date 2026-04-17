@@ -215,6 +215,21 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("article_points", lens_mds)
         self.assertIn("source_centroids", lens_mds)
         self.assertEqual(lens_mds["status"], "unavailable")
+        self.assertIn("lens_time_series", stats)
+        lens_time_series = stats["lens_time_series"]
+        self.assertIn("status", lens_time_series)
+        self.assertIn("reason", lens_time_series)
+        self.assertIn("lenses", lens_time_series)
+        self.assertIn("dates", lens_time_series)
+        self.assertIn("series", lens_time_series)
+        self.assertIn("summary", lens_time_series)
+        self.assertIn("lens_temporal_embedding", stats)
+        lens_temporal_embedding = stats["lens_temporal_embedding"]
+        self.assertIn("status", lens_temporal_embedding)
+        self.assertIn("reason", lens_temporal_embedding)
+        self.assertIn("points", lens_temporal_embedding)
+        self.assertIn("day_centroids", lens_temporal_embedding)
+        self.assertIn("summary", lens_temporal_embedding)
         self.assertIn("lens_views", stats)
         lens_views = stats["lens_views"]
         self.assertIn("coverage_mode", lens_views)
