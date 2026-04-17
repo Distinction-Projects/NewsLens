@@ -36,6 +36,16 @@ def _select_lens_mds(data: dict) -> tuple[dict, str]:
     return {}, "missing"
 
 
+def _select_lens_separation(data: dict) -> tuple[dict, str]:
+    if not isinstance(data, dict):
+        return {}, "missing"
+    derived = data.get("derived")
+    derived_sep = derived.get("lens_separation") if isinstance(derived, dict) else None
+    if isinstance(derived_sep, dict):
+        return derived_sep, "derived"
+    return {}, "missing"
+
+
 def _empty_figure(title: str) -> go.Figure:
     figure = go.Figure()
     figure.update_layout(
@@ -512,6 +522,105 @@ def _component_table(pca_payload: dict):
     )
 
 
+def _separation_summary(separation_payload: dict):
+    status = str(separation_payload.get("status") or "missing")
+    reason = str(separation_payload.get("reason") or "").strip()
+    if status != "ok":
+        detail = f"Lens separation unavailable ({status})"
+        if reason:
+            detail = f"{detail}: {reason}"
+        return dbc.Alert(detail, color="warning", className="mb-3")
+
+    n_sources = separation_payload.get("n_sources")
+    ratio = separation_payload.get("separation_ratio")
+    silhouette = separation_payload.get("silhouette_like_mean")
+    within = separation_payload.get("within_source_mean_distance")
+    between = separation_payload.get("between_source_centroid_mean_distance")
+    return dbc.Row(
+        [
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.P("Sources", className="text-muted mb-1"),
+                            html.H4(str(n_sources) if isinstance(n_sources, (int, float)) else "n/a", className="mb-0"),
+                        ]
+                    ),
+                    className="shadow-sm",
+                ),
+                md=6,
+                lg=2,
+                className="mb-3",
+            ),
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.P("Separation Ratio", className="text-muted mb-1"),
+                            html.H4(f"{float(ratio):.2f}" if isinstance(ratio, (int, float)) else "n/a", className="mb-0"),
+                        ]
+                    ),
+                    className="shadow-sm",
+                ),
+                md=6,
+                lg=2,
+                className="mb-3",
+            ),
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.P("Silhouette-like Mean", className="text-muted mb-1"),
+                            html.H4(
+                                f"{float(silhouette):.3f}" if isinstance(silhouette, (int, float)) else "n/a",
+                                className="mb-0",
+                            ),
+                        ]
+                    ),
+                    className="shadow-sm",
+                ),
+                md=6,
+                lg=2,
+                className="mb-3",
+            ),
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.P("Within Mean Dist", className="text-muted mb-1"),
+                            html.H4(
+                                f"{float(within):.3f}" if isinstance(within, (int, float)) else "n/a",
+                                className="mb-0",
+                            ),
+                        ]
+                    ),
+                    className="shadow-sm",
+                ),
+                md=6,
+                lg=3,
+                className="mb-3",
+            ),
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.P("Between Centroid Mean Dist", className="text-muted mb-1"),
+                            html.H4(
+                                f"{float(between):.3f}" if isinstance(between, (int, float)) else "n/a",
+                                className="mb-0",
+                            ),
+                        ]
+                    ),
+                    className="shadow-sm",
+                ),
+                md=6,
+                lg=3,
+                className="mb-3",
+            ),
+        ]
+    )
+
+
 layout = dbc.Container(
     [
         dcc.Interval(id="news-lens-pca-load", interval=50, n_intervals=0, max_intervals=1),
@@ -592,6 +701,7 @@ layout = dbc.Container(
             className="mb-3",
         ),
         dbc.Row(id="news-lens-pca-cards"),
+        dbc.Row([dbc.Col(html.Div(id="news-lens-pca-separation"), width=12)]),
         dbc.Row(
             [
                 dbc.Col(dcc.Graph(id="news-lens-pca-explained"), lg=5, className="mb-3"),
@@ -624,6 +734,7 @@ layout = dbc.Container(
 @callback(
     Output("news-lens-pca-status", "children"),
     Output("news-lens-pca-cards", "children"),
+    Output("news-lens-pca-separation", "children"),
     Output("news-lens-pca-explained", "figure"),
     Output("news-lens-pca-scatter", "figure"),
     Output("news-lens-mds-scatter", "figure"),
@@ -655,12 +766,13 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
         error = payload.get("error", "Unknown error")
         alert = dbc.Alert(f"Stats error ({status_code}): {error}", color="danger")
         empty = _empty_figure("No data")
-        return alert, _summary_cards({}), empty, empty, empty, empty, empty, [], None, empty, alert
+        return alert, _summary_cards({}), dbc.Alert("No separation data", color="warning"), empty, empty, empty, empty, empty, [], None, empty, alert
 
     meta = payload.get("meta", {})
     data = payload.get("data", {})
     pca_payload, source = _select_lens_pca(data)
     mds_payload, mds_source = _select_lens_mds(data)
+    separation_payload, separation_source = _select_lens_separation(data)
     pca_status = str(pca_payload.get("status") or "missing")
     pca_reason = str(pca_payload.get("reason") or "").strip()
     mds_status = str(mds_payload.get("status") or "missing")
@@ -673,6 +785,8 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
         f"Basis: {pca_payload.get('basis', 'n/a')}",
         f"MDS source: {mds_source}",
         f"MDS status: {mds_status}",
+        f"Separation source: {separation_source}",
+        f"Separation status: {separation_payload.get('status', 'missing')}",
     ]
     if pca_reason:
         leading_parts.append(f"PCA reason: {pca_reason}")
@@ -690,6 +804,7 @@ def load_news_lens_pca(_load_tick, _refresh_clicks, color_by, max_points, select
     return (
         status_alert,
         _summary_cards(pca_payload),
+        _separation_summary(separation_payload),
         _explained_variance_figure(pca_payload),
         _article_scatter_figure(pca_payload, color_mode, point_limit),
         _mds_scatter_figure(mds_payload, color_mode, point_limit),

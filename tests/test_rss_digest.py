@@ -421,6 +421,15 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(len(mds["source_centroids"]), 2)
         self.assertIsInstance(mds["stress"], float)
 
+        separation = stats["lens_separation"]
+        self.assertEqual(separation["status"], "ok")
+        self.assertEqual(separation["n_articles"], 4)
+        self.assertEqual(separation["n_lenses"], 3)
+        self.assertEqual(separation["n_sources"], 2)
+        self.assertEqual(separation["coverage_mode"], "complete_rows")
+        self.assertIsInstance(separation["source_centroids"], list)
+        self.assertIsInstance(separation["centroid_distances"], list)
+
     def test_score_status_distinguishes_zero_from_unscorable(self):
         payload = {
             "articles": [

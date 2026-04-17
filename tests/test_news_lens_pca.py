@@ -1,7 +1,13 @@
 import unittest
 
 import src.app  # noqa: F401
-from src.pages.news_lens_pca import _mds_scatter_figure, _select_lens_mds, _select_lens_pca, _variance_driver_figure
+from src.pages.news_lens_pca import (
+    _mds_scatter_figure,
+    _select_lens_mds,
+    _select_lens_pca,
+    _select_lens_separation,
+    _variance_driver_figure,
+)
 
 
 class NewsLensPcaTests(unittest.TestCase):
@@ -34,6 +40,18 @@ class NewsLensPcaTests(unittest.TestCase):
         self.assertEqual(source, "derived")
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("dimensions"), ["MDS1", "MDS2"])
+
+    def test_select_lens_separation_prefers_derived(self):
+        payload, source = _select_lens_separation(
+            {
+                "derived": {"lens_separation": {"status": "ok", "separation_ratio": 1.5}},
+                "analysis": {"lens_separation": {"status": "legacy"}},
+            }
+        )
+
+        self.assertEqual(source, "derived")
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("separation_ratio"), 1.5)
 
     def test_mds_scatter_figure_renders_points_and_centroids(self):
         figure = _mds_scatter_figure(

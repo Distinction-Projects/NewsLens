@@ -186,6 +186,7 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("lens_inventory", stats_payload["data"]["derived"])
         self.assertIn("lens_pca", stats_payload["data"]["derived"])
         self.assertIn("lens_mds", stats_payload["data"]["derived"])
+        self.assertIn("lens_separation", stats_payload["data"]["derived"])
         lens_correlations = stats_payload["data"]["derived"]["lens_correlations"]
         self.assertIn("lenses", lens_correlations)
         self.assertIn("correlation", lens_correlations)
@@ -222,6 +223,12 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("stress", lens_mds)
         self.assertIn("article_points", lens_mds)
         self.assertIn("source_centroids", lens_mds)
+        lens_separation = stats_payload["data"]["derived"]["lens_separation"]
+        self.assertIn("status", lens_separation)
+        self.assertIn("reason", lens_separation)
+        self.assertIn("n_sources", lens_separation)
+        self.assertIn("separation_ratio", lens_separation)
+        self.assertIn("silhouette_like_mean", lens_separation)
         lens_views = stats_payload["data"]["derived"]["lens_views"]
         self.assertIn("coverage_mode", lens_views)
         self.assertIn("lens_names", lens_views)

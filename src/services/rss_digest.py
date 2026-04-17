@@ -1676,6 +1676,242 @@ def _lens_mds_from_records(
     }
 
 
+def _lens_separation_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    empty_payload = {
+        "status": "unavailable",
+        "reason": "",
+        "n_articles": 0,
+        "n_lenses": 0,
+        "n_sources": 0,
+        "source_counts": {},
+        "lenses": [],
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "none",
+        "within_source_mean_distance": None,
+        "between_source_centroid_mean_distance": None,
+        "between_source_centroid_min_distance": None,
+        "separation_ratio": None,
+        "silhouette_like_mean": None,
+        "silhouette_like_by_source": [],
+        "source_centroids": [],
+        "centroid_distances": [],
+    }
+    if np is None:
+        payload = dict(empty_payload)
+        payload["reason"] = "numpy is unavailable; lens separation diagnostics cannot be computed."
+        return payload
+
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        payload = dict(empty_payload)
+        payload["reason"] = "No article-level lens rows available for separation diagnostics."
+        return payload
+
+    discovered = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered]
+        ordered.extend(sorted(discovered - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered)
+
+    def _complete_matrix(required_lenses: list[str]) -> tuple[list[list[float]], list[str]]:
+        matrix: list[list[float]] = []
+        labels: list[str] = []
+        for row, label in zip(article_lens_percentages, source_labels):
+            values: list[float] = []
+            for lens_name in required_lenses:
+                value = row.get(lens_name)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    values = []
+                    break
+                values.append(float(value))
+            if values:
+                matrix.append(values)
+                labels.append(str(label))
+        return matrix, labels
+
+    matrix, matrix_labels = _complete_matrix(lens_names)
+    if not matrix and article_lens_percentages:
+        shared = set(article_lens_percentages[0].keys())
+        for row in article_lens_percentages[1:]:
+            shared &= set(row.keys())
+        shared = {
+            lens_name
+            for lens_name in shared
+            if isinstance(lens_name, str)
+            and all(isinstance(row.get(lens_name), (int, float)) and math.isfinite(float(row[lens_name])) for row in article_lens_percentages)
+        }
+        if preferred_lenses:
+            reduced_lenses = [lens_name for lens_name in preferred_lenses if lens_name in shared]
+            reduced_lenses.extend(sorted(shared - set(reduced_lenses)))
+        else:
+            reduced_lenses = sorted(shared)
+        if reduced_lenses:
+            lens_names = reduced_lenses
+            matrix, matrix_labels = _complete_matrix(lens_names)
+
+    source_counts: Counter[str] = Counter(matrix_labels)
+    if not matrix:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need complete source-lens rows to run separation diagnostics."
+        payload["n_lenses"] = len(lens_names)
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    matrix_np = np.asarray(matrix, dtype=float)
+    means_np = matrix_np.mean(axis=0)
+    centered_np = matrix_np - means_np
+    stds_np = centered_np.std(axis=0, ddof=0)
+    safe_stds_np = np.where(stds_np > 1e-12, stds_np, 1.0)
+    standardized_np = centered_np / safe_stds_np
+
+    n_articles = int(standardized_np.shape[0])
+    n_lenses = int(standardized_np.shape[1])
+    if n_articles < 2 or n_lenses < 1:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need at least 2 complete rows and 1 lens to run separation diagnostics."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["n_sources"] = len(source_counts)
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    source_to_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, label in enumerate(matrix_labels):
+        source_to_indices[str(label)].append(idx)
+    source_names = sorted(source_to_indices.keys())
+    n_sources = len(source_names)
+    if n_sources < 2:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need at least 2 sources to evaluate source separation."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["n_sources"] = n_sources
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        payload["coverage_mode"] = "complete_rows"
+        return payload
+
+    source_centroids_raw: dict[str, Any] = {}
+    source_rows: list[dict[str, Any]] = []
+    weighted_within_total = 0.0
+    weighted_within_n = 0
+    for source_name in source_names:
+        idxs = source_to_indices[source_name]
+        cluster_np = standardized_np[idxs, :]
+        centroid_np = cluster_np.mean(axis=0)
+        source_centroids_raw[source_name] = centroid_np
+        distances = np.sqrt(np.maximum(np.sum((cluster_np - centroid_np) * (cluster_np - centroid_np), axis=1), 0.0))
+        within_mean = float(distances.mean()) if len(distances) > 0 else None
+        if isinstance(within_mean, float):
+            weighted_within_total += within_mean * len(idxs)
+            weighted_within_n += len(idxs)
+        source_rows.append(
+            {
+                "source": source_name,
+                "count": len(idxs),
+                "within_mean_distance": within_mean,
+            }
+        )
+    source_rows.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+    within_source_mean_distance = (weighted_within_total / weighted_within_n) if weighted_within_n > 0 else None
+
+    centroid_distances: list[dict[str, Any]] = []
+    for row_idx, source_a in enumerate(source_names):
+        for col_idx in range(row_idx + 1, len(source_names)):
+            source_b = source_names[col_idx]
+            centroid_a = source_centroids_raw[source_a]
+            centroid_b = source_centroids_raw[source_b]
+            distance = float(np.sqrt(np.maximum(np.sum((centroid_a - centroid_b) * (centroid_a - centroid_b)), 0.0)))
+            centroid_distances.append(
+                {
+                    "source_a": source_a,
+                    "source_b": source_b,
+                    "distance": distance,
+                }
+            )
+    centroid_distances.sort(key=lambda row: float(row.get("distance") or 0.0), reverse=True)
+    centroid_distance_values = [float(row["distance"]) for row in centroid_distances if isinstance(row.get("distance"), (int, float))]
+    between_source_centroid_mean_distance = (
+        (sum(centroid_distance_values) / len(centroid_distance_values)) if centroid_distance_values else None
+    )
+    between_source_centroid_min_distance = min(centroid_distance_values) if centroid_distance_values else None
+
+    separation_ratio = None
+    if isinstance(between_source_centroid_mean_distance, (int, float)) and isinstance(within_source_mean_distance, (int, float)):
+        if within_source_mean_distance > 1e-12:
+            separation_ratio = float(between_source_centroid_mean_distance) / float(within_source_mean_distance)
+
+    diff_np = standardized_np[:, np.newaxis, :] - standardized_np[np.newaxis, :, :]
+    distance_np = np.sqrt(np.maximum(np.sum(diff_np * diff_np, axis=2), 0.0))
+    point_silhouette: list[float] = []
+    source_silhouette_values: dict[str, list[float]] = defaultdict(list)
+    for idx, source_name in enumerate(matrix_labels):
+        same_idxs = source_to_indices[source_name]
+        a_value = None
+        if len(same_idxs) > 1:
+            same_without_self = [j for j in same_idxs if j != idx]
+            if same_without_self:
+                a_value = float(np.mean([distance_np[idx, j] for j in same_without_self]))
+
+        b_candidates: list[float] = []
+        for other_source in source_names:
+            if other_source == source_name:
+                continue
+            other_idxs = source_to_indices[other_source]
+            if other_idxs:
+                b_candidates.append(float(np.mean([distance_np[idx, j] for j in other_idxs])))
+        b_value = min(b_candidates) if b_candidates else None
+        if isinstance(a_value, (int, float)) and isinstance(b_value, (int, float)):
+            denom = max(float(a_value), float(b_value))
+            if denom > 1e-12:
+                sil = (float(b_value) - float(a_value)) / denom
+                point_silhouette.append(sil)
+                source_silhouette_values[source_name].append(sil)
+
+    silhouette_like_mean = (sum(point_silhouette) / len(point_silhouette)) if point_silhouette else None
+    silhouette_like_by_source = [
+        {
+            "source": source_name,
+            "count": len(values),
+            "silhouette_like_mean": (sum(values) / len(values)) if values else None,
+        }
+        for source_name, values in source_silhouette_values.items()
+    ]
+    silhouette_like_by_source.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "n_articles": n_articles,
+        "n_lenses": n_lenses,
+        "n_sources": n_sources,
+        "source_counts": dict(source_counts),
+        "lenses": lens_names,
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "complete_rows",
+        "within_source_mean_distance": within_source_mean_distance,
+        "between_source_centroid_mean_distance": between_source_centroid_mean_distance,
+        "between_source_centroid_min_distance": between_source_centroid_min_distance,
+        "separation_ratio": separation_ratio,
+        "silhouette_like_mean": silhouette_like_mean,
+        "silhouette_like_by_source": silhouette_like_by_source,
+        "source_centroids": source_rows,
+        "centroid_distances": centroid_distances[:25],
+    }
+
+
 def _oneway_source_effect(
     values: list[float],
     source_labels: list[str],
@@ -2308,6 +2544,11 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         article_meta_rows=article_meta_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    lens_separation = _lens_separation_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -2361,6 +2602,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_correlations": lens_correlations,
         "lens_pca": lens_pca,
         "lens_mds": lens_mds,
+        "lens_separation": lens_separation,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "lens_views": lens_views,
