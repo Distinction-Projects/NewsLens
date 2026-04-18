@@ -230,6 +230,13 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("points", lens_temporal_embedding)
         self.assertIn("day_centroids", lens_temporal_embedding)
         self.assertIn("summary", lens_temporal_embedding)
+        self.assertIn("lens_temporal_embedding_mds", stats)
+        lens_temporal_embedding_mds = stats["lens_temporal_embedding_mds"]
+        self.assertIn("status", lens_temporal_embedding_mds)
+        self.assertIn("reason", lens_temporal_embedding_mds)
+        self.assertIn("points", lens_temporal_embedding_mds)
+        self.assertIn("day_centroids", lens_temporal_embedding_mds)
+        self.assertIn("summary", lens_temporal_embedding_mds)
         self.assertIn("lens_views", stats)
         lens_views = stats["lens_views"]
         self.assertIn("coverage_mode", lens_views)

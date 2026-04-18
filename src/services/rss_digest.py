@@ -1631,6 +1631,7 @@ def _lens_mds_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
+                "published_at": _clean_text(meta_row.get("published_at")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "mds1": float(coords_np[row_offset][0]) if dimension_count >= 1 else None,
@@ -2112,6 +2113,125 @@ def _lens_temporal_embedding_from_pca(pca_payload: dict[str, Any]) -> dict[str, 
         "reason": "",
         "basis": "pc1_pc2_with_day_index",
         "coverage_mode": "pca_points_with_datetime",
+        "points": points,
+        "day_centroids": day_centroids,
+        "summary": {
+            "articles": len(points),
+            "days": len(day_centroids),
+            "start_date": day_values[0] if day_values else None,
+            "end_date": day_values[-1] if day_values else None,
+        },
+    }
+
+
+def _lens_temporal_embedding_from_mds(mds_payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(mds_payload, dict):
+        return {
+            "status": "unavailable",
+            "reason": "MDS payload missing.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    if str(mds_payload.get("status") or "") != "ok":
+        reason = str(mds_payload.get("reason") or "").strip() or "MDS is unavailable."
+        return {
+            "status": "unavailable",
+            "reason": reason,
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    article_points = mds_payload.get("article_points")
+    if not isinstance(article_points, list):
+        return {
+            "status": "unavailable",
+            "reason": "MDS article points are missing.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    valid_rows: list[dict[str, Any]] = []
+    for row in article_points:
+        if not isinstance(row, dict):
+            continue
+        mds1 = row.get("mds1")
+        mds2 = row.get("mds2")
+        published_at = row.get("published_at")
+        if not isinstance(mds1, (int, float)) or not isinstance(mds2, (int, float)):
+            continue
+        dt = parse_datetime(published_at)
+        if dt is None:
+            continue
+        valid_rows.append(
+            {
+                "id": _clean_text(row.get("id")),
+                "title": _clean_text(row.get("title")) or "Untitled",
+                "source": _clean_text(row.get("source")) or "Unknown",
+                "strongest_lens": _clean_text(row.get("strongest_lens")) or "Unknown",
+                "strongest_percent": _coerce_float(row.get("strongest_percent")),
+                "published_at": _as_iso_utc(dt),
+                "date": dt.date().isoformat(),
+                "mds1": float(mds1),
+                "mds2": float(mds2),
+            }
+        )
+
+    if not valid_rows:
+        return {
+            "status": "unavailable",
+            "reason": "No MDS article points have valid publication timestamps.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    day_values = sorted({row["date"] for row in valid_rows if isinstance(row.get("date"), str)})
+    day_index_map = {day: idx for idx, day in enumerate(day_values)}
+    day_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    points: list[dict[str, Any]] = []
+    for row in valid_rows:
+        day = row["date"]
+        day_index = day_index_map.get(day)
+        if day_index is None:
+            continue
+        enriched = dict(row)
+        enriched["day_index"] = day_index
+        points.append(enriched)
+        day_groups[day].append(enriched)
+
+    day_centroids: list[dict[str, Any]] = []
+    for day in day_values:
+        rows = day_groups.get(day, [])
+        if not rows:
+            continue
+        day_centroids.append(
+            {
+                "date": day,
+                "day_index": day_index_map[day],
+                "count": len(rows),
+                "mds1": sum(float(row["mds1"]) for row in rows) / len(rows),
+                "mds2": sum(float(row["mds2"]) for row in rows) / len(rows),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "mds1_mds2_with_day_index",
+        "coverage_mode": "mds_points_with_datetime",
         "points": points,
         "day_centroids": day_centroids,
         "summary": {
@@ -2763,6 +2883,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     )
     lens_time_series = _lens_time_series_from_records(records, lens_maxima)
     lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
+    lens_temporal_embedding_mds = _lens_temporal_embedding_from_mds(lens_mds)
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -2819,6 +2940,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_separation": lens_separation,
         "lens_time_series": lens_time_series,
         "lens_temporal_embedding": lens_temporal_embedding,
+        "lens_temporal_embedding_mds": lens_temporal_embedding_mds,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "lens_views": lens_views,
