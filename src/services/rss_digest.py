@@ -2332,6 +2332,30 @@ def _permutation_pvalue_for_source_effect(
     return (extreme + 1) / (valid + 1)
 
 
+def _benjamini_hochberg_adjust(p_values: list[float | None]) -> list[float | None]:
+    """Return Benjamini-Hochberg FDR-adjusted p-values, preserving input order."""
+    indexed: list[tuple[int, float]] = []
+    for idx, raw in enumerate(p_values):
+        if isinstance(raw, (int, float)):
+            value = float(raw)
+            if math.isfinite(value):
+                indexed.append((idx, min(max(value, 0.0), 1.0)))
+
+    adjusted: list[float | None] = [None] * len(p_values)
+    m = len(indexed)
+    if m == 0:
+        return adjusted
+
+    indexed.sort(key=lambda item: item[1])
+    running_min = 1.0
+    for rank, (orig_idx, p_value) in enumerate(reversed(indexed), start=1):
+        i = m - rank + 1
+        candidate = (p_value * m) / i
+        running_min = min(running_min, candidate)
+        adjusted[orig_idx] = min(max(running_min, 0.0), 1.0)
+    return adjusted
+
+
 def _source_lens_effects_from_records(
     article_lens_percentages: list[dict[str, float]],
     source_labels: list[str],
@@ -2344,6 +2368,11 @@ def _source_lens_effects_from_records(
             "status": "unavailable",
             "reason": "No article-level lens rows available.",
             "permutations": permutations,
+            "multiple_testing": {
+                "method": "benjamini-hochberg",
+                "target": "p_perm_raw",
+                "n_tests": 0,
+            },
             "rows": [],
         }
 
@@ -2404,6 +2433,7 @@ def _source_lens_effects_from_records(
                 "f_stat": observed_f,
                 "eta_sq": _coerce_float(effect.get("eta_sq")),
                 "p_perm": p_perm,
+                "p_perm_raw": p_perm,
                 "source_gap": source_gap,
                 "top_source": high_source,
                 "bottom_source": low_source,
@@ -2411,6 +2441,14 @@ def _source_lens_effects_from_records(
                 "source_counts": source_counts,
             }
         )
+
+    adjusted_p_values = _benjamini_hochberg_adjust([_coerce_float(row.get("p_perm_raw")) for row in rows])
+    for row, p_fdr in zip(rows, adjusted_p_values):
+        p_raw = _coerce_float(row.get("p_perm_raw"))
+        row["p_value_raw"] = p_raw
+        row["p_value_fdr"] = p_fdr
+        row["p_perm_fdr"] = p_fdr
+        row["significant_fdr_0_05"] = bool(isinstance(p_fdr, (int, float)) and float(p_fdr) <= 0.05)
 
     rows.sort(
         key=lambda row: (
@@ -2425,12 +2463,22 @@ def _source_lens_effects_from_records(
             "status": "ok",
             "reason": "",
             "permutations": permutations,
+            "multiple_testing": {
+                "method": "benjamini-hochberg",
+                "target": "p_perm_raw",
+                "n_tests": sum(1 for row in rows if isinstance(row.get("p_perm_raw"), (int, float))),
+            },
             "rows": rows,
         }
     return {
         "status": "unavailable",
         "reason": "Insufficient source coverage for one-way lens tests.",
         "permutations": permutations,
+        "multiple_testing": {
+            "method": "benjamini-hochberg",
+            "target": "p_perm_raw",
+            "n_tests": 0,
+        },
         "rows": [],
     }
 
@@ -2720,6 +2768,363 @@ def _source_differentiation_from_records(
     return summary
 
 
+def _topic_memberships_from_record(
+    record: dict[str, Any],
+    topic_display_labels: dict[str, str],
+) -> list[str]:
+    topic_values = _unique_case_insensitive(_values_to_strings(record.get("topic_tags")))
+    topic_keys: list[str] = []
+    for topic_value in topic_values:
+        topic_text = topic_value.strip()
+        if not topic_text:
+            continue
+        topic_key = topic_text.lower()
+        if topic_key not in topic_display_labels:
+            topic_display_labels[topic_key] = topic_text
+        topic_keys.append(topic_key)
+
+    if topic_keys:
+        return topic_keys
+
+    topic_display_labels.setdefault("__untagged__", "Untagged")
+    return ["__untagged__"]
+
+
+def _source_topic_control_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    topic_keys_for_lens_rows: list[list[str]],
+    topic_display_labels: dict[str, str],
+    pooled_source_differentiation: dict[str, Any],
+    pooled_source_lens_effects: dict[str, Any],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
+        "topic_basis": "topic_tags",
+        "multi_topic_policy": "duplicate_per_topic",
+        "pooled_label": "topic-confounded",
+        "pooled": {
+            "source_differentiation": (
+                pooled_source_differentiation if isinstance(pooled_source_differentiation, dict) else {}
+            ),
+            "source_lens_effects": pooled_source_lens_effects if isinstance(pooled_source_lens_effects, dict) else {},
+        },
+        "topics": [],
+        "summary": {
+            "topic_count": 0,
+            "analyzed_topic_count": 0,
+            "unavailable_topic_count": 0,
+        },
+    }
+    if (
+        not article_lens_percentages
+        or len(article_lens_percentages) != len(source_labels)
+        or len(article_lens_percentages) != len(topic_keys_for_lens_rows)
+    ):
+        return base_payload
+
+    topic_display = dict(topic_display_labels)
+    topic_display.setdefault("__untagged__", "Untagged")
+
+    topic_buckets: dict[str, dict[str, Any]] = defaultdict(lambda: {"rows": [], "source_labels": []})
+    for lens_row, source_label, topic_keys in zip(
+        article_lens_percentages,
+        source_labels,
+        topic_keys_for_lens_rows,
+    ):
+        effective_keys: list[str] = []
+        if isinstance(topic_keys, list):
+            for topic_key in topic_keys:
+                if not isinstance(topic_key, str):
+                    continue
+                normalized_key = topic_key.strip().lower()
+                if not normalized_key:
+                    continue
+                effective_keys.append(normalized_key)
+        if not effective_keys:
+            effective_keys = ["__untagged__"]
+
+        unique_keys = list(dict.fromkeys(effective_keys))
+        for topic_key in unique_keys:
+            topic_buckets[topic_key]["rows"].append(lens_row)
+            topic_buckets[topic_key]["source_labels"].append(source_label)
+
+    topic_rows: list[dict[str, Any]] = []
+    analyzed_topic_count = 0
+    unavailable_topic_count = 0
+    for topic_key, bucket in topic_buckets.items():
+        topic_rows_data = bucket["rows"] if isinstance(bucket.get("rows"), list) else []
+        topic_source_labels = bucket["source_labels"] if isinstance(bucket.get("source_labels"), list) else []
+        source_counts_counter: Counter[str] = Counter(topic_source_labels)
+        source_counts = {
+            source_name: count
+            for source_name, count in sorted(
+                source_counts_counter.items(),
+                key=lambda item: (-item[1], item[0].lower()),
+            )
+        }
+
+        topic_source_lens_effects = _source_lens_effects_from_records(
+            topic_rows_data,
+            topic_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+        topic_source_differentiation = _source_differentiation_from_records(
+            topic_rows_data,
+            topic_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+
+        differentiation_ok = (
+            isinstance(topic_source_differentiation, dict)
+            and str(topic_source_differentiation.get("status") or "") == "ok"
+        )
+        effects_ok = (
+            isinstance(topic_source_lens_effects, dict)
+            and str(topic_source_lens_effects.get("status") or "") == "ok"
+        )
+        if differentiation_ok or effects_ok:
+            analyzed_topic_count += 1
+        else:
+            unavailable_topic_count += 1
+
+        topic_rows.append(
+            {
+                "topic": topic_display.get(topic_key) or topic_key,
+                "n_articles": len(topic_rows_data),
+                "n_sources": len(source_counts_counter),
+                "source_counts": source_counts,
+                "source_differentiation": topic_source_differentiation,
+                "source_lens_effects": topic_source_lens_effects,
+            }
+        )
+
+    topic_rows.sort(key=lambda row: (-int(row.get("n_articles", 0)), str(row.get("topic", "")).lower()))
+    base_payload["topics"] = topic_rows
+    base_payload["summary"] = {
+        "topic_count": len(topic_rows),
+        "analyzed_topic_count": analyzed_topic_count,
+        "unavailable_topic_count": unavailable_topic_count,
+    }
+    return base_payload
+
+
+def _source_reliability_assessment(
+    source_differentiation: dict[str, Any] | None,
+    source_lens_effects: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_differentiation = source_differentiation if isinstance(source_differentiation, dict) else {}
+    source_lens_effects = source_lens_effects if isinstance(source_lens_effects, dict) else {}
+
+    differentiation_status = str(source_differentiation.get("status") or "unavailable")
+    effects_status = str(source_lens_effects.get("status") or "unavailable")
+    n_articles = int(source_differentiation.get("n_articles", 0) or 0)
+    n_sources = int(source_differentiation.get("n_sources", 0) or 0)
+    n_lenses = int(source_differentiation.get("n_lenses", 0) or 0)
+
+    classification = (
+        source_differentiation.get("classification")
+        if isinstance(source_differentiation.get("classification"), dict)
+        else {}
+    )
+    multivariate = (
+        source_differentiation.get("multivariate")
+        if isinstance(source_differentiation.get("multivariate"), dict)
+        else {}
+    )
+    rows = source_lens_effects.get("rows") if isinstance(source_lens_effects.get("rows"), list) else []
+    q_values = [float(row.get("p_perm_fdr")) for row in rows if isinstance(row, dict) and isinstance(row.get("p_perm_fdr"), (int, float))]
+    significant_lens_count = sum(1 for q_value in q_values if q_value <= 0.05)
+    best_q = min(q_values) if q_values else None
+    total_lens_tests = len(q_values)
+
+    classification_accuracy = _coerce_float(classification.get("accuracy"))
+    classification_baseline = _coerce_float(classification.get("baseline_accuracy"))
+    classification_lift = None
+    if classification_accuracy is not None and classification_baseline is not None:
+        classification_lift = classification_accuracy - classification_baseline
+
+    classification_p = _coerce_float(classification.get("p_perm"))
+    multivariate_p = _coerce_float(multivariate.get("p_perm"))
+
+    flags: list[str] = []
+    if n_articles < 20:
+        flags.append("low_article_count")
+    if n_sources < 2:
+        flags.append("insufficient_source_count")
+    if differentiation_status != "ok":
+        flags.append("source_differentiation_unavailable")
+    if effects_status != "ok":
+        flags.append("source_lens_effects_unavailable")
+    if significant_lens_count == 0 and effects_status == "ok":
+        flags.append("no_fdr_significant_lens_effects")
+    if isinstance(classification_lift, (int, float)) and float(classification_lift) <= 0:
+        flags.append("no_classification_lift")
+
+    if differentiation_status != "ok" and effects_status != "ok":
+        return {
+            "status": "unavailable",
+            "tier": "unavailable",
+            "score": None,
+            "flags": list(dict.fromkeys(flags)),
+            "metrics": {
+                "n_articles": n_articles,
+                "n_sources": n_sources,
+                "n_lenses": n_lenses,
+                "classification_accuracy": classification_accuracy,
+                "classification_baseline_accuracy": classification_baseline,
+                "classification_lift": classification_lift,
+                "classification_p_perm": classification_p,
+                "multivariate_p_perm": multivariate_p,
+                "best_q_value": best_q,
+                "fdr_significant_lens_count": significant_lens_count,
+                "total_lens_tests": total_lens_tests,
+            },
+            "reason": "Source differentiation and lens effects are both unavailable for this slice.",
+        }
+
+    score = 0.0
+    if n_articles >= 120:
+        score += 0.25
+    elif n_articles >= 60:
+        score += 0.20
+    elif n_articles >= 30:
+        score += 0.15
+    elif n_articles >= 15:
+        score += 0.10
+    elif n_articles >= 8:
+        score += 0.05
+
+    if n_sources >= 4:
+        score += 0.15
+    elif n_sources == 3:
+        score += 0.10
+    elif n_sources == 2:
+        score += 0.05
+
+    if isinstance(multivariate_p, (int, float)):
+        if multivariate_p <= 0.05:
+            score += 0.20
+        elif multivariate_p <= 0.10:
+            score += 0.10
+    if isinstance(classification_p, (int, float)):
+        if classification_p <= 0.05:
+            score += 0.20
+        elif classification_p <= 0.10:
+            score += 0.10
+
+    if isinstance(classification_lift, (int, float)):
+        if classification_lift >= 0.15:
+            score += 0.15
+        elif classification_lift >= 0.08:
+            score += 0.10
+        elif classification_lift >= 0.03:
+            score += 0.05
+
+    if significant_lens_count >= 3:
+        score += 0.15
+    elif significant_lens_count >= 1:
+        score += 0.10
+
+    if isinstance(best_q, (int, float)):
+        if best_q <= 0.01:
+            score += 0.10
+        elif best_q <= 0.05:
+            score += 0.07
+        elif best_q <= 0.10:
+            score += 0.04
+
+    if total_lens_tests >= 10:
+        score += 0.05
+    elif total_lens_tests >= 5:
+        score += 0.03
+
+    if n_articles < 12:
+        score = min(score, 0.35)
+    elif n_articles < 20:
+        score = min(score, 0.50)
+    if n_sources < 2:
+        score = min(score, 0.25)
+
+    score = min(max(score, 0.0), 1.0)
+    if score >= 0.70:
+        tier = "high"
+    elif score >= 0.45:
+        tier = "moderate"
+    else:
+        tier = "low"
+
+    return {
+        "status": "ok",
+        "tier": tier,
+        "score": score,
+        "flags": list(dict.fromkeys(flags)),
+        "metrics": {
+            "n_articles": n_articles,
+            "n_sources": n_sources,
+            "n_lenses": n_lenses,
+            "classification_accuracy": classification_accuracy,
+            "classification_baseline_accuracy": classification_baseline,
+            "classification_lift": classification_lift,
+            "classification_p_perm": classification_p,
+            "multivariate_p_perm": multivariate_p,
+            "best_q_value": best_q,
+            "fdr_significant_lens_count": significant_lens_count,
+            "total_lens_tests": total_lens_tests,
+        },
+        "reason": "",
+    }
+
+
+def _source_reliability_from_topic_control(
+    source_differentiation: dict[str, Any],
+    source_lens_effects: dict[str, Any],
+    source_topic_control: dict[str, Any],
+) -> dict[str, Any]:
+    pooled_assessment = _source_reliability_assessment(source_differentiation, source_lens_effects)
+
+    topic_rows = source_topic_control.get("topics") if isinstance(source_topic_control.get("topics"), list) else []
+    topic_assessments: list[dict[str, Any]] = []
+    for topic_row in topic_rows:
+        if not isinstance(topic_row, dict):
+            continue
+        topic_name = str(topic_row.get("topic") or "").strip()
+        if not topic_name:
+            continue
+        topic_assessments.append(
+            {
+                "topic": topic_name,
+                "assessment": _source_reliability_assessment(
+                    topic_row.get("source_differentiation") if isinstance(topic_row.get("source_differentiation"), dict) else {},
+                    topic_row.get("source_lens_effects") if isinstance(topic_row.get("source_lens_effects"), dict) else {},
+                ),
+            }
+        )
+
+    tier_counter: Counter[str] = Counter()
+    status_counter: Counter[str] = Counter()
+    for topic_item in topic_assessments:
+        assessment = topic_item.get("assessment") if isinstance(topic_item.get("assessment"), dict) else {}
+        tier_counter[str(assessment.get("tier") or "unavailable")] += 1
+        status_counter[str(assessment.get("status") or "unavailable")] += 1
+
+    return {
+        "method": "heuristic-v1",
+        "pooled_label": "topic-confounded",
+        "pooled": pooled_assessment,
+        "topics": topic_assessments,
+        "summary": {
+            "topic_count": len(topic_assessments),
+            "ok_topic_count": status_counter.get("ok", 0),
+            "unavailable_topic_count": status_counter.get("unavailable", 0),
+            "high_count": tier_counter.get("high", 0),
+            "moderate_count": tier_counter.get("moderate", 0),
+            "low_count": tier_counter.get("low", 0),
+            "unavailable_count": tier_counter.get("unavailable", 0),
+        },
+    }
+
+
 def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     input_records = extract_records(payload)
     excluded_unscraped_articles = len(input_records) - len(records)
@@ -2739,6 +3144,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     placeholder_zero_source_counter: Counter[str] = Counter()
     article_lens_percentages: list[dict[str, float]] = []
     source_labels_for_lens_rows: list[str] = []
+    topic_keys_for_lens_rows: list[list[str]] = []
+    topic_display_labels: dict[str, str] = {}
     article_meta_for_lens_rows: list[dict[str, Any]] = []
 
     scored_articles = 0
@@ -2793,9 +3200,11 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
 
         lens_percentages = _record_lens_percentages(record, lens_maxima)
         if lens_percentages:
+            topic_keys = _topic_memberships_from_record(record, topic_display_labels)
             strongest_lens, strongest_percent = max(lens_percentages.items(), key=lambda item: item[1])
             article_lens_percentages.append(lens_percentages)
             source_labels_for_lens_rows.append(source_label)
+            topic_keys_for_lens_rows.append(topic_keys)
             article_meta_for_lens_rows.append(
                 {
                     "id": _clean_text(record.get("id")),
@@ -2894,6 +3303,20 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         source_labels_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    source_topic_control = _source_topic_control_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        topic_keys_for_lens_rows,
+        topic_display_labels,
+        pooled_source_differentiation=source_differentiation,
+        pooled_source_lens_effects=source_lens_effects,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    source_reliability = _source_reliability_from_topic_control(
+        source_differentiation,
+        source_lens_effects,
+        source_topic_control,
+    )
     lens_views = _lens_views_from_records(records, lens_maxima)
     data_quality = _data_quality_from_records(records)
     lens_inventory = _lens_inventory_from_records(
@@ -2943,6 +3366,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_temporal_embedding_mds": lens_temporal_embedding_mds,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
+        "source_topic_control": source_topic_control,
+        "source_reliability": source_reliability,
         "lens_views": lens_views,
         "source_tag_views": source_tag_views,
         "data_quality": data_quality,

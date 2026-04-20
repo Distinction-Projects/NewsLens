@@ -210,6 +210,28 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("status", source_lens_effects)
         self.assertIn("permutations", source_lens_effects)
         self.assertIn("rows", source_lens_effects)
+        source_topic_control = stats_payload["data"]["derived"]["source_topic_control"]
+        self.assertEqual(source_topic_control["topic_basis"], "topic_tags")
+        self.assertEqual(source_topic_control["multi_topic_policy"], "duplicate_per_topic")
+        self.assertEqual(source_topic_control["pooled_label"], "topic-confounded")
+        self.assertIn("topics", source_topic_control)
+        self.assertIn("summary", source_topic_control)
+        self.assertEqual(
+            source_topic_control["pooled"]["source_differentiation"],
+            source_differentiation,
+        )
+        self.assertEqual(
+            source_topic_control["pooled"]["source_lens_effects"],
+            source_lens_effects,
+        )
+        self.assertIn("source_reliability", stats_payload["data"]["derived"])
+        source_reliability = stats_payload["data"]["derived"]["source_reliability"]
+        self.assertEqual(source_reliability["method"], "heuristic-v1")
+        self.assertEqual(source_reliability["pooled_label"], "topic-confounded")
+        self.assertIn("pooled", source_reliability)
+        self.assertIn("topics", source_reliability)
+        self.assertIn("summary", source_reliability)
+        self.assertIn(source_reliability["pooled"].get("status"), {"ok", "unavailable"})
         lens_pca = stats_payload["data"]["derived"]["lens_pca"]
         self.assertIn("status", lens_pca)
         self.assertIn("reason", lens_pca)
