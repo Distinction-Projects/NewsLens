@@ -38,3 +38,18 @@ Open:
 
 - `http://localhost:3000/`
 - `http://localhost:3000/news`
+
+## E2E smoke test (Playwright)
+
+From `frontend-node/` with the app running on port 3000:
+
+```bash
+npm run e2e:install-browsers
+npm run e2e:smoke
+```
+
+Optional override:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 npm run e2e:smoke
+```
