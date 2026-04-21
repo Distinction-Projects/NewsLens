@@ -26,6 +26,7 @@ DEFAULT_RSS_DAILY_JSON_URL = (
 DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE = (
     "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json"
 )
+CONFIG_PLACEHOLDER_VALUES = {"", "-", "none", "null", "unset", "changeme"}
 
 RECORD_LIST_KEYS = (
     "digests",
@@ -177,6 +178,15 @@ def _clean_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _clean_config_url(value: Any) -> str | None:
+    text = _clean_text(value)
+    if text is None:
+        return None
+    if text.lower() in CONFIG_PLACEHOLDER_VALUES:
+        return None
+    return text
 
 
 def extract_records(payload: Any) -> list[dict[str, Any]]:
@@ -3395,15 +3405,15 @@ class RssDigestClient:
         timeout_seconds: int | None = None,
     ) -> None:
         self.current_source_url = (
-            source_url
-            or os.getenv("RSS_DAILY_JSON_URL")
+            _clean_config_url(source_url)
+            or _clean_config_url(os.getenv("RSS_DAILY_JSON_URL"))
             or DEFAULT_RSS_DAILY_JSON_URL
-        ).strip()
+        )
         self.source_url = self.current_source_url
         self.history_url_template = (
-            os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE")
+            _clean_config_url(os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE"))
             or DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE
-        ).strip()
+        )
         self.current_ttl_seconds = _coerce_int(
             ttl_seconds if ttl_seconds is not None else os.getenv("RSS_CACHE_TTL_SECONDS"),
             default=3600,

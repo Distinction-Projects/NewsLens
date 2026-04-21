@@ -1,9 +1,12 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from src.services.rss_digest import (
+    DEFAULT_RSS_DAILY_JSON_URL,
+    DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE,
     RssDigestClient,
     derive_stats,
     filter_records,
@@ -76,6 +79,26 @@ SAMPLE_PAYLOAD = {
 
 
 class RssDigestServiceTests(unittest.TestCase):
+    def test_placeholder_env_urls_fall_back_to_defaults(self):
+        previous_current = os.environ.get("RSS_DAILY_JSON_URL")
+        previous_history = os.environ.get("RSS_HISTORY_JSON_URL_TEMPLATE")
+        try:
+            os.environ["RSS_DAILY_JSON_URL"] = "-"
+            os.environ["RSS_HISTORY_JSON_URL_TEMPLATE"] = "-"
+            client = RssDigestClient()
+            self.assertEqual(client.current_source_url, DEFAULT_RSS_DAILY_JSON_URL)
+            self.assertEqual(client.history_url_template, DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE)
+        finally:
+            if previous_current is None:
+                os.environ.pop("RSS_DAILY_JSON_URL", None)
+            else:
+                os.environ["RSS_DAILY_JSON_URL"] = previous_current
+
+            if previous_history is None:
+                os.environ.pop("RSS_HISTORY_JSON_URL_TEMPLATE", None)
+            else:
+                os.environ["RSS_HISTORY_JSON_URL_TEMPLATE"] = previous_history
+
     def test_parse_datetime_supports_rfc2822(self):
         parsed = parse_datetime("Mon, 02 Mar 2026 15:25:29 -0500")
         self.assertIsNotNone(parsed)
