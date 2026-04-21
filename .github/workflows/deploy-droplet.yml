@@ -17,6 +17,8 @@ jobs:
       DEPLOY_HOST: ${{ secrets.DROPLET_HOST }}
       DEPLOY_USER: ${{ secrets.DROPLET_USER }}
       DEPLOY_PORT: ${{ secrets.DROPLET_PORT }}
+      RSS_DAILY_JSON_URL: ${{ secrets.RSS_DAILY_JSON_URL }}
+      RSS_HISTORY_JSON_URL_TEMPLATE: ${{ secrets.RSS_HISTORY_JSON_URL_TEMPLATE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,6 +48,30 @@ jobs:
             --exclude '.tmp' \
             -e "ssh -p ${DEPLOY_PORT:-22}" \
             ./ "${DEPLOY_USER}@${DEPLOY_HOST}:/srv/newslens/app/"
+
+      - name: Sync Runtime Env To Droplet
+        run: |
+          set -euo pipefail
+
+          {
+            printf 'RSS_DAILY_JSON_URL=%s\n' "${RSS_DAILY_JSON_URL}"
+            printf 'RSS_HISTORY_JSON_URL_TEMPLATE=%s\n' "${RSS_HISTORY_JSON_URL_TEMPLATE}"
+          } > /tmp/newslens.env
+
+          scp -P "${DEPLOY_PORT:-22}" /tmp/newslens.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/newslens.env"
+          rm -f /tmp/newslens.env
+
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" << 'EOF'
+          set -euo pipefail
+
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ]; then
+            SUDO="sudo"
+          fi
+
+          ${SUDO} install -m 640 -o root -g newslens /tmp/newslens.env /etc/newslens/newslens.env
+          rm -f /tmp/newslens.env
+          EOF
 
       - name: Restart Service And Smoke Check
         run: |
