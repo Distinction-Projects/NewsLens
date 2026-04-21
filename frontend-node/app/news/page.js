@@ -3,37 +3,50 @@ import { NEWS_PAGES } from "../../lib/newsPages";
 
 export const dynamic = "force-dynamic";
 
+const LIVE_PAGE_SLUGS = new Set([
+  "digest",
+  "stats",
+  "sources",
+  "lenses",
+  "tags",
+  "source-tag-matrix",
+  "trends",
+  "data-quality",
+  "workflow-status",
+  "raw-json",
+  "integration"
+]);
+
 export default function NewsIndexPage() {
+  const livePages = NEWS_PAGES.filter((page) => LIVE_PAGE_SLUGS.has(page.slug));
+  const scaffoldedPages = NEWS_PAGES.filter((page) => !LIVE_PAGE_SLUGS.has(page.slug));
+
   return (
     <>
       <div className="panel">
         <h2>Migration Status</h2>
         <p className="muted">
-          `digest`, `stats`, and `sources` now read live data from FastAPI. Remaining pages are scaffolded and will
-          be migrated progressively.
+          {livePages.length} news pages now read live data from FastAPI. The remaining routes stay scaffolded while
+          the Dash interactions are ported progressively.
         </p>
       </div>
 
       <div className="panel">
-        <h2>Start Here</h2>
+        <h2>Live Node Pages</h2>
         <ul>
-          <li>
-            <Link href="/news/digest">News Digest</Link>
-          </li>
-          <li>
-            <Link href="/news/stats">News Stats</Link>
-          </li>
-          <li>
-            <Link href="/news/sources">News Sources</Link>
-          </li>
+          {livePages.map((page) => (
+            <li key={page.slug}>
+              <Link href={`/news/${page.slug}`}>{page.title}</Link>
+            </li>
+          ))}
         </ul>
       </div>
 
       <div className="panel">
-        <h2>All Routed Pages</h2>
-        <p className="muted">All legacy `/news/*` routes now exist in this Next.js surface.</p>
+        <h2>Scaffolded Routes</h2>
+        <p className="muted">These routes exist in Next.js and will be migrated in later passes.</p>
         <ul>
-          {NEWS_PAGES.map((page) => (
+          {scaffoldedPages.map((page) => (
             <li key={page.slug}>
               <Link href={`/news/${page.slug}`}>{page.title}</Link>
             </li>
