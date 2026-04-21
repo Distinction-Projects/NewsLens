@@ -112,7 +112,7 @@ def _source_tag_counts(
             rows = [
                 (str(row.get("tag", "")).strip(), int(row.get("count", 0) or 0))
                 for row in source_rows
-                if isinstance(row, dict) and str(row.get("tag", "")).strip()
+                if isinstance(row, dict) and str(row.get("tag", "")).strip() and str(row.get("tag", "")).strip().lower() != "general"
             ]
             rows.sort(key=lambda item: (-item[1], item[0].lower()))
             return rows[:top_n]
@@ -122,7 +122,7 @@ def _source_tag_counts(
         source = str(row.get("source", "Unknown"))
         tag = str(row.get("tag", "")).strip()
         count = int(row.get("count", 0) or 0)
-        if source != source_name or not tag:
+        if source != source_name or not tag or tag.lower() == "general":
             continue
         rows.append((tag, count))
     rows.sort(key=lambda item: (-item[1], item[0].lower()))

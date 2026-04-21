@@ -59,9 +59,14 @@ def _score_tag_heatmap_figure(heatmap_rows: list[dict]) -> go.Figure:
     if not heatmap_rows:
         return _empty_figure("Score Bin x Tag Count Bin")
 
-    score_bins = sorted({str(row.get("score_bin", "")) for row in heatmap_rows})
-    tag_bins = sorted({str(row.get("tag_count_bin", "")) for row in heatmap_rows})
-    value_map = {(str(row.get("tag_count_bin", "")), str(row.get("score_bin", ""))): int(row.get("count", 0) or 0) for row in heatmap_rows}
+    # Filter out 'general' tag from heatmap
+    filtered_rows = [row for row in heatmap_rows if row.get("tag", "").lower() != "general"]
+    if not filtered_rows:
+        return _empty_figure("Score Bin x Tag Count Bin")
+
+    score_bins = sorted({str(row.get("score_bin", "")) for row in filtered_rows})
+    tag_bins = sorted({str(row.get("tag_count_bin", "")) for row in filtered_rows})
+    value_map = {(str(row.get("tag_count_bin", "")), str(row.get("score_bin", ""))): int(row.get("count", 0) or 0) for row in filtered_rows}
 
     z_values = []
     for tag_bin in tag_bins:

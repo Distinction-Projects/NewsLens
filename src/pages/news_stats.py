@@ -56,7 +56,9 @@ def _source_figure(source_counts: list[dict]) -> go.Figure:
 
 
 def _tag_figure(tag_counts: list[dict]) -> go.Figure:
-    top_tags = tag_counts[:12]
+    # Filter out 'general' tag and take top 12
+    filtered_tags = [row for row in tag_counts if row.get("tag", "").lower() != "general"]
+    top_tags = filtered_tags[:12]
     if not top_tags:
         return _empty_figure("Top Tags")
     figure = go.Figure(
