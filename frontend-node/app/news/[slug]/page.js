@@ -208,10 +208,6 @@ async function renderPageBody(slug, title) {
   return renderPlaceholder(title);
 }
 
-export function generateStaticParams() {
-  return NEWS_PAGES.map((entry) => ({ slug: entry.slug }));
-}
-
 export default async function NewsDetailPage({ params }) {
   const page = getNewsPage(params.slug);
   if (!page) {

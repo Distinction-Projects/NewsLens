@@ -45,6 +45,9 @@ jobs:
             --exclude '*.pyc' \
             --exclude '.pytest_cache' \
             --exclude '.mypy_cache' \
+            --exclude '.next' \
+            --exclude 'test-results' \
+            --exclude 'playwright-report' \
             --exclude '.tmp' \
             -e "ssh -p ${DEPLOY_PORT:-22}" \
             ./ "${DEPLOY_USER}@${DEPLOY_HOST}:/srv/newslens/app/"
@@ -73,7 +76,7 @@ jobs:
           rm -f /tmp/newslens.env
           EOF
 
-      - name: Restart Service And Smoke Check
+      - name: Build Services And Smoke Check
         run: |
           set -euo pipefail
           ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" << 'EOF'
@@ -84,25 +87,101 @@ jobs:
             SUDO="sudo"
           fi
 
+          run_as_app_user() {
+            if [ "$(id -u)" -eq 0 ]; then
+              runuser -u newslens -- "$@"
+            else
+              sudo -u newslens "$@"
+            fi
+          }
+
+          if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then
+              curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+            else
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+            fi
+            ${SUDO} apt-get install -y nodejs
+          fi
+
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
           /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
-          ${SUDO} systemctl restart newslens
-          ${SUDO} systemctl is-active --quiet newslens
 
-          ok=0
+          run_as_app_user npm --prefix /srv/newslens/app/frontend-node ci
+          run_as_app_user env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
+            npm --prefix /srv/newslens/app/frontend-node run build
+
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens.service /etc/systemd/system/newslens.service
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-node.service /etc/systemd/system/newslens-node.service
+          ${SUDO} systemctl daemon-reload
+          ${SUDO} systemctl enable newslens newslens-api newslens-node
+
+          ${SUDO} systemctl restart newslens
+          ${SUDO} systemctl restart newslens-api
+          ${SUDO} systemctl restart newslens-node
+          ${SUDO} systemctl is-active --quiet newslens
+          ${SUDO} systemctl is-active --quiet newslens-api
+          ${SUDO} systemctl is-active --quiet newslens-node
+
+          dash_ok=0
           for i in $(seq 1 36); do
             if curl -fsS --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/ >/dev/null; then
-              ok=1
+              dash_ok=1
               break
             fi
             sleep 5
           done
 
-          if [ "$ok" -eq 1 ]; then
+          api_ok=0
+          for i in $(seq 1 36); do
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/stats >/dev/null; then
+              api_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          node_ok=0
+          for i in $(seq 1 36); do
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/news/digest >/dev/null; then
+              node_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$dash_ok" -ne 1 ] || [ "$api_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
+            ${SUDO} systemctl status newslens --no-pager || true
+            ${SUDO} systemctl status newslens-api --no-pager || true
+            ${SUDO} systemctl status newslens-node --no-pager || true
+            ${SUDO} journalctl -u newslens -n 80 --no-pager || true
+            ${SUDO} journalctl -u newslens-api -n 120 --no-pager || true
+            ${SUDO} journalctl -u newslens-node -n 120 --no-pager || true
+            exit 1
+          fi
+
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/nginx.newslens.conf /etc/nginx/sites-available/newslens
+          ${SUDO} ln -sf /etc/nginx/sites-available/newslens /etc/nginx/sites-enabled/newslens
+          ${SUDO} rm -f /etc/nginx/sites-enabled/default
+          ${SUDO} nginx -t
+          ${SUDO} systemctl restart nginx
+
+          nginx_ok=0
+          for i in $(seq 1 12); do
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/news/digest >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/stats >/dev/null; then
+              nginx_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$nginx_ok" -eq 1 ]; then
             exit 0
           fi
 
-          ${SUDO} systemctl status newslens --no-pager || true
-          ${SUDO} journalctl -u newslens -n 120 --no-pager || true
+          ${SUDO} systemctl status nginx --no-pager || true
+          ${SUDO} journalctl -u nginx -n 120 --no-pager || true
           exit 1
           EOF

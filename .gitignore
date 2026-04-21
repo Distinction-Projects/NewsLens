@@ -10,3 +10,6 @@ NewsLens.code-workspace
 node_modules/
 .next/
 dist/
+test-results/
+playwright-report/
+.playwright-cli/
