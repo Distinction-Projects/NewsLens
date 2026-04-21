@@ -7,6 +7,11 @@ The repo has two distinct surfaces:
 - a local sentiment-model playground for evaluating and testing text classifiers
 - a read-only RSS/OpenAI news dashboard fed from the public `RSS_Feeds` repository
 
+The repo now also includes an incremental migration path to a split architecture:
+
+- FastAPI backend adapter for news endpoints (`src/api/fastapi_app.py`)
+- starter Node.js frontend scaffold (`frontend-node/`)
+
 The important runtime behavior is that daily upstream JSON updates do not require a new image build. The deployed app keeps the same image and refreshes the RSS contract at runtime.
 
 ## What the app includes
@@ -76,6 +81,19 @@ If you want the same startup shape as DigitalOcean, run Gunicorn locally:
 PORT=8050 WORKER_TMP_DIR=/tmp gunicorn --chdir src --timeout 600 app:server --bind 0.0.0.0:$PORT --worker-tmp-dir ${WORKER_TMP_DIR}
 ```
 
+## FastAPI local run (split architecture backend)
+
+```bash
+source .venv/bin/activate
+uvicorn src.api.fastapi_app:app --reload --port 9000
+```
+
+Optional CORS override for a separate frontend:
+
+```bash
+export NEWS_API_CORS_ORIGINS="http://localhost:3000,https://your-frontend.example.com"
+```
+
 ## App bootstrap rules
 
 The bootstrap in `src/app.py` is intentionally opinionated:
@@ -136,6 +154,8 @@ Available endpoints:
 - `GET /api/news/digest`
 - `GET /api/news/digest/latest`
 - `GET /api/news/stats`
+- `GET /api/news/upstream`
+- `GET /api/news/export`
 - `GET /health/news-freshness`
 
 Supported digest and stats query params:
@@ -161,6 +181,19 @@ Metadata returned by the news endpoints includes:
 - `source_url`
 - `input_articles_count`
 - `excluded_unscraped_articles`
+
+## Node frontend starter
+
+The `frontend-node/` folder contains a Next.js starter that consumes FastAPI news routes.
+
+```bash
+cd frontend-node
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Set `NEXT_PUBLIC_NEWS_API_BASE_URL` in `.env.local` if your backend URL differs from `http://127.0.0.1:9000`.
 
 ## Local verification
 

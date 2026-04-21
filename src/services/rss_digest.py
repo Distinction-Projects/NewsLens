@@ -26,6 +26,7 @@ DEFAULT_RSS_DAILY_JSON_URL = (
 DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE = (
     "https://raw.githubusercontent.com/Distinction-Projects/RSS_Feeds/main/data/history/rss_openai_daily_{date}.json"
 )
+CONFIG_PLACEHOLDER_VALUES = {"", "-", "none", "null", "unset", "changeme"}
 
 RECORD_LIST_KEYS = (
     "digests",
@@ -179,6 +180,15 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
+def _clean_config_url(value: Any) -> str | None:
+    text = _clean_text(value)
+    if text is None:
+        return None
+    if text.lower() in CONFIG_PLACEHOLDER_VALUES:
+        return None
+    return text
+
+
 def extract_records(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
@@ -281,18 +291,25 @@ def normalize_article(article: dict[str, Any]) -> dict[str, Any]:
     published_at = _as_iso_utc(published_dt)
 
     score = article.get("score")
-    score_obj = score if isinstance(score, dict) else {}
-    score_value = _coerce_float(score_obj.get("value"))
-    score_max_value = _coerce_float(score_obj.get("max_value"))
-    score_percent = _coerce_float(score_obj.get("percent"))
-    if score_percent is None and score_value is not None and score_max_value and score_max_value > 0:
-        score_percent = (score_value / score_max_value) * 100
+    has_input_score_object = isinstance(score, dict)
+    score_obj = score if has_input_score_object else {}
 
     rubric_count_raw = score_obj.get("rubric_count")
     try:
         rubric_count = int(rubric_count_raw) if rubric_count_raw is not None else None
     except (TypeError, ValueError):
         rubric_count = None
+
+    legacy_value = _coerce_float(score_obj.get("value"))
+    legacy_max_value = _coerce_float(score_obj.get("max_value"))
+    legacy_percent = _coerce_float(score_obj.get("percent"))
+    if (
+        legacy_percent is None
+        and isinstance(legacy_value, (int, float))
+        and isinstance(legacy_max_value, (int, float))
+        and legacy_max_value > 0
+    ):
+        legacy_percent = (legacy_value / legacy_max_value) * 100.0
 
     normalized = {
         "id": _clean_text(article.get("id")),
@@ -314,11 +331,14 @@ def normalize_article(article: dict[str, Any]) -> dict[str, Any]:
             "url": _clean_text(feed_obj.get("url")),
         },
         "score": {
-            "value": score_value,
-            "max_value": score_max_value,
-            "percent": score_percent,
+            "present": has_input_score_object,
             "rubric_count": rubric_count,
             "lens_scores": _normalize_score_lens_scores(score_obj.get("lens_scores")),
+            "legacy_total": {
+                "value": legacy_value,
+                "max_value": legacy_max_value,
+                "percent": legacy_percent,
+            },
         },
         "scraped": article.get("scraped"),
         "scrape_error": article.get("scrape_error"),
@@ -406,42 +426,11 @@ def sort_records_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(records, key=lambda row: _record_datetime(row) or epoch, reverse=True)
 
 
-_SCORE_DISTRIBUTION_BINS = (
-    {"label": "0-20", "min": 0, "max": 20},
-    {"label": "20-40", "min": 20, "max": 40},
-    {"label": "40-60", "min": 40, "max": 60},
-    {"label": "60-80", "min": 60, "max": 80},
-    {"label": "80-100", "min": 80, "max": 100},
-)
-_SCORE_HISTOGRAM_BIN_LABELS = tuple(f"{start}-{start + 10}" for start in range(0, 100, 10))
 _TAG_COUNT_DISTRIBUTION_LABELS = ("0", "1", "2", "3", "4", "5+")
-_TAG_COUNT_HEATMAP_LABELS = ("0", "1", "2", "3", "4+")
-_SCORE_HEATMAP_LABELS = tuple(bin_def["label"] for bin_def in _SCORE_DISTRIBUTION_BINS)
 _SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=200, minimum=0)
 _SOURCE_EFFECT_RANDOM_SEED = 17
 _PCA_MAX_COMPONENTS = _coerce_int(os.getenv("RSS_PCA_MAX_COMPONENTS"), default=6, minimum=1)
 _MDS_MAX_DIMENSIONS = _coerce_int(os.getenv("RSS_MDS_MAX_DIMENSIONS"), default=3, minimum=1)
-
-
-def _score_distribution_bin_index(score_percent: float) -> int:
-    if score_percent < 20:
-        return 0
-    if score_percent < 40:
-        return 1
-    if score_percent < 60:
-        return 2
-    if score_percent < 80:
-        return 3
-    return 4
-
-
-def _score_histogram_label(score_percent: float) -> str:
-    bounded = min(max(score_percent, 0.0), 100.0)
-    if bounded >= 100.0:
-        return "90-100"
-    lower = int(bounded // 10) * 10
-    upper = lower + 10
-    return f"{lower}-{upper}"
 
 
 def _tag_count_distribution_label(tag_count: int) -> str:
@@ -458,10 +447,6 @@ def _tag_count_heatmap_label(tag_count: int) -> str:
     if tag_count >= 4:
         return "4+"
     return str(tag_count)
-
-
-def _score_heatmap_label(score_percent: float) -> str:
-    return _SCORE_DISTRIBUTION_BINS[_score_distribution_bin_index(score_percent)]["label"]
 
 
 def _lens_max_map_from_analysis(analysis: Any) -> dict[str, float]:
@@ -532,71 +517,61 @@ def _ordered_lenses(preferred: list[str], discovered: set[str]) -> list[str]:
     return ordered
 
 
-def _overall_percent_for_record(record: dict[str, Any]) -> float | None:
-    score = record.get("score")
-    score_obj = score if isinstance(score, dict) else {}
-    percent = _coerce_float(score_obj.get("percent"))
-    if percent is not None:
-        return min(max(percent, 0.0), 100.0)
-    return None
-
-
 def _score_details_for_record(record: dict[str, Any]) -> dict[str, Any]:
     score = record.get("score")
     score_obj = score if isinstance(score, dict) else {}
-    has_score_object = isinstance(score, dict)
-
-    max_value = _coerce_float(score_obj.get("max_value"))
-    value = _coerce_float(score_obj.get("value"))
-    percent = _coerce_float(score_obj.get("percent"))
-    has_positive_scale = max_value is not None and max_value > 0
-    if percent is None and value is not None and has_positive_scale:
-        percent = (value / max_value) * 100.0
+    present_raw = score_obj.get("present")
+    has_score_object = bool(present_raw) if isinstance(present_raw, bool) else isinstance(score, dict)
 
     lens_scores = score_obj.get("lens_scores")
     lens_scores_obj = lens_scores if isinstance(lens_scores, dict) else {}
-    has_numeric_lens_signal = False
+    lens_percent_values: list[float] = []
     for lens_payload in lens_scores_obj.values():
         if isinstance(lens_payload, dict):
-            if any(_coerce_float(lens_payload.get(key)) is not None for key in ("value", "percent", "max_value")):
-                has_numeric_lens_signal = True
-                break
+            percent = _coerce_float(lens_payload.get("percent"))
+            if percent is None:
+                value = _coerce_float(lens_payload.get("value"))
+                max_value = _coerce_float(lens_payload.get("max_value"))
+                if value is not None and max_value is not None and max_value > 0:
+                    percent = (value / max_value) * 100.0
+            if percent is None:
+                continue
+            lens_percent_values.append(min(max(percent, 0.0), 100.0))
             continue
         if isinstance(lens_payload, (int, float)):
-            has_numeric_lens_signal = True
-            break
+            lens_percent_values.append(min(max(float(lens_payload), 0.0), 100.0))
 
-    has_value = value is not None
-    has_percent = percent is not None
-    bounded_percent = min(max(percent, 0.0), 100.0) if has_percent else None
-    is_zero_percent = isinstance(bounded_percent, (int, float)) and abs(float(bounded_percent)) < 1e-9
-    is_positive_percent = isinstance(bounded_percent, (int, float)) and float(bounded_percent) > 0.0
+    has_numeric_lens_signal = bool(lens_percent_values)
+    legacy_total = score_obj.get("legacy_total")
+    legacy_total_obj = legacy_total if isinstance(legacy_total, dict) else {}
+    legacy_value = _coerce_float(legacy_total_obj.get("value"))
+    legacy_max_value = _coerce_float(legacy_total_obj.get("max_value"))
+    legacy_percent = _coerce_float(legacy_total_obj.get("percent"))
+    legacy_fields = [legacy_value, legacy_max_value, legacy_percent]
+    has_any_legacy_numeric = any(isinstance(value, (int, float)) for value in legacy_fields)
+    has_positive_legacy_signal = any(
+        isinstance(value, (int, float)) and float(value) > 0.0 for value in legacy_fields
+    )
 
-    positive_percent = isinstance(bounded_percent, (int, float)) and float(bounded_percent) > 0.0
-    positive_value = isinstance(value, (int, float)) and float(value) > 0.0
-
-    scored = False
-    if has_positive_scale and (has_value or has_percent):
+    if has_numeric_lens_signal:
+        is_zero_percent = all(abs(value) < 1e-9 for value in lens_percent_values)
+        is_positive_percent = any(value > 0.0 for value in lens_percent_values)
         scored = True
-    elif has_numeric_lens_signal:
-        scored = True
-    elif positive_percent:
-        scored = True
-    elif has_percent and positive_value:
-        scored = True
+    else:
+        is_zero_percent = False
+        is_positive_percent = False
+        scored = False
 
     likely_placeholder_zero = (
         has_score_object
         and not scored
-        and is_zero_percent
-        and not has_positive_scale
-        and not positive_value
         and not has_numeric_lens_signal
+        and (not has_any_legacy_numeric or not has_positive_legacy_signal)
     )
 
     return {
         "status": "scored" if scored else "unscorable",
-        "percent": bounded_percent if scored else None,
+        "percent": None,
         "has_score_object": has_score_object,
         "is_zero_percent": bool(scored and is_zero_percent),
         "is_positive_percent": bool(scored and is_positive_percent),
@@ -635,7 +610,6 @@ def _data_quality_from_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         ("AI Summary", lambda row: row.get("ai_summary")),
         ("Summary", lambda row: row.get("summary")),
         ("Tags", lambda row: row.get("tags")),
-        ("Score Percent", lambda row: (row.get("score") or {}).get("percent") if isinstance(row.get("score"), dict) else None),
         ("Lens Scores", lambda row: (row.get("score") or {}).get("lens_scores") if isinstance(row.get("score"), dict) else None),
     ]
 
@@ -688,7 +662,6 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
                 "title": _clean_text(record.get("title")) or "Untitled",
                 "source": source_name,
                 "published": _clean_text(record.get("published")) or _clean_text(record.get("published_at")),
-                "overall_percent": _overall_percent_for_record(record),
                 "lens_scores": lens_scores,
                 "strongest_lens": strongest_lens,
                 "strongest_percent": strongest_percent,
@@ -704,14 +677,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
     lens_names = _ordered_lenses(list(lens_maxima.keys()), discovered_lenses)
 
     by_source_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    by_source_overall: dict[str, list[float]] = defaultdict(list)
     by_source_count: Counter[str] = Counter()
     for row in article_rows:
         source_name = str(row.get("source") or "Unknown")
         by_source_count[source_name] += 1
-        overall_percent = row.get("overall_percent")
-        if isinstance(overall_percent, (int, float)):
-            by_source_overall[source_name].append(float(overall_percent))
 
         lens_scores = row.get("lens_scores")
         lens_score_obj = lens_scores if isinstance(lens_scores, dict) else {}
@@ -726,21 +695,14 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
             values = by_source_lens[source_name].get(lens_name, [])
             if values:
                 lens_means[lens_name] = sum(values) / len(values)
-        overall_values = by_source_overall.get(source_name, [])
         source_rows.append(
             {
                 "source": source_name,
                 "article_count": count,
-                "overall_avg": (sum(overall_values) / len(overall_values)) if overall_values else None,
                 "lens_means": lens_means,
             }
         )
 
-    source_overall_values = [
-        float(row["overall_avg"])
-        for row in source_rows
-        if isinstance(row.get("overall_avg"), (int, float))
-    ]
     source_lens_average_rows: list[dict[str, Any]] = []
     for lens_name in lens_names:
         values = [
@@ -804,14 +766,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
     )
 
     dominant_counter: Counter[str] = Counter()
-    overall_values: list[float] = []
     for row in article_rows:
         strongest_lens = row.get("strongest_lens")
         if isinstance(strongest_lens, str) and strongest_lens:
             dominant_counter[strongest_lens] += 1
-        overall_percent = row.get("overall_percent")
-        if isinstance(overall_percent, (int, float)):
-            overall_values.append(float(overall_percent))
 
     lens_average_rows: list[dict[str, Any]] = []
     for lens_name in lens_names:
@@ -844,16 +802,10 @@ def _lens_views_from_records(records: list[dict[str, Any]], lens_maxima: dict[st
         "stability_rows": stability_rows,
         "summary": {
             "article_count": len(article_rows),
-            "overall_avg": (sum(overall_values) / len(overall_values)) if overall_values else None,
             "dominant_lens_counts": dominant_lens_counts,
             "lens_average_rows": lens_average_rows,
             "source_count": len(source_rows),
             "covered_articles": sum(int(row.get("article_count") or 0) for row in source_rows),
-            "source_overall_avg": (
-                sum(source_overall_values) / len(source_overall_values)
-                if source_overall_values
-                else None
-            ),
             "source_lens_average_rows": source_lens_average_rows,
             "stability_lens_count": len(stability_rows),
             "stability_avg_stddev": stability_avg_stddev,
@@ -1451,7 +1403,7 @@ def _lens_pca_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
-                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
+                "published_at": _clean_text(meta_row.get("published_at")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "pc1": float(scores_np[row_offset][0]) if component_count >= 1 else None,
@@ -1689,7 +1641,7 @@ def _lens_mds_from_records(
                 "id": _clean_text(meta_row.get("id")),
                 "title": title,
                 "source": point_source,
-                "overall_percent": _coerce_float(meta_row.get("overall_percent")),
+                "published_at": _clean_text(meta_row.get("published_at")),
                 "strongest_lens": _clean_text(meta_row.get("strongest_lens")),
                 "strongest_percent": _coerce_float(meta_row.get("strongest_percent")),
                 "mds1": float(coords_np[row_offset][0]) if dimension_count >= 1 else None,
@@ -1733,6 +1685,571 @@ def _lens_mds_from_records(
         "source_centroids": source_centroids,
         "basis": "euclidean_distance_on_zscore_lens_percentages",
         "coverage_mode": "complete_rows",
+    }
+
+
+def _lens_separation_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    empty_payload = {
+        "status": "unavailable",
+        "reason": "",
+        "n_articles": 0,
+        "n_lenses": 0,
+        "n_sources": 0,
+        "source_counts": {},
+        "lenses": [],
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "none",
+        "within_source_mean_distance": None,
+        "between_source_centroid_mean_distance": None,
+        "between_source_centroid_min_distance": None,
+        "separation_ratio": None,
+        "silhouette_like_mean": None,
+        "silhouette_like_by_source": [],
+        "source_centroids": [],
+        "centroid_distances": [],
+    }
+    if np is None:
+        payload = dict(empty_payload)
+        payload["reason"] = "numpy is unavailable; lens separation diagnostics cannot be computed."
+        return payload
+
+    if not article_lens_percentages or len(article_lens_percentages) != len(source_labels):
+        payload = dict(empty_payload)
+        payload["reason"] = "No article-level lens rows available for separation diagnostics."
+        return payload
+
+    discovered = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        ordered = [lens_name for lens_name in preferred_lenses if lens_name in discovered]
+        ordered.extend(sorted(discovered - set(ordered)))
+        lens_names = ordered
+    else:
+        lens_names = sorted(discovered)
+
+    def _complete_matrix(required_lenses: list[str]) -> tuple[list[list[float]], list[str]]:
+        matrix: list[list[float]] = []
+        labels: list[str] = []
+        for row, label in zip(article_lens_percentages, source_labels):
+            values: list[float] = []
+            for lens_name in required_lenses:
+                value = row.get(lens_name)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    values = []
+                    break
+                values.append(float(value))
+            if values:
+                matrix.append(values)
+                labels.append(str(label))
+        return matrix, labels
+
+    matrix, matrix_labels = _complete_matrix(lens_names)
+    if not matrix and article_lens_percentages:
+        shared = set(article_lens_percentages[0].keys())
+        for row in article_lens_percentages[1:]:
+            shared &= set(row.keys())
+        shared = {
+            lens_name
+            for lens_name in shared
+            if isinstance(lens_name, str)
+            and all(isinstance(row.get(lens_name), (int, float)) and math.isfinite(float(row[lens_name])) for row in article_lens_percentages)
+        }
+        if preferred_lenses:
+            reduced_lenses = [lens_name for lens_name in preferred_lenses if lens_name in shared]
+            reduced_lenses.extend(sorted(shared - set(reduced_lenses)))
+        else:
+            reduced_lenses = sorted(shared)
+        if reduced_lenses:
+            lens_names = reduced_lenses
+            matrix, matrix_labels = _complete_matrix(lens_names)
+
+    source_counts: Counter[str] = Counter(matrix_labels)
+    if not matrix:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need complete source-lens rows to run separation diagnostics."
+        payload["n_lenses"] = len(lens_names)
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    matrix_np = np.asarray(matrix, dtype=float)
+    means_np = matrix_np.mean(axis=0)
+    centered_np = matrix_np - means_np
+    stds_np = centered_np.std(axis=0, ddof=0)
+    safe_stds_np = np.where(stds_np > 1e-12, stds_np, 1.0)
+    standardized_np = centered_np / safe_stds_np
+
+    n_articles = int(standardized_np.shape[0])
+    n_lenses = int(standardized_np.shape[1])
+    if n_articles < 2 or n_lenses < 1:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need at least 2 complete rows and 1 lens to run separation diagnostics."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["n_sources"] = len(source_counts)
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        return payload
+
+    source_to_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, label in enumerate(matrix_labels):
+        source_to_indices[str(label)].append(idx)
+    source_names = sorted(source_to_indices.keys())
+    n_sources = len(source_names)
+    if n_sources < 2:
+        payload = dict(empty_payload)
+        payload["reason"] = "Need at least 2 sources to evaluate source separation."
+        payload["n_articles"] = n_articles
+        payload["n_lenses"] = n_lenses
+        payload["n_sources"] = n_sources
+        payload["source_counts"] = dict(source_counts)
+        payload["lenses"] = lens_names
+        payload["coverage_mode"] = "complete_rows"
+        return payload
+
+    source_centroids_raw: dict[str, Any] = {}
+    source_rows: list[dict[str, Any]] = []
+    weighted_within_total = 0.0
+    weighted_within_n = 0
+    for source_name in source_names:
+        idxs = source_to_indices[source_name]
+        cluster_np = standardized_np[idxs, :]
+        centroid_np = cluster_np.mean(axis=0)
+        source_centroids_raw[source_name] = centroid_np
+        distances = np.sqrt(np.maximum(np.sum((cluster_np - centroid_np) * (cluster_np - centroid_np), axis=1), 0.0))
+        within_mean = float(distances.mean()) if len(distances) > 0 else None
+        if isinstance(within_mean, float):
+            weighted_within_total += within_mean * len(idxs)
+            weighted_within_n += len(idxs)
+        source_rows.append(
+            {
+                "source": source_name,
+                "count": len(idxs),
+                "within_mean_distance": within_mean,
+            }
+        )
+    source_rows.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+    within_source_mean_distance = (weighted_within_total / weighted_within_n) if weighted_within_n > 0 else None
+
+    centroid_distances: list[dict[str, Any]] = []
+    for row_idx, source_a in enumerate(source_names):
+        for col_idx in range(row_idx + 1, len(source_names)):
+            source_b = source_names[col_idx]
+            centroid_a = source_centroids_raw[source_a]
+            centroid_b = source_centroids_raw[source_b]
+            distance = float(np.sqrt(np.maximum(np.sum((centroid_a - centroid_b) * (centroid_a - centroid_b)), 0.0)))
+            centroid_distances.append(
+                {
+                    "source_a": source_a,
+                    "source_b": source_b,
+                    "distance": distance,
+                }
+            )
+    centroid_distances.sort(key=lambda row: float(row.get("distance") or 0.0), reverse=True)
+    centroid_distance_values = [float(row["distance"]) for row in centroid_distances if isinstance(row.get("distance"), (int, float))]
+    between_source_centroid_mean_distance = (
+        (sum(centroid_distance_values) / len(centroid_distance_values)) if centroid_distance_values else None
+    )
+    between_source_centroid_min_distance = min(centroid_distance_values) if centroid_distance_values else None
+
+    separation_ratio = None
+    if isinstance(between_source_centroid_mean_distance, (int, float)) and isinstance(within_source_mean_distance, (int, float)):
+        if within_source_mean_distance > 1e-12:
+            separation_ratio = float(between_source_centroid_mean_distance) / float(within_source_mean_distance)
+
+    diff_np = standardized_np[:, np.newaxis, :] - standardized_np[np.newaxis, :, :]
+    distance_np = np.sqrt(np.maximum(np.sum(diff_np * diff_np, axis=2), 0.0))
+    point_silhouette: list[float] = []
+    source_silhouette_values: dict[str, list[float]] = defaultdict(list)
+    for idx, source_name in enumerate(matrix_labels):
+        same_idxs = source_to_indices[source_name]
+        a_value = None
+        if len(same_idxs) > 1:
+            same_without_self = [j for j in same_idxs if j != idx]
+            if same_without_self:
+                a_value = float(np.mean([distance_np[idx, j] for j in same_without_self]))
+
+        b_candidates: list[float] = []
+        for other_source in source_names:
+            if other_source == source_name:
+                continue
+            other_idxs = source_to_indices[other_source]
+            if other_idxs:
+                b_candidates.append(float(np.mean([distance_np[idx, j] for j in other_idxs])))
+        b_value = min(b_candidates) if b_candidates else None
+        if isinstance(a_value, (int, float)) and isinstance(b_value, (int, float)):
+            denom = max(float(a_value), float(b_value))
+            if denom > 1e-12:
+                sil = (float(b_value) - float(a_value)) / denom
+                point_silhouette.append(sil)
+                source_silhouette_values[source_name].append(sil)
+
+    silhouette_like_mean = (sum(point_silhouette) / len(point_silhouette)) if point_silhouette else None
+    silhouette_like_by_source = [
+        {
+            "source": source_name,
+            "count": len(values),
+            "silhouette_like_mean": (sum(values) / len(values)) if values else None,
+        }
+        for source_name, values in source_silhouette_values.items()
+    ]
+    silhouette_like_by_source.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("source", "")).lower()))
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "n_articles": n_articles,
+        "n_lenses": n_lenses,
+        "n_sources": n_sources,
+        "source_counts": dict(source_counts),
+        "lenses": lens_names,
+        "basis": "euclidean_distance_on_zscore_lens_percentages",
+        "coverage_mode": "complete_rows",
+        "within_source_mean_distance": within_source_mean_distance,
+        "between_source_centroid_mean_distance": between_source_centroid_mean_distance,
+        "between_source_centroid_min_distance": between_source_centroid_min_distance,
+        "separation_ratio": separation_ratio,
+        "silhouette_like_mean": silhouette_like_mean,
+        "silhouette_like_by_source": silhouette_like_by_source,
+        "source_centroids": source_rows,
+        "centroid_distances": centroid_distances[:25],
+    }
+
+
+def _lens_time_series_from_records(
+    records: list[dict[str, Any]],
+    lens_maxima: OrderedDict[str, float],
+) -> dict[str, Any]:
+    if not records:
+        return {
+            "status": "unavailable",
+            "reason": "No records available for lens time series.",
+            "basis": "daily_mean_lens_percentages",
+            "coverage_mode": "none",
+            "lenses": [],
+            "dates": [],
+            "series": [],
+            "summary": {"articles_with_time_and_lens_scores": 0, "days": 0},
+        }
+
+    per_day_lens: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    article_count = 0
+    for record in records:
+        published_dt = _record_datetime(record)
+        if published_dt is None:
+            continue
+        lens_percentages = _record_lens_percentages(record, lens_maxima)
+        if not lens_percentages:
+            continue
+        day_key = published_dt.date().isoformat()
+        article_count += 1
+        for lens_name, lens_value in lens_percentages.items():
+            if isinstance(lens_name, str) and isinstance(lens_value, (int, float)) and math.isfinite(float(lens_value)):
+                per_day_lens[day_key][lens_name].append(float(lens_value))
+
+    if not per_day_lens:
+        return {
+            "status": "unavailable",
+            "reason": "No records with both valid publication time and lens percentages.",
+            "basis": "daily_mean_lens_percentages",
+            "coverage_mode": "none",
+            "lenses": [],
+            "dates": [],
+            "series": [],
+            "summary": {"articles_with_time_and_lens_scores": 0, "days": 0},
+        }
+
+    dates = sorted(per_day_lens.keys())
+    discovered_lenses = sorted(
+        {
+            lens_name
+            for day_map in per_day_lens.values()
+            for lens_name in day_map.keys()
+            if isinstance(lens_name, str)
+        }
+    )
+
+    preferred = list(lens_maxima.keys())
+    ordered_lenses = [lens_name for lens_name in preferred if lens_name in discovered_lenses]
+    ordered_lenses.extend([lens_name for lens_name in discovered_lenses if lens_name not in set(ordered_lenses)])
+
+    series: list[dict[str, Any]] = []
+    for lens_name in ordered_lenses:
+        points: list[dict[str, Any]] = []
+        for day_key in dates:
+            values = per_day_lens.get(day_key, {}).get(lens_name, [])
+            if not values:
+                continue
+            points.append(
+                {
+                    "date": day_key,
+                    "mean": (sum(values) / len(values)),
+                    "median": statistics.median(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "count": len(values),
+                }
+            )
+        series.append({"lens": lens_name, "points": points})
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "daily_mean_lens_percentages",
+        "coverage_mode": "records_with_datetime_and_lens_scores",
+        "lenses": ordered_lenses,
+        "dates": dates,
+        "series": series,
+        "summary": {
+            "articles_with_time_and_lens_scores": article_count,
+            "days": len(dates),
+        },
+    }
+
+
+def _lens_temporal_embedding_from_pca(pca_payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(pca_payload, dict):
+        return {
+            "status": "unavailable",
+            "reason": "PCA payload missing.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    if str(pca_payload.get("status") or "") != "ok":
+        reason = str(pca_payload.get("reason") or "").strip() or "PCA is unavailable."
+        return {
+            "status": "unavailable",
+            "reason": reason,
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    article_points = pca_payload.get("article_points")
+    if not isinstance(article_points, list):
+        return {
+            "status": "unavailable",
+            "reason": "PCA article points are missing.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    valid_rows: list[dict[str, Any]] = []
+    for row in article_points:
+        if not isinstance(row, dict):
+            continue
+        pc1 = row.get("pc1")
+        pc2 = row.get("pc2")
+        published_at = row.get("published_at")
+        if not isinstance(pc1, (int, float)) or not isinstance(pc2, (int, float)):
+            continue
+        dt = parse_datetime(published_at)
+        if dt is None:
+            continue
+        valid_rows.append(
+            {
+                "id": _clean_text(row.get("id")),
+                "title": _clean_text(row.get("title")) or "Untitled",
+                "source": _clean_text(row.get("source")) or "Unknown",
+                "strongest_lens": _clean_text(row.get("strongest_lens")) or "Unknown",
+                "strongest_percent": _coerce_float(row.get("strongest_percent")),
+                "published_at": _as_iso_utc(dt),
+                "date": dt.date().isoformat(),
+                "pc1": float(pc1),
+                "pc2": float(pc2),
+            }
+        )
+
+    if not valid_rows:
+        return {
+            "status": "unavailable",
+            "reason": "No PCA article points have valid publication timestamps.",
+            "basis": "pc1_pc2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    day_values = sorted({row["date"] for row in valid_rows if isinstance(row.get("date"), str)})
+    day_index_map = {day: idx for idx, day in enumerate(day_values)}
+    day_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    points: list[dict[str, Any]] = []
+    for row in valid_rows:
+        day = row["date"]
+        day_index = day_index_map.get(day)
+        if day_index is None:
+            continue
+        enriched = dict(row)
+        enriched["day_index"] = day_index
+        points.append(enriched)
+        day_groups[day].append(enriched)
+
+    day_centroids: list[dict[str, Any]] = []
+    for day in day_values:
+        rows = day_groups.get(day, [])
+        if not rows:
+            continue
+        day_centroids.append(
+            {
+                "date": day,
+                "day_index": day_index_map[day],
+                "count": len(rows),
+                "pc1": sum(float(row["pc1"]) for row in rows) / len(rows),
+                "pc2": sum(float(row["pc2"]) for row in rows) / len(rows),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "pc1_pc2_with_day_index",
+        "coverage_mode": "pca_points_with_datetime",
+        "points": points,
+        "day_centroids": day_centroids,
+        "summary": {
+            "articles": len(points),
+            "days": len(day_centroids),
+            "start_date": day_values[0] if day_values else None,
+            "end_date": day_values[-1] if day_values else None,
+        },
+    }
+
+
+def _lens_temporal_embedding_from_mds(mds_payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(mds_payload, dict):
+        return {
+            "status": "unavailable",
+            "reason": "MDS payload missing.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    if str(mds_payload.get("status") or "") != "ok":
+        reason = str(mds_payload.get("reason") or "").strip() or "MDS is unavailable."
+        return {
+            "status": "unavailable",
+            "reason": reason,
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    article_points = mds_payload.get("article_points")
+    if not isinstance(article_points, list):
+        return {
+            "status": "unavailable",
+            "reason": "MDS article points are missing.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    valid_rows: list[dict[str, Any]] = []
+    for row in article_points:
+        if not isinstance(row, dict):
+            continue
+        mds1 = row.get("mds1")
+        mds2 = row.get("mds2")
+        published_at = row.get("published_at")
+        if not isinstance(mds1, (int, float)) or not isinstance(mds2, (int, float)):
+            continue
+        dt = parse_datetime(published_at)
+        if dt is None:
+            continue
+        valid_rows.append(
+            {
+                "id": _clean_text(row.get("id")),
+                "title": _clean_text(row.get("title")) or "Untitled",
+                "source": _clean_text(row.get("source")) or "Unknown",
+                "strongest_lens": _clean_text(row.get("strongest_lens")) or "Unknown",
+                "strongest_percent": _coerce_float(row.get("strongest_percent")),
+                "published_at": _as_iso_utc(dt),
+                "date": dt.date().isoformat(),
+                "mds1": float(mds1),
+                "mds2": float(mds2),
+            }
+        )
+
+    if not valid_rows:
+        return {
+            "status": "unavailable",
+            "reason": "No MDS article points have valid publication timestamps.",
+            "basis": "mds1_mds2_with_day_index",
+            "coverage_mode": "none",
+            "points": [],
+            "day_centroids": [],
+            "summary": {"articles": 0, "days": 0},
+        }
+
+    day_values = sorted({row["date"] for row in valid_rows if isinstance(row.get("date"), str)})
+    day_index_map = {day: idx for idx, day in enumerate(day_values)}
+    day_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    points: list[dict[str, Any]] = []
+    for row in valid_rows:
+        day = row["date"]
+        day_index = day_index_map.get(day)
+        if day_index is None:
+            continue
+        enriched = dict(row)
+        enriched["day_index"] = day_index
+        points.append(enriched)
+        day_groups[day].append(enriched)
+
+    day_centroids: list[dict[str, Any]] = []
+    for day in day_values:
+        rows = day_groups.get(day, [])
+        if not rows:
+            continue
+        day_centroids.append(
+            {
+                "date": day,
+                "day_index": day_index_map[day],
+                "count": len(rows),
+                "mds1": sum(float(row["mds1"]) for row in rows) / len(rows),
+                "mds2": sum(float(row["mds2"]) for row in rows) / len(rows),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "mds1_mds2_with_day_index",
+        "coverage_mode": "mds_points_with_datetime",
+        "points": points,
+        "day_centroids": day_centroids,
+        "summary": {
+            "articles": len(points),
+            "days": len(day_centroids),
+            "start_date": day_values[0] if day_values else None,
+            "end_date": day_values[-1] if day_values else None,
+        },
     }
 
 
@@ -1825,6 +2342,30 @@ def _permutation_pvalue_for_source_effect(
     return (extreme + 1) / (valid + 1)
 
 
+def _benjamini_hochberg_adjust(p_values: list[float | None]) -> list[float | None]:
+    """Return Benjamini-Hochberg FDR-adjusted p-values, preserving input order."""
+    indexed: list[tuple[int, float]] = []
+    for idx, raw in enumerate(p_values):
+        if isinstance(raw, (int, float)):
+            value = float(raw)
+            if math.isfinite(value):
+                indexed.append((idx, min(max(value, 0.0), 1.0)))
+
+    adjusted: list[float | None] = [None] * len(p_values)
+    m = len(indexed)
+    if m == 0:
+        return adjusted
+
+    indexed.sort(key=lambda item: item[1])
+    running_min = 1.0
+    for rank, (orig_idx, p_value) in enumerate(reversed(indexed), start=1):
+        i = m - rank + 1
+        candidate = (p_value * m) / i
+        running_min = min(running_min, candidate)
+        adjusted[orig_idx] = min(max(running_min, 0.0), 1.0)
+    return adjusted
+
+
 def _source_lens_effects_from_records(
     article_lens_percentages: list[dict[str, float]],
     source_labels: list[str],
@@ -1837,6 +2378,11 @@ def _source_lens_effects_from_records(
             "status": "unavailable",
             "reason": "No article-level lens rows available.",
             "permutations": permutations,
+            "multiple_testing": {
+                "method": "benjamini-hochberg",
+                "target": "p_perm_raw",
+                "n_tests": 0,
+            },
             "rows": [],
         }
 
@@ -1897,6 +2443,7 @@ def _source_lens_effects_from_records(
                 "f_stat": observed_f,
                 "eta_sq": _coerce_float(effect.get("eta_sq")),
                 "p_perm": p_perm,
+                "p_perm_raw": p_perm,
                 "source_gap": source_gap,
                 "top_source": high_source,
                 "bottom_source": low_source,
@@ -1904,6 +2451,14 @@ def _source_lens_effects_from_records(
                 "source_counts": source_counts,
             }
         )
+
+    adjusted_p_values = _benjamini_hochberg_adjust([_coerce_float(row.get("p_perm_raw")) for row in rows])
+    for row, p_fdr in zip(rows, adjusted_p_values):
+        p_raw = _coerce_float(row.get("p_perm_raw"))
+        row["p_value_raw"] = p_raw
+        row["p_value_fdr"] = p_fdr
+        row["p_perm_fdr"] = p_fdr
+        row["significant_fdr_0_05"] = bool(isinstance(p_fdr, (int, float)) and float(p_fdr) <= 0.05)
 
     rows.sort(
         key=lambda row: (
@@ -1918,12 +2473,22 @@ def _source_lens_effects_from_records(
             "status": "ok",
             "reason": "",
             "permutations": permutations,
+            "multiple_testing": {
+                "method": "benjamini-hochberg",
+                "target": "p_perm_raw",
+                "n_tests": sum(1 for row in rows if isinstance(row.get("p_perm_raw"), (int, float))),
+            },
             "rows": rows,
         }
     return {
         "status": "unavailable",
         "reason": "Insufficient source coverage for one-way lens tests.",
         "permutations": permutations,
+        "multiple_testing": {
+            "method": "benjamini-hochberg",
+            "target": "p_perm_raw",
+            "n_tests": 0,
+        },
         "rows": [],
     }
 
@@ -2213,6 +2778,363 @@ def _source_differentiation_from_records(
     return summary
 
 
+def _topic_memberships_from_record(
+    record: dict[str, Any],
+    topic_display_labels: dict[str, str],
+) -> list[str]:
+    topic_values = _unique_case_insensitive(_values_to_strings(record.get("topic_tags")))
+    topic_keys: list[str] = []
+    for topic_value in topic_values:
+        topic_text = topic_value.strip()
+        if not topic_text:
+            continue
+        topic_key = topic_text.lower()
+        if topic_key not in topic_display_labels:
+            topic_display_labels[topic_key] = topic_text
+        topic_keys.append(topic_key)
+
+    if topic_keys:
+        return topic_keys
+
+    topic_display_labels.setdefault("__untagged__", "Untagged")
+    return ["__untagged__"]
+
+
+def _source_topic_control_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    topic_keys_for_lens_rows: list[list[str]],
+    topic_display_labels: dict[str, str],
+    pooled_source_differentiation: dict[str, Any],
+    pooled_source_lens_effects: dict[str, Any],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
+        "topic_basis": "topic_tags",
+        "multi_topic_policy": "duplicate_per_topic",
+        "pooled_label": "topic-confounded",
+        "pooled": {
+            "source_differentiation": (
+                pooled_source_differentiation if isinstance(pooled_source_differentiation, dict) else {}
+            ),
+            "source_lens_effects": pooled_source_lens_effects if isinstance(pooled_source_lens_effects, dict) else {},
+        },
+        "topics": [],
+        "summary": {
+            "topic_count": 0,
+            "analyzed_topic_count": 0,
+            "unavailable_topic_count": 0,
+        },
+    }
+    if (
+        not article_lens_percentages
+        or len(article_lens_percentages) != len(source_labels)
+        or len(article_lens_percentages) != len(topic_keys_for_lens_rows)
+    ):
+        return base_payload
+
+    topic_display = dict(topic_display_labels)
+    topic_display.setdefault("__untagged__", "Untagged")
+
+    topic_buckets: dict[str, dict[str, Any]] = defaultdict(lambda: {"rows": [], "source_labels": []})
+    for lens_row, source_label, topic_keys in zip(
+        article_lens_percentages,
+        source_labels,
+        topic_keys_for_lens_rows,
+    ):
+        effective_keys: list[str] = []
+        if isinstance(topic_keys, list):
+            for topic_key in topic_keys:
+                if not isinstance(topic_key, str):
+                    continue
+                normalized_key = topic_key.strip().lower()
+                if not normalized_key:
+                    continue
+                effective_keys.append(normalized_key)
+        if not effective_keys:
+            effective_keys = ["__untagged__"]
+
+        unique_keys = list(dict.fromkeys(effective_keys))
+        for topic_key in unique_keys:
+            topic_buckets[topic_key]["rows"].append(lens_row)
+            topic_buckets[topic_key]["source_labels"].append(source_label)
+
+    topic_rows: list[dict[str, Any]] = []
+    analyzed_topic_count = 0
+    unavailable_topic_count = 0
+    for topic_key, bucket in topic_buckets.items():
+        topic_rows_data = bucket["rows"] if isinstance(bucket.get("rows"), list) else []
+        topic_source_labels = bucket["source_labels"] if isinstance(bucket.get("source_labels"), list) else []
+        source_counts_counter: Counter[str] = Counter(topic_source_labels)
+        source_counts = {
+            source_name: count
+            for source_name, count in sorted(
+                source_counts_counter.items(),
+                key=lambda item: (-item[1], item[0].lower()),
+            )
+        }
+
+        topic_source_lens_effects = _source_lens_effects_from_records(
+            topic_rows_data,
+            topic_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+        topic_source_differentiation = _source_differentiation_from_records(
+            topic_rows_data,
+            topic_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+
+        differentiation_ok = (
+            isinstance(topic_source_differentiation, dict)
+            and str(topic_source_differentiation.get("status") or "") == "ok"
+        )
+        effects_ok = (
+            isinstance(topic_source_lens_effects, dict)
+            and str(topic_source_lens_effects.get("status") or "") == "ok"
+        )
+        if differentiation_ok or effects_ok:
+            analyzed_topic_count += 1
+        else:
+            unavailable_topic_count += 1
+
+        topic_rows.append(
+            {
+                "topic": topic_display.get(topic_key) or topic_key,
+                "n_articles": len(topic_rows_data),
+                "n_sources": len(source_counts_counter),
+                "source_counts": source_counts,
+                "source_differentiation": topic_source_differentiation,
+                "source_lens_effects": topic_source_lens_effects,
+            }
+        )
+
+    topic_rows.sort(key=lambda row: (-int(row.get("n_articles", 0)), str(row.get("topic", "")).lower()))
+    base_payload["topics"] = topic_rows
+    base_payload["summary"] = {
+        "topic_count": len(topic_rows),
+        "analyzed_topic_count": analyzed_topic_count,
+        "unavailable_topic_count": unavailable_topic_count,
+    }
+    return base_payload
+
+
+def _source_reliability_assessment(
+    source_differentiation: dict[str, Any] | None,
+    source_lens_effects: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_differentiation = source_differentiation if isinstance(source_differentiation, dict) else {}
+    source_lens_effects = source_lens_effects if isinstance(source_lens_effects, dict) else {}
+
+    differentiation_status = str(source_differentiation.get("status") or "unavailable")
+    effects_status = str(source_lens_effects.get("status") or "unavailable")
+    n_articles = int(source_differentiation.get("n_articles", 0) or 0)
+    n_sources = int(source_differentiation.get("n_sources", 0) or 0)
+    n_lenses = int(source_differentiation.get("n_lenses", 0) or 0)
+
+    classification = (
+        source_differentiation.get("classification")
+        if isinstance(source_differentiation.get("classification"), dict)
+        else {}
+    )
+    multivariate = (
+        source_differentiation.get("multivariate")
+        if isinstance(source_differentiation.get("multivariate"), dict)
+        else {}
+    )
+    rows = source_lens_effects.get("rows") if isinstance(source_lens_effects.get("rows"), list) else []
+    q_values = [float(row.get("p_perm_fdr")) for row in rows if isinstance(row, dict) and isinstance(row.get("p_perm_fdr"), (int, float))]
+    significant_lens_count = sum(1 for q_value in q_values if q_value <= 0.05)
+    best_q = min(q_values) if q_values else None
+    total_lens_tests = len(q_values)
+
+    classification_accuracy = _coerce_float(classification.get("accuracy"))
+    classification_baseline = _coerce_float(classification.get("baseline_accuracy"))
+    classification_lift = None
+    if classification_accuracy is not None and classification_baseline is not None:
+        classification_lift = classification_accuracy - classification_baseline
+
+    classification_p = _coerce_float(classification.get("p_perm"))
+    multivariate_p = _coerce_float(multivariate.get("p_perm"))
+
+    flags: list[str] = []
+    if n_articles < 20:
+        flags.append("low_article_count")
+    if n_sources < 2:
+        flags.append("insufficient_source_count")
+    if differentiation_status != "ok":
+        flags.append("source_differentiation_unavailable")
+    if effects_status != "ok":
+        flags.append("source_lens_effects_unavailable")
+    if significant_lens_count == 0 and effects_status == "ok":
+        flags.append("no_fdr_significant_lens_effects")
+    if isinstance(classification_lift, (int, float)) and float(classification_lift) <= 0:
+        flags.append("no_classification_lift")
+
+    if differentiation_status != "ok" and effects_status != "ok":
+        return {
+            "status": "unavailable",
+            "tier": "unavailable",
+            "score": None,
+            "flags": list(dict.fromkeys(flags)),
+            "metrics": {
+                "n_articles": n_articles,
+                "n_sources": n_sources,
+                "n_lenses": n_lenses,
+                "classification_accuracy": classification_accuracy,
+                "classification_baseline_accuracy": classification_baseline,
+                "classification_lift": classification_lift,
+                "classification_p_perm": classification_p,
+                "multivariate_p_perm": multivariate_p,
+                "best_q_value": best_q,
+                "fdr_significant_lens_count": significant_lens_count,
+                "total_lens_tests": total_lens_tests,
+            },
+            "reason": "Source differentiation and lens effects are both unavailable for this slice.",
+        }
+
+    score = 0.0
+    if n_articles >= 120:
+        score += 0.25
+    elif n_articles >= 60:
+        score += 0.20
+    elif n_articles >= 30:
+        score += 0.15
+    elif n_articles >= 15:
+        score += 0.10
+    elif n_articles >= 8:
+        score += 0.05
+
+    if n_sources >= 4:
+        score += 0.15
+    elif n_sources == 3:
+        score += 0.10
+    elif n_sources == 2:
+        score += 0.05
+
+    if isinstance(multivariate_p, (int, float)):
+        if multivariate_p <= 0.05:
+            score += 0.20
+        elif multivariate_p <= 0.10:
+            score += 0.10
+    if isinstance(classification_p, (int, float)):
+        if classification_p <= 0.05:
+            score += 0.20
+        elif classification_p <= 0.10:
+            score += 0.10
+
+    if isinstance(classification_lift, (int, float)):
+        if classification_lift >= 0.15:
+            score += 0.15
+        elif classification_lift >= 0.08:
+            score += 0.10
+        elif classification_lift >= 0.03:
+            score += 0.05
+
+    if significant_lens_count >= 3:
+        score += 0.15
+    elif significant_lens_count >= 1:
+        score += 0.10
+
+    if isinstance(best_q, (int, float)):
+        if best_q <= 0.01:
+            score += 0.10
+        elif best_q <= 0.05:
+            score += 0.07
+        elif best_q <= 0.10:
+            score += 0.04
+
+    if total_lens_tests >= 10:
+        score += 0.05
+    elif total_lens_tests >= 5:
+        score += 0.03
+
+    if n_articles < 12:
+        score = min(score, 0.35)
+    elif n_articles < 20:
+        score = min(score, 0.50)
+    if n_sources < 2:
+        score = min(score, 0.25)
+
+    score = min(max(score, 0.0), 1.0)
+    if score >= 0.70:
+        tier = "high"
+    elif score >= 0.45:
+        tier = "moderate"
+    else:
+        tier = "low"
+
+    return {
+        "status": "ok",
+        "tier": tier,
+        "score": score,
+        "flags": list(dict.fromkeys(flags)),
+        "metrics": {
+            "n_articles": n_articles,
+            "n_sources": n_sources,
+            "n_lenses": n_lenses,
+            "classification_accuracy": classification_accuracy,
+            "classification_baseline_accuracy": classification_baseline,
+            "classification_lift": classification_lift,
+            "classification_p_perm": classification_p,
+            "multivariate_p_perm": multivariate_p,
+            "best_q_value": best_q,
+            "fdr_significant_lens_count": significant_lens_count,
+            "total_lens_tests": total_lens_tests,
+        },
+        "reason": "",
+    }
+
+
+def _source_reliability_from_topic_control(
+    source_differentiation: dict[str, Any],
+    source_lens_effects: dict[str, Any],
+    source_topic_control: dict[str, Any],
+) -> dict[str, Any]:
+    pooled_assessment = _source_reliability_assessment(source_differentiation, source_lens_effects)
+
+    topic_rows = source_topic_control.get("topics") if isinstance(source_topic_control.get("topics"), list) else []
+    topic_assessments: list[dict[str, Any]] = []
+    for topic_row in topic_rows:
+        if not isinstance(topic_row, dict):
+            continue
+        topic_name = str(topic_row.get("topic") or "").strip()
+        if not topic_name:
+            continue
+        topic_assessments.append(
+            {
+                "topic": topic_name,
+                "assessment": _source_reliability_assessment(
+                    topic_row.get("source_differentiation") if isinstance(topic_row.get("source_differentiation"), dict) else {},
+                    topic_row.get("source_lens_effects") if isinstance(topic_row.get("source_lens_effects"), dict) else {},
+                ),
+            }
+        )
+
+    tier_counter: Counter[str] = Counter()
+    status_counter: Counter[str] = Counter()
+    for topic_item in topic_assessments:
+        assessment = topic_item.get("assessment") if isinstance(topic_item.get("assessment"), dict) else {}
+        tier_counter[str(assessment.get("tier") or "unavailable")] += 1
+        status_counter[str(assessment.get("status") or "unavailable")] += 1
+
+    return {
+        "method": "heuristic-v1",
+        "pooled_label": "topic-confounded",
+        "pooled": pooled_assessment,
+        "topics": topic_assessments,
+        "summary": {
+            "topic_count": len(topic_assessments),
+            "ok_topic_count": status_counter.get("ok", 0),
+            "unavailable_topic_count": status_counter.get("unavailable", 0),
+            "high_count": tier_counter.get("high", 0),
+            "moderate_count": tier_counter.get("moderate", 0),
+            "low_count": tier_counter.get("low", 0),
+            "unavailable_count": tier_counter.get("unavailable", 0),
+        },
+    }
+
+
 def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     input_records = extract_records(payload)
     excluded_unscraped_articles = len(input_records) - len(records)
@@ -2225,19 +3147,17 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     daily_counter: Counter[str] = Counter()
     publish_hour_counter: Counter[int] = Counter()
     tag_count_distribution_counter: Counter[str] = Counter()
-    score_histogram_counter: Counter[str] = Counter()
     source_tag_counter: Counter[tuple[str, str]] = Counter()
-    score_tag_heatmap_counter: Counter[tuple[str, str]] = Counter()
     scored_source_counter: Counter[str] = Counter()
     unscorable_source_counter: Counter[str] = Counter()
     zero_score_source_counter: Counter[str] = Counter()
     placeholder_zero_source_counter: Counter[str] = Counter()
-    source_score_values: dict[str, list[float]] = {}
     article_lens_percentages: list[dict[str, float]] = []
     source_labels_for_lens_rows: list[str] = []
+    topic_keys_for_lens_rows: list[list[str]] = []
+    topic_display_labels: dict[str, str] = {}
     article_meta_for_lens_rows: list[dict[str, Any]] = []
 
-    score_percents: list[float] = []
     scored_articles = 0
     zero_score_articles = 0
     positive_score_articles = 0
@@ -2245,7 +3165,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     score_object_present_articles = 0
     score_object_missing_articles = 0
     placeholder_zero_unscorable_articles = 0
-    score_bins = [{**bin_def, "count": 0} for bin_def in _SCORE_DISTRIBUTION_BINS]
 
     for record in records:
         source = record.get("source")
@@ -2289,25 +3208,19 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
                 placeholder_zero_unscorable_articles += 1
                 placeholder_zero_source_counter[source_label] += 1
 
-        bounded_percent = score_details["percent"]
-        if isinstance(bounded_percent, (int, float)):
-            score_percents.append(float(bounded_percent))
-            source_score_values.setdefault(source_label, []).append(float(bounded_percent))
-            score_bins[_score_distribution_bin_index(float(bounded_percent))]["count"] += 1
-            score_histogram_counter[_score_histogram_label(float(bounded_percent))] += 1
-            score_tag_heatmap_counter[(_score_heatmap_label(float(bounded_percent)), _tag_count_heatmap_label(tag_count))] += 1
-
         lens_percentages = _record_lens_percentages(record, lens_maxima)
         if lens_percentages:
+            topic_keys = _topic_memberships_from_record(record, topic_display_labels)
             strongest_lens, strongest_percent = max(lens_percentages.items(), key=lambda item: item[1])
             article_lens_percentages.append(lens_percentages)
             source_labels_for_lens_rows.append(source_label)
+            topic_keys_for_lens_rows.append(topic_keys)
             article_meta_for_lens_rows.append(
                 {
                     "id": _clean_text(record.get("id")),
                     "title": _clean_text(record.get("title")),
                     "source": source_label,
-                    "overall_percent": _overall_percent_for_record(record),
+                    "published_at": _clean_text(record.get("published_at")),
                     "strongest_lens": strongest_lens,
                     "strongest_percent": strongest_percent,
                 }
@@ -2317,32 +3230,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     tag_counts = [{"tag": tag, "count": count} for tag, count in tag_counter.most_common()]
     daily_counts = [{"date": day, "count": daily_counter[day]} for day in sorted(daily_counter.keys())]
     publish_hour_counts = [{"hour": hour, "count": publish_hour_counter.get(hour, 0)} for hour in range(24)]
-
-    source_score_summary: list[dict[str, Any]] = []
-    for source_name, source_count in source_counter.most_common():
-        values = source_score_values.get(source_name, [])
-        source_score_summary.append(
-            {
-                "source": source_name,
-                "count": source_count,
-                "scored_count": len(values),
-                "avg_percent": (sum(values) / len(values)) if values else None,
-                "min_percent": min(values) if values else None,
-                "max_percent": max(values) if values else None,
-            }
-        )
-
-    score_histogram_bins = []
-    for label in _SCORE_HISTOGRAM_BIN_LABELS:
-        lower, upper = label.split("-", 1)
-        score_histogram_bins.append(
-            {
-                "label": label,
-                "min": int(lower),
-                "max": int(upper),
-                "count": score_histogram_counter.get(label, 0),
-            }
-        )
 
     tag_count_distribution = []
     for label in _TAG_COUNT_DISTRIBUTION_LABELS:
@@ -2374,16 +3261,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         tag_totals_counter[tag_name] += count
     source_tag_totals = [{"source": source_name, "count": count} for source_name, count in source_tag_totals_counter.most_common()]
     tag_totals = [{"tag": tag_name, "count": count} for tag_name, count in tag_totals_counter.most_common()]
-
-    score_tag_count_heatmap = [
-        {
-            "score_bin": score_bin,
-            "tag_count_bin": tag_count_bin,
-            "count": score_tag_heatmap_counter.get((score_bin, tag_count_bin), 0),
-        }
-        for tag_count_bin in _TAG_COUNT_HEATMAP_LABELS
-        for score_bin in _SCORE_HEATMAP_LABELS
-    ]
 
     scored_by_source = [
         {"source": source_name, "count": count}
@@ -2418,6 +3295,14 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         article_meta_rows=article_meta_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    lens_separation = _lens_separation_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    lens_time_series = _lens_time_series_from_records(records, lens_maxima)
+    lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
+    lens_temporal_embedding_mds = _lens_temporal_embedding_from_mds(lens_mds)
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -2427,6 +3312,20 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         article_lens_percentages,
         source_labels_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
+    )
+    source_topic_control = _source_topic_control_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        topic_keys_for_lens_rows,
+        topic_display_labels,
+        pooled_source_differentiation=source_differentiation,
+        pooled_source_lens_effects=source_lens_effects,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    source_reliability = _source_reliability_from_topic_control(
+        source_differentiation,
+        source_lens_effects,
+        source_topic_control,
     )
     lens_views = _lens_views_from_records(records, lens_maxima)
     data_quality = _data_quality_from_records(records)
@@ -2443,9 +3342,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     )
 
     total_articles = len(records)
-    average_percent = sum(score_percents) / len(score_percents) if score_percents else None
     score_coverage_ratio = (scored_articles / total_articles) if total_articles else 0.0
-    scored_without_percent_articles = max(scored_articles - zero_score_articles - positive_score_articles, 0)
 
     return {
         "input_articles": len(input_records),
@@ -2455,7 +3352,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "zero_score_articles": zero_score_articles,
         "positive_score_articles": positive_score_articles,
         "unscorable_articles": unscorable_articles,
-        "scored_without_percent_articles": scored_without_percent_articles,
         "score_object_present_articles": score_object_present_articles,
         "score_object_missing_articles": score_object_missing_articles,
         "placeholder_zero_unscorable_articles": placeholder_zero_unscorable_articles,
@@ -2463,7 +3359,6 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
             "scored": scored_articles,
             "positive": positive_score_articles,
             "zero": zero_score_articles,
-            "scored_without_percent": scored_without_percent_articles,
             "unscorable": unscorable_articles,
             "score_object_present": score_object_present_articles,
             "score_object_missing": score_object_missing_articles,
@@ -2475,29 +3370,25 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_correlations": lens_correlations,
         "lens_pca": lens_pca,
         "lens_mds": lens_mds,
+        "lens_separation": lens_separation,
+        "lens_time_series": lens_time_series,
+        "lens_temporal_embedding": lens_temporal_embedding,
+        "lens_temporal_embedding_mds": lens_temporal_embedding_mds,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
+        "source_topic_control": source_topic_control,
+        "source_reliability": source_reliability,
         "lens_views": lens_views,
         "source_tag_views": source_tag_views,
         "data_quality": data_quality,
         "lens_inventory": lens_inventory,
         "daily_counts_utc": daily_counts,
-        "score_distribution": {
-            "bins": score_bins,
-            "average_percent": average_percent,
-            "min_percent": min(score_percents) if score_percents else None,
-            "max_percent": max(score_percents) if score_percents else None,
-            "count": len(score_percents),
-        },
         "chart_aggregates": {
-            "score_histogram_bins": score_histogram_bins,
             "tag_count_distribution": tag_count_distribution,
             "publish_hour_counts_utc": publish_hour_counts,
-            "source_score_summary": source_score_summary,
             "source_tag_matrix": source_tag_matrix,
             "source_tag_totals": source_tag_totals,
             "tag_totals": tag_totals,
-            "score_tag_count_heatmap": score_tag_count_heatmap,
             "scored_by_source": scored_by_source,
             "score_status_by_source": score_status_by_source,
         },
@@ -2514,15 +3405,15 @@ class RssDigestClient:
         timeout_seconds: int | None = None,
     ) -> None:
         self.current_source_url = (
-            source_url
-            or os.getenv("RSS_DAILY_JSON_URL")
+            _clean_config_url(source_url)
+            or _clean_config_url(os.getenv("RSS_DAILY_JSON_URL"))
             or DEFAULT_RSS_DAILY_JSON_URL
-        ).strip()
+        )
         self.source_url = self.current_source_url
         self.history_url_template = (
-            os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE")
+            _clean_config_url(os.getenv("RSS_HISTORY_JSON_URL_TEMPLATE"))
             or DEFAULT_RSS_HISTORY_JSON_URL_TEMPLATE
-        ).strip()
+        )
         self.current_ttl_seconds = _coerce_int(
             ttl_seconds if ttl_seconds is not None else os.getenv("RSS_CACHE_TTL_SECONDS"),
             default=3600,

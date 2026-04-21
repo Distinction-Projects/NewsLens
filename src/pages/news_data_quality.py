@@ -4,7 +4,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -117,17 +117,8 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-quality-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Data Quality", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "Notebook bootstrap parity page for quick data diagnostics and field completeness checks. "
-                        "Metrics are backend-derived and served through /api/news/stats.",
-                        className="text-muted",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "Audit missingness, unscorable records, and data quality diagnostics."
         ),
         dbc.Row(
             [

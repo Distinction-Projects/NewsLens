@@ -173,12 +173,12 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(stats_payload["data"]["derived"]["input_articles"], 3)
         self.assertEqual(stats_payload["data"]["derived"]["excluded_unscraped_articles"], 1)
         self.assertEqual(stats_payload["data"]["derived"]["total_articles"], 2)
-        self.assertEqual(stats_payload["data"]["derived"]["scored_articles"], 2)
+        self.assertEqual(stats_payload["data"]["derived"]["scored_articles"], 1)
         self.assertEqual(stats_payload["data"]["derived"]["zero_score_articles"], 0)
-        self.assertEqual(stats_payload["data"]["derived"]["unscorable_articles"], 0)
+        self.assertEqual(stats_payload["data"]["derived"]["unscorable_articles"], 1)
         self.assertIn("score_status", stats_payload["data"]["derived"])
-        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["scored"], 2)
-        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["unscorable"], 0)
+        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["scored"], 1)
+        self.assertEqual(stats_payload["data"]["derived"]["score_status"]["unscorable"], 1)
         self.assertIn("lens_correlations", stats_payload["data"]["derived"])
         self.assertIn("source_differentiation", stats_payload["data"]["derived"])
         self.assertIn("source_lens_effects", stats_payload["data"]["derived"])
@@ -186,6 +186,10 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("lens_inventory", stats_payload["data"]["derived"])
         self.assertIn("lens_pca", stats_payload["data"]["derived"])
         self.assertIn("lens_mds", stats_payload["data"]["derived"])
+        self.assertIn("lens_separation", stats_payload["data"]["derived"])
+        self.assertIn("lens_time_series", stats_payload["data"]["derived"])
+        self.assertIn("lens_temporal_embedding", stats_payload["data"]["derived"])
+        self.assertIn("lens_temporal_embedding_mds", stats_payload["data"]["derived"])
         lens_correlations = stats_payload["data"]["derived"]["lens_correlations"]
         self.assertIn("lenses", lens_correlations)
         self.assertIn("correlation", lens_correlations)
@@ -206,6 +210,28 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("status", source_lens_effects)
         self.assertIn("permutations", source_lens_effects)
         self.assertIn("rows", source_lens_effects)
+        source_topic_control = stats_payload["data"]["derived"]["source_topic_control"]
+        self.assertEqual(source_topic_control["topic_basis"], "topic_tags")
+        self.assertEqual(source_topic_control["multi_topic_policy"], "duplicate_per_topic")
+        self.assertEqual(source_topic_control["pooled_label"], "topic-confounded")
+        self.assertIn("topics", source_topic_control)
+        self.assertIn("summary", source_topic_control)
+        self.assertEqual(
+            source_topic_control["pooled"]["source_differentiation"],
+            source_differentiation,
+        )
+        self.assertEqual(
+            source_topic_control["pooled"]["source_lens_effects"],
+            source_lens_effects,
+        )
+        self.assertIn("source_reliability", stats_payload["data"]["derived"])
+        source_reliability = stats_payload["data"]["derived"]["source_reliability"]
+        self.assertEqual(source_reliability["method"], "heuristic-v1")
+        self.assertEqual(source_reliability["pooled_label"], "topic-confounded")
+        self.assertIn("pooled", source_reliability)
+        self.assertIn("topics", source_reliability)
+        self.assertIn("summary", source_reliability)
+        self.assertIn(source_reliability["pooled"].get("status"), {"ok", "unavailable"})
         lens_pca = stats_payload["data"]["derived"]["lens_pca"]
         self.assertIn("status", lens_pca)
         self.assertIn("reason", lens_pca)
@@ -222,6 +248,27 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("stress", lens_mds)
         self.assertIn("article_points", lens_mds)
         self.assertIn("source_centroids", lens_mds)
+        lens_separation = stats_payload["data"]["derived"]["lens_separation"]
+        self.assertIn("status", lens_separation)
+        self.assertIn("reason", lens_separation)
+        self.assertIn("n_sources", lens_separation)
+        self.assertIn("separation_ratio", lens_separation)
+        self.assertIn("silhouette_like_mean", lens_separation)
+        lens_time_series = stats_payload["data"]["derived"]["lens_time_series"]
+        self.assertIn("status", lens_time_series)
+        self.assertIn("reason", lens_time_series)
+        self.assertIn("series", lens_time_series)
+        self.assertIn("summary", lens_time_series)
+        lens_temporal_embedding = stats_payload["data"]["derived"]["lens_temporal_embedding"]
+        self.assertIn("status", lens_temporal_embedding)
+        self.assertIn("reason", lens_temporal_embedding)
+        self.assertIn("points", lens_temporal_embedding)
+        self.assertIn("summary", lens_temporal_embedding)
+        lens_temporal_embedding_mds = stats_payload["data"]["derived"]["lens_temporal_embedding_mds"]
+        self.assertIn("status", lens_temporal_embedding_mds)
+        self.assertIn("reason", lens_temporal_embedding_mds)
+        self.assertIn("points", lens_temporal_embedding_mds)
+        self.assertIn("summary", lens_temporal_embedding_mds)
         lens_views = stats_payload["data"]["derived"]["lens_views"]
         self.assertIn("coverage_mode", lens_views)
         self.assertIn("lens_names", lens_views)
@@ -230,12 +277,10 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("stability_rows", lens_views)
         self.assertIn("summary", lens_views)
         self.assertEqual(lens_views["summary"]["article_count"], 1)
-        self.assertEqual(lens_views["summary"]["overall_avg"], 70.0)
         self.assertIsInstance(lens_views["summary"]["dominant_lens_counts"], list)
         self.assertIsInstance(lens_views["summary"]["lens_average_rows"], list)
         self.assertEqual(lens_views["summary"]["source_count"], 1)
         self.assertEqual(lens_views["summary"]["covered_articles"], 1)
-        self.assertEqual(lens_views["summary"]["source_overall_avg"], 70.0)
         self.assertIsInstance(lens_views["summary"]["source_lens_average_rows"], list)
         self.assertEqual(lens_views["summary"]["stability_lens_count"], 1)
         self.assertEqual(lens_views["summary"]["stability_avg_stddev"], 0.0)
@@ -251,7 +296,7 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertIn("summary", data_quality)
         self.assertIn("field_coverage", data_quality)
         self.assertEqual(data_quality["summary"]["total"], 2)
-        self.assertEqual(data_quality["summary"]["scored"], 2)
+        self.assertEqual(data_quality["summary"]["scored"], 1)
         self.assertEqual(data_quality["summary"]["missing_ai_summary"], 0)
         self.assertEqual(data_quality["summary"]["missing_published"], 0)
         self.assertEqual(data_quality["summary"]["missing_source"], 0)
@@ -259,10 +304,8 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(coverage_by_field["Title"]["present"], 2)
         self.assertEqual(coverage_by_field["Lens Scores"]["present"], 1)
         chart_aggregates = stats_payload["data"]["derived"]["chart_aggregates"]
-        self.assertEqual(len(chart_aggregates["score_histogram_bins"]), 10)
         self.assertEqual(len(chart_aggregates["tag_count_distribution"]), 6)
         self.assertEqual(len(chart_aggregates["publish_hour_counts_utc"]), 24)
-        self.assertEqual(len(chart_aggregates["score_tag_count_heatmap"]), 25)
         self.assertIn("source_tag_totals", chart_aggregates)
         self.assertIn("tag_totals", chart_aggregates)
         self.assertIn("score_status_by_source", chart_aggregates)
@@ -309,20 +352,20 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(snapshot_payload["meta"]["snapshot_date"], self.snapshot_date)
 
     def test_export_endpoints(self):
-        export_json = self.client.get("/api/news/export?artifact=source_score_summary&format=json")
+        export_json = self.client.get("/api/news/export?artifact=source_score_status&format=json")
         self.assertEqual(export_json.status_code, 200)
         payload = export_json.get_json()
         self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["artifact"], "source_score_summary")
+        self.assertEqual(payload["artifact"], "source_score_status")
         self.assertIsInstance(payload["rows"], list)
         self.assertGreaterEqual(len(payload["rows"]), 1)
 
-        export_csv = self.client.get("/api/news/export?artifact=source_score_summary&format=csv")
+        export_csv = self.client.get("/api/news/export?artifact=source_score_status&format=csv")
         self.assertEqual(export_csv.status_code, 200)
         self.assertIn("text/csv", export_csv.content_type)
         csv_body = export_csv.get_data(as_text=True)
         self.assertIn("source", csv_body)
-        self.assertIn("avg_percent", csv_body)
+        self.assertIn("scored", csv_body)
 
         export_source_effects = self.client.get("/api/news/export?artifact=source_lens_effects&format=json")
         self.assertEqual(export_source_effects.status_code, 200)
@@ -340,7 +383,7 @@ class NewsEndpointTests(unittest.TestCase):
         bad_artifact = self.client.get("/api/news/export?artifact=unknown")
         self.assertEqual(bad_artifact.status_code, 400)
 
-        bad_format = self.client.get("/api/news/export?artifact=source_score_summary&format=xml")
+        bad_format = self.client.get("/api/news/export?artifact=source_score_status&format=xml")
         self.assertEqual(bad_format.status_code, 400)
 
     def test_freshness_is_stale_when_generated_at_missing(self):

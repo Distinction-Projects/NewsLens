@@ -1,0 +1,18 @@
+[Unit]
+Description=NewsLens Next.js frontend service
+After=network.target newslens-api.service
+Wants=newslens-api.service
+
+[Service]
+Type=simple
+User=newslens
+Group=newslens
+WorkingDirectory=/srv/newslens/app/frontend-node
+Environment=NODE_ENV=production
+Environment=NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

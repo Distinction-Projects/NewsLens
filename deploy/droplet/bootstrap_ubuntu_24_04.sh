@@ -29,6 +29,10 @@ fi
 
 apt-get update
 apt-get install -y nginx git build-essential curl ca-certificates
+if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
 
 if ! getent group "${APP_GROUP}" >/dev/null; then
   groupadd --system "${APP_GROUP}"
@@ -53,22 +57,30 @@ runuser -u "${APP_USER}" -- env NLTK_DATA="${NLTK_DATA_DIR}" \
   env NLTK_DATA="${NLTK_DATA_DIR}" "${VENV_DIR}/bin/python" -m src.cache_models
 )
 
+runuser -u "${APP_USER}" -- npm --prefix "${APP_DIR}/frontend-node" ci
+runuser -u "${APP_USER}" -- env NEXT_PUBLIC_NEWS_API_BASE_URL="http://127.0.0.1:9000" \
+  npm --prefix "${APP_DIR}/frontend-node" run build
+
 if [[ ! -f "${ENV_FILE}" ]]; then
   install -m 640 -o root -g "${APP_GROUP}" "${APP_DIR}/.env.example" "${ENV_FILE}"
 fi
 
 install -m 644 "${APP_DIR}/deploy/droplet/newslens.service" /etc/systemd/system/newslens.service
+install -m 644 "${APP_DIR}/deploy/droplet/newslens-api.service" /etc/systemd/system/newslens-api.service
+install -m 644 "${APP_DIR}/deploy/droplet/newslens-node.service" /etc/systemd/system/newslens-node.service
 install -m 644 "${APP_DIR}/deploy/droplet/nginx.newslens.conf" /etc/nginx/sites-available/newslens
 
 ln -sf /etc/nginx/sites-available/newslens /etc/nginx/sites-enabled/newslens
 rm -f /etc/nginx/sites-enabled/default
 
 systemctl daemon-reload
-systemctl enable newslens
+systemctl enable newslens newslens-api newslens-node
 systemctl restart newslens
+systemctl restart newslens-api
+systemctl restart newslens-node
 nginx -t
 systemctl restart nginx
 
 echo "Bootstrap complete."
 echo "Edit ${ENV_FILE} if you want custom RSS settings."
-echo "Check status with: systemctl status newslens --no-pager"
+echo "Check status with: systemctl status newslens newslens-api newslens-node --no-pager"

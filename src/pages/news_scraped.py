@@ -7,7 +7,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
-from src.pages.news_page_utils import build_status_alert
+from src.pages.news_page_utils import build_news_intro, build_status_alert
 
 
 dash.register_page(
@@ -46,9 +46,6 @@ def _article_block(record: dict) -> dbc.Card:
     scraped = record.get("scraped")
     raw_text = json.dumps(scraped, indent=2, default=str) if isinstance(scraped, dict) else "No scraped payload."
     published = record.get("published_at") or record.get("published") or "Unknown date"
-    score = record.get("score") if isinstance(record.get("score"), dict) else {}
-    score_percent = score.get("percent")
-    score_text = f"{score_percent:.1f}%" if isinstance(score_percent, (int, float)) else "n/a"
 
     return dbc.Card(
         dbc.CardBody(
@@ -63,7 +60,6 @@ def _article_block(record: dict) -> dbc.Card:
                 html.Div(
                     [
                         html.Span(f"Published: {published}", className="me-3"),
-                        html.Span(f"Score: {score_text}", className="me-3"),
                         html.Span(f"Has scraped: {'yes' if _has_scraped_payload(record) else 'no'}"),
                     ],
                     className="small text-muted mb-2",
@@ -112,6 +108,9 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-scraped-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("Raw Scraped Article Data", className="mb-3"), width=12)]),
+        build_news_intro(
+            "Review raw scraped article payloads and grouped source output."
+        ),
         dbc.Row(
             [
                 dbc.Col(

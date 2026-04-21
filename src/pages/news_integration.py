@@ -6,6 +6,8 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, callback, ctx, dcc, html
 from flask import current_app
 
+from src.pages.news_page_utils import build_news_intro
+
 
 dash.register_page(
     __name__,
@@ -44,16 +46,8 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-integration-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Integration Monitor", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "Connectivity and payload checks for RSS contract ingestion in this app runtime.",
-                        className="text-muted mb-3",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "Verify app-to-upstream integration status and runtime contract signals."
         ),
         dbc.Row(
             [

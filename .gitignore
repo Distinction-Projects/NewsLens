@@ -7,3 +7,9 @@ src/models/*.json
 NewsLens.code-workspace
 *.code-workspace
 .env
+node_modules/
+.next/
+dist/
+test-results/
+playwright-report/
+.playwright-cli/
