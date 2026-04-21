@@ -7,3 +7,6 @@ src/models/*.json
 NewsLens.code-workspace
 *.code-workspace
 .env
+node_modules/
+.next/
+dist/

@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -1118,18 +1118,8 @@ layout = dbc.Container(
         dcc.Interval(id="news-lens-temporal-play-interval", interval=1200, n_intervals=0, disabled=True),
         dcc.Store(id="news-lens-pca-cache"),
         dbc.Row([dbc.Col(html.H3("News Lens PCA", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "Principal Component Analysis and classical MDS over complete article-lens rows. "
-                        "Use this page to inspect variance structure, identify the strongest lens drivers, "
-                        "and compare source/article separation across two reduced-dimension projections.",
-                        className="text-muted",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "View latent lens components that explain the largest variance in the dataset."
         ),
         dbc.Row(
             [

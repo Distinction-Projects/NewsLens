@@ -258,6 +258,35 @@ body {
     padding: 10px 10px 10px 10px;
 }
 
+/* === News intro helper === */
+.news-page-intro {
+    border-radius: 8px;
+    opacity: 0.95;
+}
+
+.news-page-intro .accordion-item {
+    border: 1px solid rgba(140, 216, 228, 0.25);
+    background-color: rgba(8, 56, 60, 0.55);
+}
+
+.news-page-intro .accordion-header button {
+    background-color: rgba(8, 56, 60, 0.55);
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 0.55rem 0.85rem;
+    box-shadow: none;
+}
+
+.news-page-intro .accordion-header button:not(.collapsed) {
+    background-color: rgba(8, 56, 60, 0.75);
+    box-shadow: none;
+}
+
+.news-page-intro .accordion-body {
+    padding: 0.65rem 0.85rem;
+    color: #d9eef1 !important;
+}
+
 /* === NAV ===*/
 .logo {
     padding: 23px 1px 1px 1px;

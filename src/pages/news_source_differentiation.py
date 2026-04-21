@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -229,17 +229,8 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-source-diff-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Source Differentiation", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "These statistics estimate how separable sources are in lens-score space. "
-                        "Use pooled results for global context and within-topic mode for controlled comparisons.",
-                        className="text-muted",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "Estimate how separable sources are in lens-score space, including within-topic mode."
         ),
         dbc.Row(
             [

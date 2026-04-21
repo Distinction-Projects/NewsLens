@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
-from src.pages.news_page_utils import build_status_alert
+from src.pages.news_page_utils import build_news_intro, build_status_alert
 
 
 dash.register_page(
@@ -149,6 +149,9 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-stats-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Statistics", className="mb-3"), width=12)]),
+        build_news_intro(
+            "Get a high-level snapshot of feed volume, scoring coverage, and score/tag distributions."
+        ),
         dbc.Row(
             [
                 dbc.Col(

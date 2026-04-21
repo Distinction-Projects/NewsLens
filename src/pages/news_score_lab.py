@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -123,6 +123,9 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-score-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Score Lab", className="mb-3"), width=12)]),
+        build_news_intro(
+            "Run focused scoring diagnostics and inspect model-output behavior."
+        ),
         dbc.Row(
             [
                 dbc.Col(

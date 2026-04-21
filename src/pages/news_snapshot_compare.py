@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get
+from src.pages.news_page_utils import api_get, build_news_intro
 
 
 dash.register_page(
@@ -176,6 +176,9 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-compare-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Snapshot Compare", className="mb-3"), width=12)]),
+        build_news_intro(
+            "Compare current data against a selected historical snapshot."
+        ),
         dbc.Row(
             [
                 dbc.Col(

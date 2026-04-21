@@ -7,7 +7,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html
 from flask import current_app
 
-from src.pages.news_page_utils import build_status_alert
+from src.pages.news_page_utils import build_news_intro, build_status_alert
 
 
 dash.register_page(
@@ -108,6 +108,9 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-scraped-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("Raw Scraped Article Data", className="mb-3"), width=12)]),
+        build_news_intro(
+            "Review raw scraped article payloads and grouped source output."
+        ),
         dbc.Row(
             [
                 dbc.Col(

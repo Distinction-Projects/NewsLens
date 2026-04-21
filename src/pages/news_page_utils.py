@@ -33,6 +33,29 @@ def mode_label(meta: dict) -> str:
     return f"snapshot ({snapshot_date or 'missing-date'})"
 
 
+def build_news_intro(summary_text: str) -> dbc.Row:
+    text = str(summary_text or "").strip()
+    return dbc.Row(
+        [
+            dbc.Col(
+                dbc.Accordion(
+                    [
+                        dbc.AccordionItem(
+                            html.P(text, className="mb-0"),
+                            title="What this page does",
+                        )
+                    ],
+                    start_collapsed=True,
+                    flush=True,
+                    className="news-page-intro",
+                ),
+                width=12,
+            )
+        ],
+        className="mb-3",
+    )
+
+
 def build_status_alert(
     meta: dict | None,
     *,

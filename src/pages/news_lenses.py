@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -138,17 +138,8 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-lenses-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Lenses", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "This page surfaces the upstream lens inventory that powers the multi-lens scoring pipeline. "
-                        "It prefers backend-derived inventory from stats, with upstream summary fallback for compatibility.",
-                        className="text-muted",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "Review lens-level score behavior to understand framing dimensions across the corpus."
         ),
         dbc.Row(
             [

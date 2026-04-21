@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, ctx, dcc, html
 
-from src.pages.news_page_utils import api_get, build_status_alert, snapshot_param
+from src.pages.news_page_utils import api_get, build_news_intro, build_status_alert, snapshot_param
 
 
 dash.register_page(
@@ -295,17 +295,8 @@ layout = dbc.Container(
     [
         dcc.Interval(id="news-source-effects-load", interval=50, n_intervals=0, max_intervals=1),
         dbc.Row([dbc.Col(html.H3("News Source Effects", className="mb-2"), width=12)]),
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.P(
-                        "Lens-level one-way source tests (ANOVA-style) built from article lens percentages, "
-                        "with pooled and within-topic views for confound-aware comparisons.",
-                        className="text-muted",
-                    ),
-                    width=12,
-                )
-            ]
+        build_news_intro(
+            "Compare source effect sizes by lens with pooled vs within-topic views."
         ),
         dbc.Row(
             [

@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, ctx, dcc, html, MATCH
 from flask import current_app
 
-from src.pages.news_page_utils import build_status_alert
+from src.pages.news_page_utils import build_news_intro, build_status_alert
 
 try:
     from src.NewsLens import preprocess, prebuilt_model, predict_cached, predict_score_cached, vader_score
@@ -229,6 +229,9 @@ layout = dbc.Container(
             [
                 dbc.Col(html.H3("News Digest", className="mb-3"), width=12),
             ]
+        ),
+        build_news_intro(
+            "Browse matched articles quickly and inspect source, date, summary, and per-article analysis controls."
         ),
         dbc.Row(
             [
