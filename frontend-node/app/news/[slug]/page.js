@@ -132,6 +132,20 @@ function activeSnapshotDate(searchParams) {
   return null;
 }
 
+function isTruthyQueryValue(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function queryLimit(searchParams, key, fallback, min = 1, max = 500) {
+  const raw = getQueryParam(searchParams, key);
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
+
 function selectedTopicFromQuery(searchParams, topics) {
   const requested = getQueryParam(searchParams, "topic");
   if (!requested) {
@@ -269,9 +283,60 @@ function MiniBar({ value, max }) {
   );
 }
 
-async function renderDigest() {
-  const payload = await fetchNewsJson("/api/news/digest?limit=50");
-  const rows = Array.isArray(payload?.data) ? payload.data : [];
+async function renderDigest(searchParams) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
+  const dateFilter = getQueryParam(searchParams, "date");
+  const tagFilter = getQueryParam(searchParams, "tag");
+  const sourceFilter = getQueryParam(searchParams, "source");
+  const limit = queryLimit(searchParams, "limit", 20, 1, 200);
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+
+  const digestParams = new URLSearchParams();
+  digestParams.set("limit", String(limit));
+  if (dateFilter) {
+    digestParams.set("date", dateFilter);
+  }
+  if (tagFilter) {
+    digestParams.set("tag", tagFilter);
+  }
+  if (sourceFilter) {
+    digestParams.set("source", sourceFilter);
+  }
+  if (snapshotDate) {
+    digestParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    digestParams.set("refresh", "true");
+  }
+
+  const latestParams = new URLSearchParams();
+  if (dateFilter) {
+    latestParams.set("date", dateFilter);
+  }
+  if (tagFilter) {
+    latestParams.set("tag", tagFilter);
+  }
+  if (sourceFilter) {
+    latestParams.set("source", sourceFilter);
+  }
+  if (snapshotDate) {
+    latestParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    latestParams.set("refresh", "true");
+  }
+
+  const [digestPayload, latestPayload] = await Promise.all([
+    fetchNewsJson(`/api/news/digest?${digestParams.toString()}`, forceRefresh ? { cache: "no-store" } : {}),
+    fetchNewsJson(
+      `/api/news/digest/latest${latestParams.toString() ? `?${latestParams.toString()}` : ""}`,
+      forceRefresh ? { cache: "no-store" } : {}
+    )
+  ]);
+  const meta = asObject(digestPayload?.meta);
+  const rows = Array.isArray(digestPayload?.data) ? digestPayload.data : [];
+  const latest = asObject(latestPayload?.data);
   const sourceCounts = new Map();
   const avgBySource = new Map();
   for (const article of rows) {
@@ -296,8 +361,83 @@ async function renderDigest() {
     })
     .filter((row) => row.average !== null);
 
+  const refreshHref = buildQueryHref({
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    date: dateFilter,
+    tag: tagFilter,
+    source: sourceFilter,
+    limit,
+    refresh: "1"
+  });
+  const sourceMode = String(meta?.source_mode || "unknown");
+  const generatedAt = String(meta?.generated_at || "n/a");
+  const fromCache = isTruthyQueryValue(meta?.from_cache);
+  const usingLastGood = isTruthyQueryValue(meta?.using_last_good);
+  const latestTitle = String(latest?.title || "No matching article");
+  const latestSource = String(latest?.source_name || asObject(latest?.source).name || "Unknown");
+  const latestPublished = String(latest?.published_at || latest?.published || "Unknown");
+  const latestSummary = String(latest?.ai_summary || latest?.summary || "No summary available.");
+  const latestTags = asArray(latest?.tags);
+
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
+      <div className="panel">
+        <h3>Digest Filters</h3>
+        <form method="get" className="inline-form-grid">
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={selectedSnapshotDateValue(searchParams)} />
+          <label className="muted" htmlFor="digest-date-filter">
+            Date (UTC)
+          </label>
+          <input id="digest-date-filter" name="date" type="text" placeholder="YYYY-MM-DD" defaultValue={dateFilter} />
+          <label className="muted" htmlFor="digest-tag-filter">
+            Tag
+          </label>
+          <input id="digest-tag-filter" name="tag" type="text" placeholder="OpenAI" defaultValue={tagFilter} />
+          <label className="muted" htmlFor="digest-source-filter">
+            Source
+          </label>
+          <input id="digest-source-filter" name="source" type="text" placeholder="PBS" defaultValue={sourceFilter} />
+          <label className="muted" htmlFor="digest-limit-filter">
+            Limit
+          </label>
+          <input id="digest-limit-filter" name="limit" type="number" min="1" max="200" defaultValue={String(limit)} />
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button type="submit" className="news-nav-link active-link">
+              Apply
+            </button>
+            <a className="news-nav-link" href={refreshHref}>
+              Refresh
+            </a>
+          </div>
+        </form>
+      </div>
+      <div className="panel">
+        <h3>Digest Status</h3>
+        <div className="stats-grid">
+          <StatCard label="Items Returned" value={formatNumber(meta?.returned_count ?? rows.length)} />
+          <StatCard label="Generated At (UTC)" value={generatedAt} />
+          <StatCard label="Source Mode" value={sourceMode} />
+          <StatCard label="From Cache" value={fromCache ? "yes" : "no"} />
+          <StatCard label="Using Last Good" value={usingLastGood ? "yes" : "no"} />
+        </div>
+      </div>
+      <div className="panel">
+        <h3>Latest Match</h3>
+        <p className="muted" style={{ marginBottom: "8px" }}>
+          {latestSource} • {latestPublished}
+        </p>
+        <h4 style={{ marginTop: 0 }}>{latestTitle}</h4>
+        <p>{latestSummary}</p>
+        {latestTags.length > 0 ? <p className="muted">Tags: {latestTags.join(", ")}</p> : null}
+        {latest?.link ? (
+          <a className="news-nav-link" href={latest.link} target="_blank" rel="noreferrer">
+            Open article
+          </a>
+        ) : null}
+      </div>
       <div className="panel">
         <h3>Digest Visuals</h3>
         {rows.length === 0 ? (
@@ -1092,15 +1232,17 @@ async function renderDataQuality(searchParams) {
   );
 }
 
-async function fetchEndpointStatus(label, path) {
+async function fetchEndpointStatus(label, path, options = {}) {
+  const fetchOptions = asObject(options?.fetchOptions);
   try {
-    const payload = await fetchNewsJson(path);
+    const payload = await fetchNewsJson(path, fetchOptions);
     return {
       label,
       path,
       ok: true,
       status: payload?.status || "ok",
-      detail: payload?.meta?.source_mode || payload?.data?.status || payload?.status || "reachable"
+      detail: payload?.meta?.source_mode || payload?.data?.status || payload?.status || "reachable",
+      payload
     };
   } catch (error) {
     return {
@@ -1108,7 +1250,8 @@ async function fetchEndpointStatus(label, path) {
       path,
       ok: false,
       status: "error",
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
+      payload: null
     };
   }
 }
@@ -1204,29 +1347,142 @@ async function renderRawJson(searchParams) {
   );
 }
 
-async function renderIntegration() {
+async function renderIntegration(searchParams) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+  const requestOptions = forceRefresh ? { fetchOptions: { cache: "no-store" } } : {};
+
+  const digestParams = new URLSearchParams();
+  digestParams.set("limit", "5");
+  if (snapshotDate) {
+    digestParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    digestParams.set("refresh", "true");
+  }
+
+  const latestParams = new URLSearchParams();
+  if (snapshotDate) {
+    latestParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    latestParams.set("refresh", "true");
+  }
+
+  const statsParams = new URLSearchParams();
+  if (snapshotDate) {
+    statsParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    statsParams.set("refresh", "true");
+  }
+
   const rows = await Promise.all([
-    fetchEndpointStatus("API Health", "/health/news-freshness"),
-    fetchEndpointStatus("Digest Contract", "/api/news/digest?limit=1"),
-    fetchEndpointStatus("Latest Contract", "/api/news/digest/latest"),
-    fetchEndpointStatus("Stats Contract", "/api/news/stats")
+    fetchEndpointStatus("Digest endpoint reachable", `/api/news/digest?${digestParams.toString()}`, requestOptions),
+    fetchEndpointStatus(
+      "Latest endpoint reachable",
+      `/api/news/digest/latest${latestParams.toString() ? `?${latestParams.toString()}` : ""}`,
+      requestOptions
+    ),
+    fetchEndpointStatus(
+      "Stats endpoint reachable",
+      `/api/news/stats${statsParams.toString() ? `?${statsParams.toString()}` : ""}`,
+      requestOptions
+    ),
+    fetchEndpointStatus("Freshness endpoint reachable", "/health/news-freshness", requestOptions)
   ]);
+  const digestRow = rows[0];
+  const latestRow = rows[1];
+  const freshnessRow = rows[3];
+
+  const digestMeta = asObject(digestRow?.payload?.meta);
+  const digestItems = asArray(digestRow?.payload?.data);
+  const latestRecord = asObject(latestRow?.payload?.data);
+  const freshnessPayload = asObject(freshnessRow?.payload);
+  const generatedAt = String(digestMeta?.generated_at || "missing");
+  const hasGeneratedAt = generatedAt !== "missing";
+  const hasArticles = digestItems.length > 0;
+  const freshnessReachable = freshnessRow?.ok || false;
+  const freshnessIsFresh = Boolean(freshnessPayload?.is_fresh);
+  const integrationOk = Boolean(digestRow?.ok) && Boolean(rows[2]?.ok) && freshnessReachable && hasGeneratedAt;
+  const staleWarning = freshnessReachable && !freshnessIsFresh;
+  const refreshHref = buildQueryHref({
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    refresh: "1"
+  });
+  const checkRows = [
+    ...rows,
+    {
+      label: "Payload includes generated_at",
+      path: "digest.meta.generated_at",
+      ok: hasGeneratedAt,
+      status: hasGeneratedAt ? "ok" : "missing",
+      detail: `generated_at=${generatedAt}`
+    },
+    {
+      label: "Payload has articles",
+      path: "digest.data",
+      ok: hasArticles,
+      status: hasArticles ? "ok" : "empty",
+      detail: `items=${digestItems.length}`
+    }
+  ];
+  const debugPayload = {
+    digest_status_code: digestRow?.ok ? 200 : null,
+    latest_status_code: latestRow?.ok ? 200 : null,
+    stats_status_code: rows[2]?.ok ? 200 : null,
+    freshness_status_code: freshnessRow?.ok ? 200 : null,
+    digest_status: digestRow?.payload?.status || null,
+    latest_status: latestRow?.payload?.status || null,
+    stats_status: rows[2]?.payload?.status || null,
+    freshness_status: freshnessPayload?.status || null,
+    from_cache: digestMeta?.from_cache,
+    using_last_good: digestMeta?.using_last_good,
+    fetch_error: digestMeta?.fetch_error,
+    freshness_reason: freshnessPayload?.reason || null
+  };
   const healthy = rows.filter((row) => row.ok).length;
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
+      <div className="panel">
+        <h3>Refresh</h3>
+        <a className="news-nav-link" href={refreshHref}>
+          Refresh checks
+        </a>
+      </div>
+      <div className="panel">
+        <h3>Integration Banner</h3>
+        {integrationOk && !staleWarning ? (
+          <StatusPill tone="good">Integration checks passing. Data is fresh.</StatusPill>
+        ) : integrationOk && staleWarning ? (
+          <StatusPill tone="neutral">Integration passing, but freshness is stale.</StatusPill>
+        ) : (
+          <StatusPill tone="bad">Integration check failure. Review endpoint statuses.</StatusPill>
+        )}
+      </div>
       <div className="panel">
         <h3>Integration Summary</h3>
         <div className="stats-grid">
           <StatCard label="Checks Passing" value={`${formatNumber(healthy)} / ${formatNumber(rows.length)}`} />
-          <StatCard label="Runtime Surface" value="Next.js + FastAPI" />
-          <StatCard label="Data Contract" value="RSS digest stats" />
+          <StatCard label="Generated At" value={generatedAt} />
+          <StatCard label="Digest Items" value={formatNumber(digestItems.length)} />
+          <StatCard label="Latest Title" value={truncateText(latestRecord?.title || "unavailable", 72)} />
+          <StatCard label="Freshness Status" value={freshnessIsFresh ? "fresh" : "stale"} />
         </div>
       </div>
 
       <div className="panel">
         <h3>Contract Checks</h3>
-        <EndpointTable rows={rows} />
+        <EndpointTable rows={checkRows} />
+      </div>
+
+      <div className="panel">
+        <h3>Debug Payload</h3>
+        <pre className="json-preview">{JSON.stringify(debugPayload, null, 2)}</pre>
       </div>
     </>
   );
@@ -2569,11 +2825,37 @@ async function renderLensStability(searchParams) {
   );
 }
 
-async function renderScraped() {
-  const payload = await fetchNewsJson("/api/news/digest?limit=100");
+async function renderScraped(searchParams) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
+  const sourceFilter = getQueryParam(searchParams, "source");
+  const limit = queryLimit(searchParams, "limit", 100, 1, 500);
+  const onlyScraped = getQueryParam(searchParams, "only") ? isTruthyQueryValue(getQueryParam(searchParams, "only")) : true;
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+
+  const digestParams = new URLSearchParams();
+  digestParams.set("limit", String(limit));
+  if (sourceFilter) {
+    digestParams.set("source", sourceFilter);
+  }
+  if (snapshotDate) {
+    digestParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    digestParams.set("refresh", "true");
+  }
+
+  const payload = await fetchNewsJson(`/api/news/digest?${digestParams.toString()}`, forceRefresh ? { cache: "no-store" } : {});
   const rows = asArray(payload?.data);
+  const meta = asObject(payload?.meta);
+  const filteredRows = onlyScraped
+    ? rows.filter((row) => {
+        const scraped = asObject(row?.scraped);
+        return Object.keys(scraped).length > 0;
+      })
+    : rows;
   const grouped = new Map();
-  for (const row of rows) {
+  for (const row of filteredRows) {
     const source = row?.source_name || asObject(row?.source).name || "Unknown";
     if (!grouped.has(source)) {
       grouped.set(source, []);
@@ -2581,18 +2863,69 @@ async function renderScraped() {
     grouped.get(source).push(row);
   }
   const groups = Array.from(grouped.entries()).sort((a, b) => b[1].length - a[1].length);
+  const refreshHref = buildQueryHref({
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    source: sourceFilter,
+    limit,
+    only: onlyScraped ? "1" : "0",
+    refresh: "1"
+  });
+  const generatedAt = String(meta?.generated_at || "n/a");
+  const sourceMode = String(meta?.source_mode || "unknown");
+  const withPayloadCount = rows.filter((row) => {
+    const scraped = asObject(row?.scraped);
+    return Object.keys(scraped).length > 0;
+  }).length;
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
+      <div className="panel">
+        <h3>Scraped Filters</h3>
+        <form method="get" className="inline-form-grid">
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={selectedSnapshotDateValue(searchParams)} />
+          <label className="muted" htmlFor="scraped-source-filter">
+            Source
+          </label>
+          <input id="scraped-source-filter" name="source" type="text" placeholder="Fox, PBS, NPR..." defaultValue={sourceFilter} />
+          <label className="muted" htmlFor="scraped-limit-filter">
+            Limit
+          </label>
+          <input id="scraped-limit-filter" name="limit" type="number" min="1" max="500" defaultValue={String(limit)} />
+          <label className="muted" htmlFor="scraped-only-filter">
+            Records shown
+          </label>
+          <select id="scraped-only-filter" name="only" defaultValue={onlyScraped ? "1" : "0"}>
+            <option value="1">Only with scraped payload</option>
+            <option value="0">All records</option>
+          </select>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button type="submit" className="news-nav-link active-link">
+              Apply
+            </button>
+            <a className="news-nav-link" href={refreshHref}>
+              Refresh
+            </a>
+          </div>
+        </form>
+      </div>
+      <div className="panel">
+        <h3>Status</h3>
+        <div className="stats-grid">
+          <StatCard label="Records Loaded" value={formatNumber(rows.length)} />
+          <StatCard label="Source Mode" value={sourceMode} />
+          <StatCard label="Generated At (UTC)" value={generatedAt} />
+          <StatCard label="Filter Applied" value={onlyScraped ? "scraped only" : "all records"} />
+        </div>
+      </div>
       <div className="panel">
         <h3>Raw Scraped Digest</h3>
         <div className="stats-grid">
-          <StatCard label="Records Loaded" value={formatNumber(rows.length)} />
+          <StatCard label="Records Loaded" value={formatNumber(filteredRows.length)} />
           <StatCard label="Sources" value={formatNumber(groups.length)} />
-          <StatCard
-            label="With Scraped Payload"
-            value={formatNumber(rows.filter((row) => asObject(row.scraped) && Object.keys(asObject(row.scraped)).length > 0).length)}
-          />
+          <StatCard label="With Scraped Payload" value={formatNumber(withPayloadCount)} />
         </div>
       </div>
 
@@ -2601,24 +2934,35 @@ async function renderScraped() {
         {groups.length === 0 ? (
           <EmptyState />
         ) : (
-          <table className="news-table">
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Articles</th>
-                <th>Example Title</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.slice(0, 25).map(([source, sourceRows]) => (
-                <tr key={source}>
-                  <td>{source}</td>
-                  <td>{formatNumber(sourceRows.length)}</td>
-                  <td>{truncateText(sourceRows[0]?.title || "Untitled", 120)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            {groups.slice(0, 25).map(([source, sourceRows]) => (
+              <details key={source} className="news-page-intro" style={{ marginBottom: "10px" }}>
+                <summary>
+                  {source} ({formatNumber(sourceRows.length)} article{sourceRows.length === 1 ? "" : "s"})
+                </summary>
+                <div style={{ marginTop: "10px", display: "grid", gap: "10px" }}>
+                  {sourceRows.map((row, index) => (
+                    <div key={`${String(row?.id || row?.link || row?.title || "article")}-${index}`} className="panel">
+                      <p style={{ marginTop: 0, marginBottom: "6px" }}>
+                        <strong>{row?.title || "Untitled"}</strong>
+                      </p>
+                      <p className="muted" style={{ marginTop: 0 }}>
+                        {String(row?.published_at || row?.published || "Unknown date")}
+                      </p>
+                      {row?.link ? (
+                        <p style={{ marginTop: 0, marginBottom: "8px" }}>
+                          <a href={row.link} target="_blank" rel="noreferrer">
+                            Open article
+                          </a>
+                        </p>
+                      ) : null}
+                      <pre className="json-preview">{JSON.stringify(asObject(row?.scraped), null, 2)}</pre>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </div>
         )}
       </div>
     </>
@@ -2759,7 +3103,7 @@ function renderPlaceholder(title) {
 
 async function renderPageBody(slug, title, searchParams) {
   if (slug === "digest") {
-    return renderDigest();
+    return renderDigest(searchParams);
   }
   if (slug === "stats") {
     return renderStats(searchParams);
@@ -2807,7 +3151,7 @@ async function renderPageBody(slug, title, searchParams) {
     return renderTrends(searchParams);
   }
   if (slug === "scraped") {
-    return renderScraped();
+    return renderScraped(searchParams);
   }
   if (slug === "snapshot-compare") {
     return renderSnapshotCompare(searchParams);
@@ -2822,7 +3166,7 @@ async function renderPageBody(slug, title, searchParams) {
     return renderRawJson(searchParams);
   }
   if (slug === "integration") {
-    return renderIntegration();
+    return renderIntegration(searchParams);
   }
   return renderPlaceholder(title);
 }
