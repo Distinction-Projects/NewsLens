@@ -97,6 +97,40 @@ function snapshotDateFromSearchParams(searchParams) {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 }
 
+function getQueryParam(searchParams, key) {
+  const raw = searchParams?.[key];
+  if (typeof raw === "string") {
+    return raw.trim();
+  }
+  if (Array.isArray(raw) && typeof raw[0] === "string") {
+    return raw[0].trim();
+  }
+  return "";
+}
+
+function normalizeMode(searchParams) {
+  const raw = getQueryParam(searchParams, "mode").toLowerCase();
+  return raw === "within-topic" ? "within-topic" : "pooled";
+}
+
+function selectedTopicFromQuery(searchParams, topics) {
+  const requested = getQueryParam(searchParams, "topic");
+  if (!requested) {
+    return topics[0] || null;
+  }
+  return topics.find((topic) => String(topic?.topic || "") === requested) || topics[0] || null;
+}
+
+function analysisModeQueryHref(mode, topic) {
+  const params = new URLSearchParams();
+  params.set("mode", mode);
+  if (topic) {
+    params.set("topic", topic);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "?";
+}
+
 function PageIntro({ summary }) {
   return (
     <details className="news-page-intro">
@@ -1585,18 +1619,82 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
   );
 }
 
-async function renderSourceDifferentiation() {
+async function renderSourceDifferentiation(searchParams) {
   const payload = await fetchStatsPayload();
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_differentiation);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
+  const mode = normalizeMode(searchParams);
+  const selectedTopic = selectedTopicFromQuery(searchParams, topics);
+  const selectedTopicName = selectedTopic ? String(selectedTopic.topic || "") : "";
+  const selectedTopicDiff = asObject(selectedTopic?.source_differentiation);
+  const selectedTopicReason = String(selectedTopicDiff.reason || "");
+  const isTopicUnavailable = String(selectedTopicDiff.status || "") !== "ok";
 
   return (
     <>
-      <SourceDifferentiationBlock title="Pooled Source Differentiation" differentiation={pooled} confounded />
       <div className="panel">
-        <h3>Within-Topic Source Differentiation</h3>
+        <h3>Analysis Mode</h3>
+        <div className="top-nav-links">
+          <a
+            className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
+            href={analysisModeQueryHref("pooled", selectedTopicName)}
+          >
+            Pooled (topic-confounded)
+          </a>
+          <a
+            className={`news-nav-link ${mode === "within-topic" ? "active-link" : ""}`}
+            href={analysisModeQueryHref("within-topic", selectedTopicName)}
+          >
+            Within-topic
+          </a>
+        </div>
+        {mode === "within-topic" && topics.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: "10px" }}>
+              Topic slice
+            </p>
+            <div className="top-nav-links">
+              {topics.slice(0, 24).map((topic) => {
+                const topicName = String(topic?.topic || "Unknown");
+                const selected = topicName === selectedTopicName;
+                return (
+                  <a
+                    key={topicName}
+                    className={`news-nav-link ${selected ? "active-link" : ""}`}
+                    href={analysisModeQueryHref("within-topic", topicName)}
+                  >
+                    {topicName}
+                  </a>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      {mode === "pooled" ? (
+        <SourceDifferentiationBlock title="Pooled Source Differentiation" differentiation={pooled} confounded />
+      ) : selectedTopic ? (
+        <SourceDifferentiationBlock
+          title={`Within-Topic Source Differentiation: ${selectedTopicName}`}
+          differentiation={selectedTopicDiff}
+        />
+      ) : (
+        <div className="panel">
+          <h3>Within-Topic Source Differentiation</h3>
+          <EmptyState />
+        </div>
+      )}
+
+      <div className="panel">
+        <h3>Topic Slice Overview</h3>
+        {mode === "within-topic" && selectedTopic && isTopicUnavailable ? (
+          <p className="muted">
+            Selected topic is unavailable: {selectedTopicReason || "Insufficient data for this topic slice."}
+          </p>
+        ) : null}
         {topics.length === 0 ? (
           <EmptyState />
         ) : (
@@ -1734,18 +1832,79 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
   );
 }
 
-async function renderSourceEffects() {
+async function renderSourceEffects(searchParams) {
   const payload = await fetchStatsPayload();
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_lens_effects);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
+  const mode = normalizeMode(searchParams);
+  const selectedTopic = selectedTopicFromQuery(searchParams, topics);
+  const selectedTopicName = selectedTopic ? String(selectedTopic.topic || "") : "";
+  const selectedTopicEffects = asObject(selectedTopic?.source_lens_effects);
+  const selectedTopicReason = String(selectedTopicEffects.reason || "");
+  const isTopicUnavailable = String(selectedTopicEffects.status || "") !== "ok";
 
   return (
     <>
-      <SourceEffectsBlock title="Pooled Source Effects" effects={pooled} confounded />
       <div className="panel">
-        <h3>Within-Topic Source Effects</h3>
+        <h3>Analysis Mode</h3>
+        <div className="top-nav-links">
+          <a
+            className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
+            href={analysisModeQueryHref("pooled", selectedTopicName)}
+          >
+            Pooled (topic-confounded)
+          </a>
+          <a
+            className={`news-nav-link ${mode === "within-topic" ? "active-link" : ""}`}
+            href={analysisModeQueryHref("within-topic", selectedTopicName)}
+          >
+            Within-topic
+          </a>
+        </div>
+        {mode === "within-topic" && topics.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: "10px" }}>
+              Topic slice
+            </p>
+            <div className="top-nav-links">
+              {topics.slice(0, 24).map((topic) => {
+                const topicName = String(topic?.topic || "Unknown");
+                const selected = topicName === selectedTopicName;
+                return (
+                  <a
+                    key={topicName}
+                    className={`news-nav-link ${selected ? "active-link" : ""}`}
+                    href={analysisModeQueryHref("within-topic", topicName)}
+                  >
+                    {topicName}
+                  </a>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      {mode === "pooled" ? (
+        <SourceEffectsBlock title="Pooled Source Effects" effects={pooled} confounded />
+      ) : selectedTopic ? (
+        <SourceEffectsBlock title={`Within-Topic Source Effects: ${selectedTopicName}`} effects={selectedTopicEffects} />
+      ) : (
+        <div className="panel">
+          <h3>Within-Topic Source Effects</h3>
+          <EmptyState />
+        </div>
+      )}
+
+      <div className="panel">
+        <h3>Topic Slice Overview</h3>
+        {mode === "within-topic" && selectedTopic && isTopicUnavailable ? (
+          <p className="muted">
+            Selected topic is unavailable: {selectedTopicReason || "Insufficient data for this topic slice."}
+          </p>
+        ) : null}
         {topics.length === 0 ? (
           <EmptyState />
         ) : (
@@ -2498,10 +2657,10 @@ async function renderPageBody(slug, title, searchParams) {
     return renderLensPca();
   }
   if (slug === "source-differentiation") {
-    return renderSourceDifferentiation();
+    return renderSourceDifferentiation(searchParams);
   }
   if (slug === "source-effects") {
-    return renderSourceEffects();
+    return renderSourceEffects(searchParams);
   }
   if (slug === "score-lab") {
     return renderScoreLab();
