@@ -10,11 +10,8 @@ It reads from the FastAPI backend routes:
 ## Migration status
 
 - All legacy `/news/*` routes are now present in Next.js under `app/news/[slug]/page.js`.
-- Live implementations currently shipped:
-  - `/news/digest`
-  - `/news/stats`
-  - `/news/sources`
-- Remaining routes are intentionally scaffolded placeholders for phased migration.
+- All `/news/*` routes now render live FastAPI-backed content/visuals.
+- No migration placeholders remain for known news route slugs.
 
 ## Local run
 
@@ -38,6 +35,25 @@ Open:
 
 - `http://localhost:3000/`
 - `http://localhost:3000/news`
+- `http://localhost:3000/supabase-test`
+
+## Supabase wiring
+
+This frontend now includes Supabase SSR helpers and middleware:
+
+- `utils/supabase/server.js`
+- `utils/supabase/client.js`
+- `utils/supabase/middleware.js`
+- `middleware.js`
+
+Set local env values in `frontend-node/.env.local`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+```
+
+The `/supabase-test` page performs a server-side read against `todos` for connectivity validation.
 
 ## E2E smoke test (Playwright)
 

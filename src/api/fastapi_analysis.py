@@ -12,6 +12,7 @@ from src.NewsLens import (
     preprocess,
     vader_score,
 )
+from src.services.database import persist_analysis_run
 
 
 class TextAnalyzeRequest(BaseModel):
@@ -126,6 +127,18 @@ def register_fastapi_analysis_endpoints(app: FastAPI) -> None:
                 "negative": "Negative",
             }.get(sentiment.lower(), sentiment.title())
 
+            storage = persist_analysis_run(
+                model=model_display,
+                sentiment=sentiment.lower(),
+                score=score,
+                input_text=raw_text,
+                processed_text=processed,
+                metadata={
+                    "endpoint": "/api/analysis/text",
+                    "model_key": model_key,
+                },
+            )
+
             return {
                 "status": "ok",
                 "error": None,
@@ -136,6 +149,7 @@ def register_fastapi_analysis_endpoints(app: FastAPI) -> None:
                     "sentiment_display": sentiment_display,
                     "score": score,
                     "processed_text": processed,
+                    "storage": storage,
                 },
             }
         except ValueError as error:

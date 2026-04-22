@@ -23,6 +23,9 @@ export default function HomePage() {
           <li>
             <Link href="/news">/news</Link> migrated news analytics pages
           </li>
+          <li>
+            <Link href="/supabase-test">/supabase-test</Link> Supabase connectivity check
+          </li>
         </ul>
       </div>
 

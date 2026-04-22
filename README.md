@@ -26,11 +26,22 @@ The important runtime behavior is that daily upstream JSON updates do not requir
 - `/news/digest`
 - `/news/stats`
 - `/news/sources`
+- `/news/lenses`
+- `/news/lens-matrix`
+- `/news/lens-correlations`
+- `/news/lens-pca`
+- `/news/source-differentiation`
+- `/news/source-effects`
 - `/news/tags`
 - `/news/score-lab`
+- `/news/lens-explorer`
+- `/news/lens-by-source`
+- `/news/lens-stability`
+- `/news/source-tag-matrix`
 - `/news/trends`
 - `/news/scraped`
 - `/news/workflow-status`
+- `/news/data-quality`
 - `/news/snapshot-compare`
 - `/news/raw-json`
 - `/news/integration`
@@ -93,6 +104,19 @@ Optional CORS override for a separate frontend:
 ```bash
 export NEWS_API_CORS_ORIGINS="http://localhost:3000,https://your-frontend.example.com"
 ```
+
+Optional database persistence (Supabase Postgres):
+
+```bash
+export DATABASE_URL="postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres"
+```
+
+When `DATABASE_URL` (or one of the alias vars in `.env.example`) is set:
+
+- `POST /api/analysis/text` will persist each analysis result into `public.analysis_runs`
+- `GET /health/database` will report DB connectivity status
+
+If no DB URL is set, API responses still succeed and persistence reports `unconfigured`.
 
 ## App bootstrap rules
 
