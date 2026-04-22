@@ -1102,6 +1102,24 @@ function getCorrelationPairRows(lenses, matrix) {
   return rows;
 }
 
+function sourceCountsToRows(sourceCountsValue) {
+  if (Array.isArray(sourceCountsValue)) {
+    return sourceCountsValue
+      .map((row) => ({
+        source: String(row?.source || "Unknown"),
+        count: toNumber(row?.count) || 0
+      }))
+      .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
+  }
+  const sourceCounts = asObject(sourceCountsValue);
+  return Object.entries(sourceCounts)
+    .map(([source, count]) => ({
+      source: String(source || "Unknown"),
+      count: toNumber(count) || 0
+    }))
+    .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
+}
+
 async function renderLensMatrix() {
   const payload = await fetchStatsPayload();
   const derived = getStatsDerived(payload);
@@ -1110,6 +1128,18 @@ async function renderLensMatrix() {
   const sourceRows = asArray(lensViews.source_rows);
   const summary = asObject(lensViews.summary);
   const topRows = sourceRows.slice(0, 20);
+  const lensAverageRows = asArray(summary.source_lens_average_rows)
+    .map((row) => ({
+      lens: String(row?.lens || ""),
+      mean: toNumber(row?.mean)
+    }))
+    .filter((row) => row.lens && row.mean !== null)
+    .sort((a, b) => (b.mean || 0) - (a.mean || 0));
+  const focusLens = lensAverageRows[0]?.lens || lensNames[0] || null;
+  const matrix = topRows.map((row) => {
+    const means = asObject(row.lens_means);
+    return lensNames.map((lens) => toNumber(means[lens]) || 0);
+  });
 
   return (
     <>
@@ -1121,6 +1151,45 @@ async function renderLensMatrix() {
           <StatCard label="Lenses" value={formatNumber(lensNames.length)} />
           <StatCard label="Covered Articles" value={formatNumber(summary.covered_articles)} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Lens Matrix Visuals</h3>
+        {topRows.length === 0 || lensNames.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: lensNames,
+                  y: topRows.map((row) => String(row.source || "Unknown")),
+                  z: matrix,
+                  colorscale: "Viridis"
+                }
+              ]}
+              layout={{ title: "Source x Lens Mean Heatmap (Percent Scale)" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: topRows.map((row) => String(row.source || "Unknown")),
+                  y: topRows.map((row) => {
+                    const means = asObject(row.lens_means);
+                    return focusLens ? toNumber(means[focusLens]) || 0 : 0;
+                  }),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{
+                title: `Source Means for Focus Lens: ${focusLens || "n/a"}`,
+                yaxis: { title: "Percent" }
+              }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1168,7 +1237,7 @@ async function renderLensCorrelations() {
   const lenses = asArray(correlations.lenses);
   const corrRaw = asArray(asObject(correlations.correlation).raw);
   const pairRankings = asArray(asObject(correlations.pair_rankings).corr_raw);
-  const topPairs =
+  const rawTopPairs =
     pairRankings.length > 0
       ? pairRankings
           .map((row) => ({
@@ -1178,6 +1247,10 @@ async function renderLensCorrelations() {
           }))
           .filter((row) => row.lens_a && row.lens_b && row.value !== null)
       : getCorrelationPairRows(lenses, corrRaw);
+  const topPairs = rawTopPairs.slice(0, 25);
+  const matrix = lenses.map((_, rowIndex) =>
+    lenses.map((_, colIndex) => toNumber(asArray(corrRaw[rowIndex])[colIndex]) || 0)
+  );
 
   return (
     <>
@@ -1191,8 +1264,49 @@ async function renderLensCorrelations() {
       </div>
 
       <div className="panel">
+        <h3>Correlation Visuals</h3>
+        {lenses.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: lenses,
+                  y: lenses,
+                  z: matrix,
+                  zmin: -1,
+                  zmax: 1,
+                  colorscale: "RdBu"
+                }
+              ]}
+              layout={{ title: "Lens Correlation Heatmap (Raw)" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  orientation: "h",
+                  y: topPairs
+                    .map((row) => `${row.lens_a} vs ${row.lens_b}`)
+                    .reverse(),
+                  x: topPairs.map((row) => toNumber(row.value) || 0).reverse(),
+                  marker: {
+                    color: topPairs.map((row) => (toNumber(row.value) || 0)).reverse(),
+                    colorscale: "RdBu"
+                  }
+                }
+              ]}
+              layout={{ title: "Top Correlation Pairs (Signed)", xaxis: { title: "Correlation" } }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
         <h3>Top Lens Pairs (Correlation Raw)</h3>
-        {topPairs.length === 0 ? (
+        {rawTopPairs.length === 0 ? (
           <EmptyState />
         ) : (
           <table className="news-table compact">
@@ -1204,7 +1318,7 @@ async function renderLensCorrelations() {
               </tr>
             </thead>
             <tbody>
-              {topPairs.slice(0, 25).map((row, index) => (
+              {rawTopPairs.slice(0, 25).map((row, index) => (
                 <tr key={`${row.lens_a}-${row.lens_b}-${index}`}>
                   <td>{row.lens_a}</td>
                   <td>{row.lens_b}</td>
@@ -1226,6 +1340,21 @@ async function renderLensPca() {
   const explained = asArray(pca.explained_variance);
   const drivers = asArray(pca.variance_drivers);
   const centroids = asArray(pca.source_centroids);
+  const explainedRows = explained
+    .map((row) => ({
+      component: String(row?.component || ""),
+      explained: toNumber(row?.explained_variance_ratio),
+      cumulative: toNumber(row?.cumulative_variance_ratio)
+    }))
+    .filter((row) => row.component && row.explained !== null && row.cumulative !== null);
+  const centroidRows = centroids
+    .map((row) => ({
+      source: String(row?.source || "Unknown"),
+      count: toNumber(row?.count) || 0,
+      pc1: toNumber(row?.pc1),
+      pc2: toNumber(row?.pc2)
+    }))
+    .filter((row) => row.pc1 !== null && row.pc2 !== null);
 
   return (
     <>
@@ -1238,6 +1367,54 @@ async function renderLensPca() {
           <StatCard label="Components" value={formatNumber(asArray(pca.components).length)} />
           <StatCard label="Coverage Mode" value={pca.coverage_mode || "n/a"} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>PCA Visuals</h3>
+        {explainedRows.length === 0 && centroidRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: explainedRows.map((row) => row.component),
+                  y: explainedRows.map((row) => (row.explained || 0) * 100),
+                  name: "Explained %",
+                  marker: { color: "#4fd1c5" }
+                },
+                {
+                  type: "scatter",
+                  mode: "lines+markers",
+                  x: explainedRows.map((row) => row.component),
+                  y: explainedRows.map((row) => (row.cumulative || 0) * 100),
+                  name: "Cumulative %",
+                  line: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Explained Variance by Component", yaxis: { title: "Percent" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "markers+text",
+                  x: centroidRows.map((row) => row.pc1),
+                  y: centroidRows.map((row) => row.pc2),
+                  text: centroidRows.map((row) => row.source),
+                  textposition: "top center",
+                  marker: {
+                    size: centroidRows.map((row) => Math.max(8, Math.min(28, 6 + Math.sqrt(row.count || 0) * 2))),
+                    color: "#fd7e14",
+                    opacity: 0.8
+                  }
+                }
+              ]}
+              layout={{ title: "Source Centroids in PC1/PC2 Space", xaxis: { title: "PC1" }, yaxis: { title: "PC2" } }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1331,6 +1508,10 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
   const data = asObject(differentiation);
   const multivariate = asObject(data.multivariate);
   const classification = asObject(data.classification);
+  const sourceCountRows = sourceCountsToRows(data.source_counts).slice(0, 20);
+  const accuracy = toNumber(classification.accuracy);
+  const baselineAccuracy = toNumber(classification.baseline_accuracy);
+  const showAccuracyChart = accuracy !== null || baselineAccuracy !== null;
   return (
     <div className="panel">
       <h3>{title}</h3>
@@ -1342,6 +1523,36 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
         <StatCard label="Lenses" value={formatNumber(data.n_lenses)} />
         <StatCard label="Permutations" value={formatNumber(data.permutations)} />
       </div>
+      {sourceCountRows.length > 0 || showAccuracyChart ? (
+        <div className="chart-grid">
+          {sourceCountRows.length > 0 ? (
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: sourceCountRows.map((row) => row.source),
+                  y: sourceCountRows.map((row) => row.count),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Source Counts in Analysis Slice", yaxis: { title: "Articles" } }}
+            />
+          ) : null}
+          {showAccuracyChart ? (
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: ["Classifier", "Baseline"],
+                  y: [accuracy !== null ? accuracy * 100 : 0, baselineAccuracy !== null ? baselineAccuracy * 100 : 0],
+                  marker: { color: ["#7aa7ff", "#fd7e14"] }
+                }
+              ]}
+              layout={{ title: "Classification Accuracy vs Baseline", yaxis: { title: "Accuracy %", range: [0, 100] } }}
+            />
+          ) : null}
+        </div>
+      ) : null}
       <table className="news-table compact">
         <tbody>
           <tr>
@@ -1428,6 +1639,24 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
   const data = asObject(effects);
   const rows = asArray(data.rows);
   const multipleTesting = asObject(data.multiple_testing);
+  const etaRows = rows
+    .map((row) => ({
+      lens: String(row?.lens || ""),
+      etaSq: toNumber(row?.eta_sq),
+      sourceMeans: asObject(row?.source_means)
+    }))
+    .filter((row) => row.lens && row.etaSq !== null)
+    .slice(0, 20);
+  const focusLens = etaRows[0];
+  const focusLensMeanRows = focusLens
+    ? Object.entries(focusLens.sourceMeans)
+        .map(([source, mean]) => ({
+          source: String(source || "Unknown"),
+          mean: toNumber(mean)
+        }))
+        .filter((row) => row.mean !== null)
+        .sort((a, b) => (b.mean || 0) - (a.mean || 0))
+    : [];
   return (
     <div className="panel">
       <h3>{title}</h3>
@@ -1439,6 +1668,36 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
         <StatCard label="Multiple Testing" value={multipleTesting.method || "n/a"} />
         <StatCard label="Tests" value={formatNumber(multipleTesting.n_tests)} />
       </div>
+      {etaRows.length > 0 ? (
+        <div className="chart-grid">
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                orientation: "h",
+                y: etaRows.map((row) => row.lens).reverse(),
+                x: etaRows.map((row) => row.etaSq || 0).reverse(),
+                marker: { color: "#7aa7ff" }
+              }
+            ]}
+            layout={{ title: "Lens Effect Size (eta squared)", xaxis: { title: "eta squared" } }}
+          />
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                x: focusLensMeanRows.map((row) => row.source),
+                y: focusLensMeanRows.map((row) => row.mean || 0),
+                marker: { color: "#fd7e14" }
+              }
+            ]}
+            layout={{
+              title: `Source Means for Top Lens: ${focusLens?.lens || "n/a"}`,
+              yaxis: { title: "Mean Lens Percent" }
+            }}
+          />
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <EmptyState />
       ) : (
@@ -1531,6 +1790,14 @@ async function renderScoreLab() {
   const scoreStatusBySource = asArray(chartAggregates.score_status_by_source).slice(0, 20);
   const scoredBySource = asArray(chartAggregates.scored_by_source).slice(0, 20);
   const tagDistribution = asArray(chartAggregates.tag_count_distribution);
+  const scoreStatusRows = scoreStatusBySource
+    .map((row) => ({
+      source: String(row?.source || "Unknown"),
+      scored: toNumber(row?.scored) || 0,
+      zero: toNumber(row?.zero_score) || 0,
+      unscorable: toNumber(row?.unscorable) || 0
+    }))
+    .slice(0, 15);
 
   return (
     <>
@@ -1543,6 +1810,64 @@ async function renderScoreLab() {
           <StatCard label="Missing Score Objects" value={formatNumber(derived.score_object_missing_articles)} />
           <StatCard label="Score Coverage" value={formatPercent(derived.score_coverage_ratio)} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Score Lab Visuals</h3>
+        {scoreStatusRows.length === 0 && scoredBySource.length === 0 && tagDistribution.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  name: "Scored",
+                  x: scoreStatusRows.map((row) => row.source),
+                  y: scoreStatusRows.map((row) => row.scored),
+                  marker: { color: "#4fd1c5" }
+                },
+                {
+                  type: "bar",
+                  name: "Zero",
+                  x: scoreStatusRows.map((row) => row.source),
+                  y: scoreStatusRows.map((row) => row.zero),
+                  marker: { color: "#fd7e14" }
+                },
+                {
+                  type: "bar",
+                  name: "Unscorable",
+                  x: scoreStatusRows.map((row) => row.source),
+                  y: scoreStatusRows.map((row) => row.unscorable),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Score Status by Source", barmode: "group", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: scoredBySource.map((row) => String(row?.source || "Unknown")),
+                  y: scoredBySource.map((row) => toNumber(row?.count) || 0),
+                  marker: { color: "#9d7dff" }
+                }
+              ]}
+              layout={{ title: "Scored Articles by Source", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: tagDistribution.map((row) => String(row?.label || "Unknown")),
+                  y: tagDistribution.map((row) => toNumber(row?.count) || 0),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Tag Count Distribution", yaxis: { title: "Articles" } }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1635,6 +1960,15 @@ async function renderLensExplorer() {
   const summary = asObject(lensViews.summary);
   const articleRows = asArray(lensViews.article_rows).slice(0, 40);
   const sourceRows = asArray(lensViews.source_rows).slice(0, 20);
+  const dominantLensCounts = asArray(summary.dominant_lens_counts).slice(0, 12);
+  const largestGapRows = articleRows
+    .map((row) => ({
+      title: truncateText(row?.title || "Untitled", 44),
+      gap: toNumber(row?.gap_vs_runner_up)
+    }))
+    .filter((row) => row.gap !== null)
+    .sort((a, b) => (b.gap || 0) - (a.gap || 0))
+    .slice(0, 12);
 
   return (
     <>
@@ -1646,6 +1980,38 @@ async function renderLensExplorer() {
           <StatCard label="Sources" value={formatNumber(summary.source_count)} />
           <StatCard label="Most Common Strongest Lens" value={summary.top_dominant_lens || "n/a"} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Explorer Visuals</h3>
+        {dominantLensCounts.length === 0 && largestGapRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: dominantLensCounts.map((row) => String(row?.lens || "Unknown")),
+                  y: dominantLensCounts.map((row) => toNumber(row?.count) || 0),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Strongest Lens Frequency", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: largestGapRows.map((row) => row.title),
+                  y: largestGapRows.map((row) => row.gap || 0),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Largest Strongest-vs-Runner-Up Gaps", yaxis: { title: "Gap" } }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1715,6 +2081,19 @@ async function renderLensBySource() {
   const lensViews = asObject(derived.lens_views);
   const lensNames = asArray(lensViews.lens_names);
   const sourceRows = asArray(lensViews.source_rows).slice(0, 20);
+  const summary = asObject(lensViews.summary);
+  const sourceLensAverageRows = asArray(summary.source_lens_average_rows)
+    .map((row) => ({
+      lens: String(row?.lens || ""),
+      mean: toNumber(row?.mean)
+    }))
+    .filter((row) => row.lens && row.mean !== null)
+    .sort((a, b) => (b.mean || 0) - (a.mean || 0));
+  const focusLens = sourceLensAverageRows[0]?.lens || lensNames[0] || null;
+  const matrix = sourceRows.map((row) => {
+    const means = asObject(row.lens_means);
+    return lensNames.map((lens) => toNumber(means[lens]) || 0);
+  });
 
   return (
     <>
@@ -1725,6 +2104,42 @@ async function renderLensBySource() {
           <StatCard label="Lenses" value={formatNumber(lensNames.length)} />
           <StatCard label="Coverage Mode" value={lensViews.coverage_mode || "n/a"} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Lens-by-Source Visuals</h3>
+        {sourceRows.length === 0 || lensNames.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: lensNames,
+                  y: sourceRows.map((row) => String(row.source || "Unknown")),
+                  z: matrix,
+                  colorscale: "Viridis"
+                }
+              ]}
+              layout={{ title: "Source x Lens Mean Heatmap" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: sourceRows.map((row) => String(row.source || "Unknown")),
+                  y: sourceRows.map((row) => {
+                    const means = asObject(row.lens_means);
+                    return focusLens ? toNumber(means[focusLens]) || 0 : 0;
+                  }),
+                  marker: { color: "#fd7e14" }
+                }
+              ]}
+              layout={{ title: `Source Comparison for Focus Lens: ${focusLens || "n/a"}`, yaxis: { title: "Percent" } }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1771,6 +2186,21 @@ async function renderLensStability() {
   const lensViews = asObject(derived.lens_views);
   const stabilityRows = asArray(lensViews.stability_rows);
   const summary = asObject(lensViews.summary);
+  const scatterRows = stabilityRows
+    .map((row) => ({
+      lens: String(row?.lens || "Unknown"),
+      mean: toNumber(row?.mean),
+      stddev: toNumber(row?.stddev)
+    }))
+    .filter((row) => row.mean !== null && row.stddev !== null);
+  const sourceGapRows = stabilityRows
+    .map((row) => ({
+      lens: String(row?.lens || "Unknown"),
+      sourceGap: toNumber(row?.source_gap)
+    }))
+    .filter((row) => row.sourceGap !== null)
+    .sort((a, b) => (b.sourceGap || 0) - (a.sourceGap || 0))
+    .slice(0, 20);
 
   return (
     <>
@@ -1782,6 +2212,42 @@ async function renderLensStability() {
           <StatCard label="Most Volatile Lens" value={summary.stability_top_lens || "n/a"} />
           <StatCard label="Total Samples" value={formatNumber(summary.stability_total_samples)} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Stability Visuals</h3>
+        {scatterRows.length === 0 && sourceGapRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "markers+text",
+                  x: scatterRows.map((row) => row.mean),
+                  y: scatterRows.map((row) => row.stddev),
+                  text: scatterRows.map((row) => row.lens),
+                  textposition: "top center",
+                  marker: { color: "#4fd1c5", size: 10 }
+                }
+              ]}
+              layout={{ title: "Lens Mean vs Std Dev", xaxis: { title: "Mean" }, yaxis: { title: "Std Dev" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  orientation: "h",
+                  y: sourceGapRows.map((row) => row.lens).reverse(),
+                  x: sourceGapRows.map((row) => row.sourceGap || 0).reverse(),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Top Source Gaps by Lens", xaxis: { title: "Source Gap" } }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1934,31 +2400,66 @@ async function renderSnapshotCompare(searchParams) {
     ["Tag Count", "tag_count"],
     ["Days Covered", "days_covered"]
   ];
+  const chartRows = rows
+    .map(([label, key]) => ({
+      label,
+      current: toNumber(currentMetrics[key]),
+      snapshot: toNumber(snapshotMetrics[key])
+    }))
+    .filter((row) => row.current !== null && row.snapshot !== null);
 
   return (
-    <div className="panel">
-      <h3>Current vs Snapshot ({snapshotDate})</h3>
-      <table className="news-table compact">
-        <thead>
-          <tr>
-            <th>Metric</th>
-            <th>Current</th>
-            <th>Snapshot</th>
-            <th>Delta</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, key]) => (
-            <tr key={key}>
-              <td>{label}</td>
-              <td>{formatDecimal(currentMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
-              <td>{formatDecimal(snapshotMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
-              <td>{metricDelta(currentMetrics[key], snapshotMetrics[key])}</td>
+    <>
+      <div className="panel">
+        <h3>Snapshot Comparison Visual</h3>
+        {chartRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                name: "Current",
+                x: chartRows.map((row) => row.label),
+                y: chartRows.map((row) => row.current || 0),
+                marker: { color: "#4fd1c5" }
+              },
+              {
+                type: "bar",
+                name: `Snapshot (${snapshotDate})`,
+                x: chartRows.map((row) => row.label),
+                y: chartRows.map((row) => row.snapshot || 0),
+                marker: { color: "#7aa7ff" }
+              }
+            ]}
+            layout={{ title: `Current vs Snapshot (${snapshotDate})`, barmode: "group", yaxis: { title: "Value" } }}
+          />
+        )}
+      </div>
+      <div className="panel">
+        <h3>Current vs Snapshot ({snapshotDate})</h3>
+        <table className="news-table compact">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Current</th>
+              <th>Snapshot</th>
+              <th>Delta</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map(([label, key]) => (
+              <tr key={key}>
+                <td>{label}</td>
+                <td>{formatDecimal(currentMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
+                <td>{formatDecimal(snapshotMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
+                <td>{metricDelta(currentMetrics[key], snapshotMetrics[key])}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
