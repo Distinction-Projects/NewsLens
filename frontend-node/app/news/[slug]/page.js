@@ -3278,21 +3278,46 @@ function pairKey(a, b) {
 
 async function renderSnapshotCompare(searchParams) {
   const snapshotDate = snapshotDateFromSearchParams(searchParams);
+  const snapshotInputValue = selectedSnapshotDateValue(searchParams);
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+  const refreshHref = buildQueryHref({ snapshot: snapshotInputValue, refresh: "1" });
+  const applyHref = buildQueryHref({ snapshot: snapshotInputValue, refresh: "" });
   if (!snapshotDate) {
     return (
-      <div className="panel">
-        <h3>Snapshot Compare</h3>
-        <p className="muted">Add a snapshot date in the query string to compare: <code>?snapshot=YYYY-MM-DD</code></p>
-      </div>
+      <>
+        <div className="panel">
+          <h3>Snapshot Compare Controls</h3>
+          <form method="get" className="news-filter-grid">
+            <label className="muted">
+              Snapshot date (UTC)
+              <input name="snapshot" type="date" defaultValue={snapshotInputValue} />
+            </label>
+            <div style={{ display: "flex", alignItems: "end", gap: "10px" }}>
+              <button type="submit" className="news-nav-link">
+                Run Compare
+              </button>
+            </div>
+          </form>
+        </div>
+        <div className="panel">
+          <h3>Snapshot Compare</h3>
+          <p className="muted">Select a snapshot date to compare current vs historical metrics.</p>
+        </div>
+      </>
     );
   }
 
   const [currentPayload, snapshotPayload] = await Promise.all([
-    fetchStatsPayload(),
-    fetchStatsPayload(snapshotDate)
+    fetchNewsJson(`/api/news/stats${forceRefresh ? "?refresh=true" : ""}`, forceRefresh ? { cache: "no-store" } : {}),
+    fetchNewsJson(
+      `/api/news/stats?snapshot_date=${encodeURIComponent(snapshotDate)}${forceRefresh ? "&refresh=true" : ""}`,
+      forceRefresh ? { cache: "no-store" } : {}
+    )
   ]);
   const currentMetrics = extractSnapshotMetrics(currentPayload);
   const snapshotMetrics = extractSnapshotMetrics(snapshotPayload);
+  const currentMeta = asObject(currentPayload?.meta);
+  const snapshotMeta = asObject(snapshotPayload?.meta);
   const rows = [
     ["Total Articles", "total_articles"],
     ["Scored Articles", "scored_articles"],
@@ -3313,6 +3338,27 @@ async function renderSnapshotCompare(searchParams) {
 
   return (
     <>
+      <div className="panel">
+        <h3>Snapshot Compare Controls</h3>
+        <form method="get" className="news-filter-grid">
+          <label className="muted">
+            Snapshot date (UTC)
+            <input name="snapshot" type="date" defaultValue={snapshotDate} />
+          </label>
+          <div style={{ display: "flex", alignItems: "end", gap: "10px" }}>
+            <button type="submit" className="news-nav-link">
+              Run Compare
+            </button>
+            <a href={refreshHref} className="news-nav-link">
+              Refresh
+            </a>
+          </div>
+        </form>
+        <p className="muted" style={{ marginTop: "10px" }}>
+          Current generated: <strong>{currentMeta.generated_at || "n/a"}</strong> | Snapshot generated:{" "}
+          <strong>{snapshotMeta.generated_at || "n/a"}</strong> | <a href={applyHref}>Clear refresh flag</a>
+        </p>
+      </div>
       <div className="panel">
         <h3>Snapshot Comparison Visual</h3>
         {chartRows.length === 0 ? (
