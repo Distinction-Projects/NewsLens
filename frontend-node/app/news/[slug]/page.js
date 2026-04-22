@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { fetchNewsJson } from "../../../lib/newsApi";
+import { fetchNewsJson, newsApiBaseUrl } from "../../../lib/newsApi";
 import { getNewsPage, NEWS_PAGES } from "../../../lib/newsPages";
 import PlotlyChart from "../../../components/PlotlyChart";
 
@@ -1234,14 +1234,34 @@ async function renderDataQuality(searchParams) {
 
 async function fetchEndpointStatus(label, path, options = {}) {
   const fetchOptions = asObject(options?.fetchOptions);
+  const url = `${newsApiBaseUrl()}${path}`;
   try {
-    const payload = await fetchNewsJson(path, fetchOptions);
+    const response = await fetch(url, {
+      next: { revalidate: 60 },
+      ...fetchOptions
+    });
+    const statusCode = response.status;
+    const text = await response.text();
+    let payload = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch (_error) {
+      payload = text;
+    }
+    const payloadObj = asObject(payload);
+    const meta = asObject(payloadObj?.meta);
+    const payloadData = asObject(payloadObj?.data);
     return {
       label,
       path,
-      ok: true,
-      status: payload?.status || "ok",
-      detail: payload?.meta?.source_mode || payload?.data?.status || payload?.status || "reachable",
+      ok: response.ok,
+      status: response.ok ? "ok" : "error",
+      statusCode,
+      detail:
+        meta?.source_mode ||
+        payloadData?.status ||
+        payloadObj?.status ||
+        (typeof payload === "string" && payload ? truncateText(payload, 200) : "reachable"),
       payload
     };
   } catch (error) {
@@ -1250,6 +1270,7 @@ async function fetchEndpointStatus(label, path, options = {}) {
       path,
       ok: false,
       status: "error",
+      statusCode: null,
       detail: error instanceof Error ? error.message : String(error),
       payload: null
     };
@@ -1275,7 +1296,9 @@ function EndpointTable({ rows }) {
               <code>{row.path}</code>
             </td>
             <td>
-              <StatusPill tone={row.ok ? "good" : "bad"}>{row.status}</StatusPill>
+              <StatusPill tone={row.ok ? "good" : "bad"}>
+                {row.statusCode ? `HTTP ${row.statusCode}` : row.status}
+              </StatusPill>
             </td>
             <td>{truncateText(row.detail)}</td>
           </tr>
@@ -1286,16 +1309,78 @@ function EndpointTable({ rows }) {
 }
 
 async function renderWorkflowStatus(searchParams) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+  const requestOptions = forceRefresh ? { fetchOptions: { cache: "no-store" } } : {};
+
+  const commonParams = new URLSearchParams();
+  if (snapshotDate) {
+    commonParams.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    commonParams.set("refresh", "true");
+  }
+
+  const digestPath = `/api/news/digest?${new URLSearchParams({ ...Object.fromEntries(commonParams), limit: "1" }).toString()}`;
+  const latestPath = `/api/news/digest/latest${commonParams.toString() ? `?${commonParams.toString()}` : ""}`;
+  const statsPath = `/api/news/stats${commonParams.toString() ? `?${commonParams.toString()}` : ""}`;
+  const freshnessPath =
+    dataMode === "current" && forceRefresh ? "/health/news-freshness?refresh=true" : "/health/news-freshness";
+
   const rows = await Promise.all([
-    fetchEndpointStatus("Digest", "/api/news/digest?limit=1"),
-    fetchEndpointStatus("Latest", "/api/news/digest/latest"),
-    fetchEndpointStatus("Stats", "/api/news/stats"),
-    fetchEndpointStatus("Freshness", "/health/news-freshness")
+    fetchEndpointStatus("Digest", digestPath, requestOptions),
+    fetchEndpointStatus("Latest", latestPath, requestOptions),
+    fetchEndpointStatus("Stats", statsPath, requestOptions),
+    fetchEndpointStatus("Freshness", freshnessPath, requestOptions)
   ]);
-  const statsPayload = rows.find((row) => row.path === "/api/news/stats" && row.ok)
-    ? await fetchStatsForMode(searchParams)
-    : null;
-  const derived = getStatsDerived(statsPayload);
+  const digestRow = rows[0];
+  const latestRow = rows[1];
+  const statsRow = rows[2];
+  const freshnessRow = rows[3];
+
+  const digestMeta = asObject(asObject(digestRow?.payload).meta);
+  const statsPayload = asObject(statsRow?.payload);
+  const statsMeta = asObject(statsPayload.meta);
+  const derived = asObject(asObject(statsPayload.data).derived);
+  const latestRecord = asObject(asObject(latestRow?.payload).data);
+
+  const inputArticles = toNumber(digestMeta.input_articles_count);
+  const excludedUnscraped = toNumber(digestMeta.excluded_unscraped_articles);
+  const includedArticles = toNumber(derived.total_articles);
+  const scoredArticles = toNumber(derived.scored_articles);
+  const zeroScoreArticles = toNumber(derived.zero_score_articles);
+  const unscorableArticles = toNumber(derived.unscorable_articles);
+  const scoreCoverageRatio = toNumber(derived.score_coverage_ratio);
+  const freshnessPayload = asObject(freshnessRow?.payload);
+
+  const ingestOk = digestRow?.ok;
+  const scrapeFilterOk =
+    inputArticles !== null &&
+    excludedUnscraped !== null &&
+    includedArticles !== null &&
+    inputArticles >= includedArticles &&
+    excludedUnscraped >= 0;
+  const scoringOk = Boolean(statsRow?.ok) && scoredArticles !== null && scoredArticles > 0;
+  const unscorableOk = Boolean(statsRow?.ok) && unscorableArticles !== null && unscorableArticles === 0;
+  const precomputeOk = Boolean(statsRow?.ok) && Boolean(statsMeta.schema_version);
+  const freshnessOk = dataMode === "snapshot" ? null : Boolean(freshnessRow?.ok);
+  const freshnessLabel =
+    dataMode === "snapshot"
+      ? "Snapshot mode does not use freshness health gate."
+      : `current freshness endpoint -> HTTP ${freshnessRow?.statusCode || "n/a"}; is_fresh=${String(freshnessPayload.is_fresh)}`;
+
+  const sourceInfo = asObject(latestRecord.source);
+  const latestTitle = latestRecord.title || "Latest article unavailable";
+  const latestSource = sourceInfo.name || sourceInfo.id || "Unknown source";
+  const latestPublished = latestRecord.published_at || latestRecord.published || "Unknown date";
+
+  const modeText = dataMode === "snapshot" ? "Snapshot mode" : "Current mode";
+  const refreshHref = buildQueryHref({
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    refresh: "1"
+  });
 
   return (
     <>
@@ -1303,43 +1388,235 @@ async function renderWorkflowStatus(searchParams) {
       <div className="panel">
         <h3>Pipeline Snapshot</h3>
         <div className="stats-grid">
-          <StatCard label="Total Articles" value={formatNumber(derived.total_articles)} />
-          <StatCard label="Scored Articles" value={formatNumber(derived.scored_articles)} />
-          <StatCard label="Unscorable" value={formatNumber(derived.unscorable_articles)} />
-          <StatCard label="Coverage" value={formatPercent(derived.score_coverage_ratio)} />
+          <StatCard label="Input Articles" value={formatNumber(inputArticles)} />
+          <StatCard label="Excluded (Scrape Errors)" value={formatNumber(excludedUnscraped)} />
+          <StatCard label="Included Articles" value={formatNumber(includedArticles)} />
+          <StatCard label="Scored Articles" value={formatNumber(scoredArticles)} />
+          <StatCard label="Zero Scores" value={formatNumber(zeroScoreArticles)} />
+          <StatCard label="Unscorable" value={formatNumber(unscorableArticles)} />
+          <StatCard label="Coverage" value={formatPercent(scoreCoverageRatio)} />
         </div>
-      </div>
-
-      <div className="panel">
-        <h3>Runtime Checks</h3>
-        <EndpointTable rows={rows} />
-      </div>
-    </>
-  );
-}
-
-async function renderRawJson(searchParams) {
-  const payload = await fetchStatsForMode(searchParams);
-  const dataMode = normalizeDataMode(searchParams);
-  const snapshotDate = activeSnapshotDate(searchParams);
-  const json = JSON.stringify(payload, null, 2);
-  const maxLength = 20000;
-  const preview = json.length > maxLength ? `${json.slice(0, maxLength)}\n... truncated ...` : json;
-
-  return (
-    <>
-      <DataModeControls searchParams={searchParams} />
-      <div className="panel">
-        <h3>Stats Endpoint Preview</h3>
         <p className="muted">
-          Showing <code>/api/news/stats</code> in <strong>{dataMode}</strong> mode
+          {modeText}
           {snapshotDate ? (
             <>
               {" "}
               for snapshot <code>{snapshotDate}</code>
             </>
           ) : null}
-          .
+          . <a href={refreshHref}>Refresh checks</a>
+        </p>
+      </div>
+
+      <div className="panel">
+        <h3>Runtime Checks</h3>
+        <ul className="news-list compact">
+          <li>
+            Ingest + digest endpoint:{" "}
+            <StatusPill tone={ingestOk ? "good" : "bad"}>{ingestOk ? "PASS" : "FAIL"}</StatusPill>
+          </li>
+          <li>
+            Scrape filtering in effect:{" "}
+            <StatusPill tone={scrapeFilterOk ? "good" : "bad"}>{scrapeFilterOk ? "PASS" : "FAIL"}</StatusPill>
+          </li>
+          <li>
+            Rubric scoring present:{" "}
+            <StatusPill tone={scoringOk ? "good" : "bad"}>{scoringOk ? "PASS" : "FAIL"}</StatusPill>
+          </li>
+          <li>
+            Unscorable article gate:{" "}
+            <StatusPill tone={unscorableOk ? "good" : "warn"}>{unscorableOk ? "PASS" : "WARN"}</StatusPill>
+          </li>
+          <li>
+            Precomputed contract present:{" "}
+            <StatusPill tone={precomputeOk ? "good" : "bad"}>{precomputeOk ? "PASS" : "FAIL"}</StatusPill>
+          </li>
+          <li>
+            Freshness gate:{" "}
+            <StatusPill tone={dataMode === "snapshot" ? "warn" : freshnessOk ? "good" : "bad"}>
+              {dataMode === "snapshot" ? "WARN" : freshnessOk ? "PASS" : "FAIL"}
+            </StatusPill>{" "}
+            <span className="muted">{freshnessLabel}</span>
+          </li>
+        </ul>
+        <EndpointTable rows={rows} />
+      </div>
+
+      <div className="panel">
+        <h3>Latest Article</h3>
+        {latestRecord?.title ? (
+          <>
+            <p>
+              <strong>{latestTitle}</strong>
+            </p>
+            <p className="muted">
+              Source: {latestSource}
+              <br />
+              Published (UTC): {latestPublished}
+            </p>
+            <p>{latestRecord.ai_summary || latestRecord.summary || "No summary available."}</p>
+            {latestRecord.link ? (
+              <p>
+                <a href={latestRecord.link} target="_blank" rel="noreferrer">
+                  Open Article
+                </a>
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <EmptyState>Latest article unavailable for current filters.</EmptyState>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderRawJson(searchParams) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
+  const endpoint = getQueryParam(searchParams, "endpoint") || "digest";
+  const dateFilter = getQueryParam(searchParams, "date");
+  const tagFilter = getQueryParam(searchParams, "tag");
+  const sourceFilter = getQueryParam(searchParams, "source");
+  const limit = queryLimit(searchParams, "limit", 20, 1, 500);
+  const forceRefresh = isTruthyQueryValue(getQueryParam(searchParams, "refresh"));
+
+  let endpointPath = "/api/news/digest";
+  if (endpoint === "latest") {
+    endpointPath = "/api/news/digest/latest";
+  } else if (endpoint === "stats") {
+    endpointPath = "/api/news/stats";
+  } else if (endpoint === "upstream") {
+    endpointPath = "/api/news/upstream";
+  } else if (endpoint === "freshness") {
+    endpointPath = "/health/news-freshness";
+  }
+
+  const query = new URLSearchParams();
+  if (snapshotDate) {
+    query.set("snapshot_date", snapshotDate);
+  }
+  if (forceRefresh) {
+    query.set("refresh", "true");
+  }
+  if (endpoint === "digest" || endpoint === "latest") {
+    if (dateFilter) {
+      query.set("date", dateFilter);
+    }
+    if (tagFilter) {
+      query.set("tag", tagFilter);
+    }
+    if (sourceFilter) {
+      query.set("source", sourceFilter);
+    }
+  }
+  if (endpoint === "digest") {
+    query.set("limit", String(limit));
+  }
+
+  const fullPath = `${endpointPath}${query.toString() ? `?${query.toString()}` : ""}`;
+  const payloadStatus = await fetchEndpointStatus(
+    "Selected endpoint",
+    fullPath,
+    forceRefresh ? { fetchOptions: { cache: "no-store" } } : {}
+  );
+  const payload = payloadStatus.payload;
+  const json = JSON.stringify(payload || { error: payloadStatus.detail }, null, 2);
+  const maxLength = 20000;
+  const preview = json.length > maxLength ? `${json.slice(0, maxLength)}\n... truncated ...` : json;
+  const payloadMeta = asObject(asObject(payload).meta);
+  const generatedAt = payloadMeta.generated_at || "n/a";
+  const applyHref = buildQueryHref({
+    endpoint,
+    date: dateFilter,
+    tag: tagFilter,
+    source: sourceFilter,
+    limit: endpoint === "digest" ? String(limit) : "",
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    refresh: ""
+  });
+  const refreshHref = buildQueryHref({
+    endpoint,
+    date: dateFilter,
+    tag: tagFilter,
+    source: sourceFilter,
+    limit: endpoint === "digest" ? String(limit) : "",
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
+    refresh: "1"
+  });
+
+  return (
+    <>
+      <DataModeControls
+        searchParams={searchParams}
+        extraParams={{
+          endpoint,
+          date: dateFilter,
+          tag: tagFilter,
+          source: sourceFilter,
+          limit: String(limit)
+        }}
+      />
+      <div className="panel">
+        <h3>Raw Endpoint Controls</h3>
+        <form method="get" className="news-filter-grid">
+          <label className="muted">
+            Endpoint
+            <select name="endpoint" defaultValue={endpoint}>
+              <option value="digest">Digest</option>
+              <option value="latest">Latest Digest Item</option>
+              <option value="stats">Stats</option>
+              <option value="upstream">Upstream Contract (raw)</option>
+              <option value="freshness">Freshness</option>
+            </select>
+          </label>
+          <label className="muted">
+            Date filter
+            <input name="date" type="text" placeholder="YYYY-MM-DD" defaultValue={dateFilter} />
+          </label>
+          <label className="muted">
+            Tag filter
+            <input name="tag" type="text" placeholder="OpenAI" defaultValue={tagFilter} />
+          </label>
+          <label className="muted">
+            Source filter
+            <input name="source" type="text" placeholder="NPR" defaultValue={sourceFilter} />
+          </label>
+          <label className="muted">
+            Limit
+            <input name="limit" type="number" min="1" max="500" defaultValue={limit} />
+          </label>
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={selectedSnapshotDateValue(searchParams)} />
+          <div style={{ display: "flex", alignItems: "end", gap: "10px" }}>
+            <button type="submit" className="news-nav-link">
+              Apply
+            </button>
+            <a className="news-nav-link" href={refreshHref}>
+              Refresh
+            </a>
+          </div>
+        </form>
+        <p className="muted" style={{ marginTop: "10px" }}>
+          <a href={applyHref}>Clear refresh flag</a>
+        </p>
+      </div>
+
+      <div className="panel">
+        <h3>Raw Endpoint Preview</h3>
+        <p className="muted">
+          Endpoint: <code>{fullPath}</code>
+          <br />
+          HTTP: <strong>{payloadStatus.statusCode || "n/a"}</strong> | Mode: <strong>{dataMode}</strong> | Generated:{" "}
+          <strong>{generatedAt}</strong>
+          {snapshotDate ? (
+            <>
+              {" "}
+              for snapshot <code>{snapshotDate}</code>
+            </>
+          ) : null}
         </p>
         <pre className="json-preview">{preview}</pre>
       </div>
