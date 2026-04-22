@@ -113,6 +113,25 @@ function normalizeMode(searchParams) {
   return raw === "within-topic" ? "within-topic" : "pooled";
 }
 
+function normalizeDataMode(searchParams) {
+  const raw = getQueryParam(searchParams, "data_mode").toLowerCase();
+  return raw === "snapshot" ? "snapshot" : "current";
+}
+
+function selectedSnapshotDateValue(searchParams) {
+  const raw = getQueryParam(searchParams, "snapshot");
+  return raw || "";
+}
+
+function activeSnapshotDate(searchParams) {
+  const date = snapshotDateFromSearchParams(searchParams);
+  const mode = normalizeDataMode(searchParams);
+  if (mode === "snapshot" && date) {
+    return date;
+  }
+  return null;
+}
+
 function selectedTopicFromQuery(searchParams, topics) {
   const requested = getQueryParam(searchParams, "topic");
   if (!requested) {
@@ -121,14 +140,38 @@ function selectedTopicFromQuery(searchParams, topics) {
   return topics.find((topic) => String(topic?.topic || "") === requested) || topics[0] || null;
 }
 
-function analysisModeQueryHref(mode, topic) {
-  const params = new URLSearchParams();
-  params.set("mode", mode);
-  if (topic) {
-    params.set("topic", topic);
+function buildQueryHref(paramsObject) {
+  const queryParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(paramsObject || {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    queryParams.set(key, String(value));
   }
-  const query = params.toString();
+  const query = queryParams.toString();
   return query ? `?${query}` : "?";
+}
+
+function analysisModeQueryHref(mode, topic, dataMode, snapshot) {
+  return buildQueryHref({
+    mode,
+    topic,
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? snapshot : ""
+  });
+}
+
+function dataModeQueryHref(dataMode, snapshot, extraParams = {}) {
+  return buildQueryHref({
+    ...extraParams,
+    data_mode: dataMode,
+    snapshot: dataMode === "snapshot" ? snapshot : ""
+  });
+}
+
+async function fetchStatsForMode(searchParams) {
+  const snapshotDate = activeSnapshotDate(searchParams);
+  return fetchStatsPayload(snapshotDate);
 }
 
 function PageIntro({ summary }) {
@@ -137,6 +180,53 @@ function PageIntro({ summary }) {
       <summary>What this page does</summary>
       <p className="muted">{summary}</p>
     </details>
+  );
+}
+
+function DataModeControls({ searchParams, extraParams = {} }) {
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
+  const missingSnapshot = dataMode === "snapshot" && !snapshotDateFromSearchParams(searchParams);
+  const currentHref = dataModeQueryHref("current", snapshotDateValue, extraParams);
+  const snapshotHref = dataModeQueryHref("snapshot", snapshotDateValue, extraParams);
+  return (
+    <div className="panel">
+      <h3>Data Mode</h3>
+      <div className="top-nav-links">
+        <a className={`news-nav-link ${dataMode === "current" ? "active-link" : ""}`} href={currentHref}>
+          Current
+        </a>
+        <a className={`news-nav-link ${dataMode === "snapshot" ? "active-link" : ""}`} href={snapshotHref}>
+          Snapshot
+        </a>
+      </div>
+      <form method="get" style={{ marginTop: "10px" }}>
+        {Object.entries(extraParams).map(([key, value]) => (
+          <input key={key} type="hidden" name={key} value={String(value || "")} />
+        ))}
+        <input type="hidden" name="data_mode" value={dataMode} />
+        <label className="muted" htmlFor="snapshot-date-input">
+          Snapshot date
+        </label>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px" }}>
+          <input
+            id="snapshot-date-input"
+            name="snapshot"
+            type="date"
+            defaultValue={snapshotDateValue}
+            disabled={dataMode !== "snapshot"}
+          />
+          <button type="submit" className="news-nav-link">
+            Apply
+          </button>
+        </div>
+      </form>
+      {missingSnapshot ? (
+        <p className="muted" style={{ marginTop: "10px" }}>
+          Snapshot mode requires a valid date (`YYYY-MM-DD`). Falling back to current data until provided.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -276,8 +366,8 @@ async function renderDigest() {
   );
 }
 
-async function renderStats() {
-  const payload = await fetchNewsJson("/api/news/stats");
+async function renderStats(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const data = payload?.data || {};
   const derived = data?.derived || {};
   const meta = payload?.meta || {};
@@ -295,6 +385,7 @@ async function renderStats() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Coverage Snapshot</h3>
         <p className="muted">
@@ -394,8 +485,8 @@ async function renderStats() {
   );
 }
 
-async function renderSources() {
-  const payload = await fetchNewsJson("/api/news/stats");
+async function renderSources(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = payload?.data?.derived || {};
   const sourceCounts = Array.isArray(derived?.source_counts) ? derived.source_counts : [];
   const scoredBySource = Array.isArray(derived?.chart_aggregates?.scored_by_source)
@@ -421,6 +512,7 @@ async function renderSources() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Source Charts</h3>
         {chartRows.length === 0 ? (
@@ -490,8 +582,8 @@ async function renderSources() {
   );
 }
 
-async function renderLenses() {
-  const payload = await fetchStatsPayload();
+async function renderLenses(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const lensInventory = asObject(derived.lens_inventory || asObject(payload?.data?.analysis).lens_summary);
   const lenses = asArray(lensInventory.lenses);
@@ -514,6 +606,7 @@ async function renderLenses() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Lens Inventory</h3>
         <p className="muted">
@@ -595,8 +688,8 @@ async function renderLenses() {
   );
 }
 
-async function renderTags() {
-  const payload = await fetchStatsPayload();
+async function renderTags(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
   const sourceTagViews = asObject(derived.source_tag_views);
@@ -613,6 +706,7 @@ async function renderTags() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Top Tags</h3>
         {tagCounts.length > 0 ? (
@@ -707,8 +801,8 @@ async function renderTags() {
   );
 }
 
-async function renderSourceTagMatrix() {
-  const payload = await fetchStatsPayload();
+async function renderSourceTagMatrix(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
   const sourceTagViews = asObject(derived.source_tag_views);
@@ -723,6 +817,7 @@ async function renderSourceTagMatrix() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Matrix Visuals</h3>
         {sourceLabels.length === 0 || tagLabels.length === 0 ? (
@@ -813,8 +908,8 @@ async function renderSourceTagMatrix() {
   );
 }
 
-async function renderTrends() {
-  const payload = await fetchStatsPayload();
+async function renderTrends(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
   const dailyCounts = asArray(derived.daily_counts_utc);
@@ -826,6 +921,7 @@ async function renderTrends() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Temporal Coverage</h3>
         <div className="stats-grid">
@@ -915,8 +1011,8 @@ async function renderTrends() {
   );
 }
 
-async function renderDataQuality() {
-  const payload = await fetchStatsPayload();
+async function renderDataQuality(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const dataQuality = asObject(derived.data_quality);
   const summary = asObject(dataQuality.summary);
@@ -925,6 +1021,7 @@ async function renderDataQuality() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Quality Snapshot</h3>
         <div className="stats-grid">
@@ -1045,7 +1142,7 @@ function EndpointTable({ rows }) {
   );
 }
 
-async function renderWorkflowStatus() {
+async function renderWorkflowStatus(searchParams) {
   const rows = await Promise.all([
     fetchEndpointStatus("Digest", "/api/news/digest?limit=1"),
     fetchEndpointStatus("Latest", "/api/news/digest/latest"),
@@ -1053,12 +1150,13 @@ async function renderWorkflowStatus() {
     fetchEndpointStatus("Freshness", "/health/news-freshness")
   ]);
   const statsPayload = rows.find((row) => row.path === "/api/news/stats" && row.ok)
-    ? await fetchStatsPayload()
+    ? await fetchStatsForMode(searchParams)
     : null;
   const derived = getStatsDerived(statsPayload);
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Pipeline Snapshot</h3>
         <div className="stats-grid">
@@ -1077,20 +1175,32 @@ async function renderWorkflowStatus() {
   );
 }
 
-async function renderRawJson() {
-  const payload = await fetchStatsPayload();
+async function renderRawJson(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDate = activeSnapshotDate(searchParams);
   const json = JSON.stringify(payload, null, 2);
   const maxLength = 20000;
   const preview = json.length > maxLength ? `${json.slice(0, maxLength)}\n... truncated ...` : json;
 
   return (
-    <div className="panel">
-      <h3>Stats Endpoint Preview</h3>
-      <p className="muted">
-        Showing <code>/api/news/stats</code>. Full endpoint switching will move over in a later interactive pass.
-      </p>
-      <pre className="json-preview">{preview}</pre>
-    </div>
+    <>
+      <DataModeControls searchParams={searchParams} />
+      <div className="panel">
+        <h3>Stats Endpoint Preview</h3>
+        <p className="muted">
+          Showing <code>/api/news/stats</code> in <strong>{dataMode}</strong> mode
+          {snapshotDate ? (
+            <>
+              {" "}
+              for snapshot <code>{snapshotDate}</code>
+            </>
+          ) : null}
+          .
+        </p>
+        <pre className="json-preview">{preview}</pre>
+      </div>
+    </>
   );
 }
 
@@ -1154,8 +1264,8 @@ function sourceCountsToRows(sourceCountsValue) {
     .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
 }
 
-async function renderLensMatrix() {
-  const payload = await fetchStatsPayload();
+async function renderLensMatrix(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const lensViews = asObject(derived.lens_views);
   const lensNames = asArray(lensViews.lens_names);
@@ -1177,6 +1287,7 @@ async function renderLensMatrix() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Lens Matrix Summary</h3>
         <div className="stats-grid">
@@ -1264,8 +1375,8 @@ async function renderLensMatrix() {
   );
 }
 
-async function renderLensCorrelations() {
-  const payload = await fetchStatsPayload();
+async function renderLensCorrelations(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const correlations = asObject(derived.lens_correlations);
   const lenses = asArray(correlations.lenses);
@@ -1288,6 +1399,7 @@ async function renderLensCorrelations() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Correlation Summary</h3>
         <div className="stats-grid">
@@ -1367,8 +1479,8 @@ async function renderLensCorrelations() {
   );
 }
 
-async function renderLensPca() {
-  const payload = await fetchStatsPayload();
+async function renderLensPca(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pca = asObject(derived.lens_pca);
   const explained = asArray(pca.explained_variance);
@@ -1392,6 +1504,7 @@ async function renderLensPca() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>PCA Status</h3>
         <StatusBlock status={String(pca.status || "unavailable")} reason={String(pca.reason || "")} />
@@ -1620,12 +1733,14 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
 }
 
 async function renderSourceDifferentiation(searchParams) {
-  const payload = await fetchStatsPayload();
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_differentiation);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
   const mode = normalizeMode(searchParams);
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
   const selectedTopic = selectedTopicFromQuery(searchParams, topics);
   const selectedTopicName = selectedTopic ? String(selectedTopic.topic || "") : "";
   const selectedTopicDiff = asObject(selectedTopic?.source_differentiation);
@@ -1634,18 +1749,19 @@ async function renderSourceDifferentiation(searchParams) {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} extraParams={{ mode, topic: selectedTopicName }} />
       <div className="panel">
         <h3>Analysis Mode</h3>
         <div className="top-nav-links">
           <a
             className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("pooled", selectedTopicName)}
+            href={analysisModeQueryHref("pooled", selectedTopicName, dataMode, snapshotDateValue)}
           >
             Pooled (topic-confounded)
           </a>
           <a
             className={`news-nav-link ${mode === "within-topic" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("within-topic", selectedTopicName)}
+            href={analysisModeQueryHref("within-topic", selectedTopicName, dataMode, snapshotDateValue)}
           >
             Within-topic
           </a>
@@ -1663,7 +1779,7 @@ async function renderSourceDifferentiation(searchParams) {
                   <a
                     key={topicName}
                     className={`news-nav-link ${selected ? "active-link" : ""}`}
-                    href={analysisModeQueryHref("within-topic", topicName)}
+                    href={analysisModeQueryHref("within-topic", topicName, dataMode, snapshotDateValue)}
                   >
                     {topicName}
                   </a>
@@ -1833,12 +1949,14 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
 }
 
 async function renderSourceEffects(searchParams) {
-  const payload = await fetchStatsPayload();
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_lens_effects);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
   const mode = normalizeMode(searchParams);
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
   const selectedTopic = selectedTopicFromQuery(searchParams, topics);
   const selectedTopicName = selectedTopic ? String(selectedTopic.topic || "") : "";
   const selectedTopicEffects = asObject(selectedTopic?.source_lens_effects);
@@ -1847,18 +1965,19 @@ async function renderSourceEffects(searchParams) {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} extraParams={{ mode, topic: selectedTopicName }} />
       <div className="panel">
         <h3>Analysis Mode</h3>
         <div className="top-nav-links">
           <a
             className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("pooled", selectedTopicName)}
+            href={analysisModeQueryHref("pooled", selectedTopicName, dataMode, snapshotDateValue)}
           >
             Pooled (topic-confounded)
           </a>
           <a
             className={`news-nav-link ${mode === "within-topic" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("within-topic", selectedTopicName)}
+            href={analysisModeQueryHref("within-topic", selectedTopicName, dataMode, snapshotDateValue)}
           >
             Within-topic
           </a>
@@ -1876,7 +1995,7 @@ async function renderSourceEffects(searchParams) {
                   <a
                     key={topicName}
                     className={`news-nav-link ${selected ? "active-link" : ""}`}
-                    href={analysisModeQueryHref("within-topic", topicName)}
+                    href={analysisModeQueryHref("within-topic", topicName, dataMode, snapshotDateValue)}
                   >
                     {topicName}
                   </a>
@@ -1941,8 +2060,8 @@ async function renderSourceEffects(searchParams) {
   );
 }
 
-async function renderScoreLab() {
-  const payload = await fetchStatsPayload();
+async function renderScoreLab(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
   const scoreStatus = asObject(derived.score_status);
@@ -1960,6 +2079,7 @@ async function renderScoreLab() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Score Diagnostics</h3>
         <div className="stats-grid">
@@ -2112,8 +2232,8 @@ async function renderScoreLab() {
   );
 }
 
-async function renderLensExplorer() {
-  const payload = await fetchStatsPayload();
+async function renderLensExplorer(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const lensViews = asObject(derived.lens_views);
   const summary = asObject(lensViews.summary);
@@ -2131,6 +2251,7 @@ async function renderLensExplorer() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Lens Explorer Summary</h3>
         <div className="stats-grid">
@@ -2234,8 +2355,8 @@ async function renderLensExplorer() {
   );
 }
 
-async function renderLensBySource() {
-  const payload = await fetchStatsPayload();
+async function renderLensBySource(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const lensViews = asObject(derived.lens_views);
   const lensNames = asArray(lensViews.lens_names);
@@ -2256,6 +2377,7 @@ async function renderLensBySource() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Source x Lens Matrix</h3>
         <div className="stats-grid">
@@ -2339,8 +2461,8 @@ async function renderLensBySource() {
   );
 }
 
-async function renderLensStability() {
-  const payload = await fetchStatsPayload();
+async function renderLensStability(searchParams) {
+  const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const lensViews = asObject(derived.lens_views);
   const stabilityRows = asArray(lensViews.stability_rows);
@@ -2363,6 +2485,7 @@ async function renderLensStability() {
 
   return (
     <>
+      <DataModeControls searchParams={searchParams} />
       <div className="panel">
         <h3>Stability Summary</h3>
         <div className="stats-grid">
@@ -2639,22 +2762,22 @@ async function renderPageBody(slug, title, searchParams) {
     return renderDigest();
   }
   if (slug === "stats") {
-    return renderStats();
+    return renderStats(searchParams);
   }
   if (slug === "sources") {
-    return renderSources();
+    return renderSources(searchParams);
   }
   if (slug === "lenses") {
-    return renderLenses();
+    return renderLenses(searchParams);
   }
   if (slug === "lens-matrix") {
-    return renderLensMatrix();
+    return renderLensMatrix(searchParams);
   }
   if (slug === "lens-correlations") {
-    return renderLensCorrelations();
+    return renderLensCorrelations(searchParams);
   }
   if (slug === "lens-pca") {
-    return renderLensPca();
+    return renderLensPca(searchParams);
   }
   if (slug === "source-differentiation") {
     return renderSourceDifferentiation(searchParams);
@@ -2663,25 +2786,25 @@ async function renderPageBody(slug, title, searchParams) {
     return renderSourceEffects(searchParams);
   }
   if (slug === "score-lab") {
-    return renderScoreLab();
+    return renderScoreLab(searchParams);
   }
   if (slug === "lens-explorer") {
-    return renderLensExplorer();
+    return renderLensExplorer(searchParams);
   }
   if (slug === "lens-by-source") {
-    return renderLensBySource();
+    return renderLensBySource(searchParams);
   }
   if (slug === "lens-stability") {
-    return renderLensStability();
+    return renderLensStability(searchParams);
   }
   if (slug === "tags") {
-    return renderTags();
+    return renderTags(searchParams);
   }
   if (slug === "source-tag-matrix") {
-    return renderSourceTagMatrix();
+    return renderSourceTagMatrix(searchParams);
   }
   if (slug === "trends") {
-    return renderTrends();
+    return renderTrends(searchParams);
   }
   if (slug === "scraped") {
     return renderScraped();
@@ -2690,13 +2813,13 @@ async function renderPageBody(slug, title, searchParams) {
     return renderSnapshotCompare(searchParams);
   }
   if (slug === "data-quality") {
-    return renderDataQuality();
+    return renderDataQuality(searchParams);
   }
   if (slug === "workflow-status") {
-    return renderWorkflowStatus();
+    return renderWorkflowStatus(searchParams);
   }
   if (slug === "raw-json") {
-    return renderRawJson();
+    return renderRawJson(searchParams);
   }
   if (slug === "integration") {
     return renderIntegration();
