@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.fastapi_analysis import register_fastapi_analysis_endpoints
 from src.api.fastapi_news import register_fastapi_news_endpoints
 
 
@@ -25,6 +26,7 @@ def create_fastapi_app() -> FastAPI:
         allow_headers=["*"],
     )
     register_fastapi_news_endpoints(app)
+    register_fastapi_analysis_endpoints(app)
     return app
 
 

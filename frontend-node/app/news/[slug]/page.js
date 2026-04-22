@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { fetchNewsJson } from "../../../lib/newsApi";
 import { getNewsPage, NEWS_PAGES } from "../../../lib/newsPages";
+import PlotlyChart from "../../../components/PlotlyChart";
 
 export const dynamic = "force-dynamic";
 
@@ -9,9 +10,20 @@ const MIGRATED_PAGE_SLUGS = new Set([
   "stats",
   "sources",
   "lenses",
+  "lens-matrix",
+  "lens-correlations",
+  "lens-pca",
+  "source-differentiation",
+  "source-effects",
+  "score-lab",
+  "lens-explorer",
+  "lens-by-source",
+  "lens-stability",
   "tags",
   "source-tag-matrix",
   "trends",
+  "scraped",
+  "snapshot-compare",
   "data-quality",
   "workflow-status",
   "raw-json",
@@ -71,12 +83,18 @@ function truncateText(value, maxLength = 220) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 }
 
-async function fetchStatsPayload() {
-  return fetchNewsJson("/api/news/stats");
+async function fetchStatsPayload(snapshotDate = null) {
+  const query = typeof snapshotDate === "string" && snapshotDate ? `?snapshot_date=${encodeURIComponent(snapshotDate)}` : "";
+  return fetchNewsJson(`/api/news/stats${query}`);
 }
 
 function getStatsDerived(payload) {
   return asObject(asObject(payload?.data).derived);
+}
+
+function snapshotDateFromSearchParams(searchParams) {
+  const raw = typeof searchParams?.snapshot === "string" ? searchParams.snapshot.trim() : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 }
 
 function PageIntro({ summary }) {
@@ -106,6 +124,16 @@ function EmptyState({ children = "No data available." }) {
   return <p className="muted">{children}</p>;
 }
 
+function StatusBlock({ status, reason }) {
+  const tone = status === "ok" ? "good" : "bad";
+  return (
+    <p className="muted">
+      <StatusPill tone={tone}>{status || "unknown"}</StatusPill>
+      {reason ? ` ${reason}` : ""}
+    </p>
+  );
+}
+
 function MiniBar({ value, max }) {
   const number = toNumber(value) || 0;
   const limit = Math.max(toNumber(max) || 0, number, 1);
@@ -120,9 +148,63 @@ function MiniBar({ value, max }) {
 async function renderDigest() {
   const payload = await fetchNewsJson("/api/news/digest?limit=50");
   const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const sourceCounts = new Map();
+  const avgBySource = new Map();
+  for (const article of rows) {
+    const source = String(article?.source_name || article?.source?.name || "Unknown");
+    sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
+    const scorePercent = toNumber(article?.score?.percent);
+    if (scorePercent !== null) {
+      const bucket = avgBySource.get(source) || { total: 0, n: 0 };
+      bucket.total += scorePercent;
+      bucket.n += 1;
+      avgBySource.set(source, bucket);
+    }
+  }
+  const topSources = Array.from(sourceCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
+  const avgSourceScores = topSources
+    .map(([source]) => {
+      const bucket = avgBySource.get(source);
+      const average = bucket && bucket.n > 0 ? bucket.total / bucket.n : null;
+      return { source, average };
+    })
+    .filter((row) => row.average !== null);
 
   return (
     <>
+      <div className="panel">
+        <h3>Digest Visuals</h3>
+        {rows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: topSources.map((row) => row[0]),
+                  y: topSources.map((row) => row[1]),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Top Sources in Current Digest Window", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: avgSourceScores.map((row) => row.source),
+                  y: avgSourceScores.map((row) => row.average),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Average Score % by Source (Scored Rows)", yaxis: { title: "Score %" } }}
+            />
+          </div>
+        )}
+      </div>
       <div className="panel">
         <h3>Latest Articles ({rows.length})</h3>
         {rows.length === 0 ? (
@@ -167,6 +249,15 @@ async function renderStats() {
   const meta = payload?.meta || {};
   const summary = data?.summary || {};
   const scoreStatus = derived?.score_status || {};
+  const sourceCounts = asArray(derived.source_counts).slice(0, 15);
+  const tagCounts = asArray(derived.tag_counts).slice(0, 15);
+  const dailyCounts = asArray(derived.daily_counts_utc);
+  const statusRows = [
+    { label: "Scored", value: toNumber(scoreStatus.scored) || 0 },
+    { label: "Positive", value: toNumber(scoreStatus.positive) || 0 },
+    { label: "Zero", value: toNumber(scoreStatus.zero) || 0 },
+    { label: "Unscorable", value: toNumber(scoreStatus.unscorable) || 0 }
+  ];
 
   return (
     <>
@@ -197,6 +288,53 @@ async function renderStats() {
 
       <div className="panel">
         <h3>Score Status</h3>
+        <div className="chart-grid">
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                x: sourceCounts.map((row) => String(row.source || "Unknown")),
+                y: sourceCounts.map((row) => toNumber(row.count) || 0),
+                marker: { color: "#4fd1c5" }
+              }
+            ]}
+            layout={{ title: "Article Volume by Source", yaxis: { title: "Articles" } }}
+          />
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                x: tagCounts.map((row) => String(row.tag || "Unknown")),
+                y: tagCounts.map((row) => toNumber(row.count) || 0),
+                marker: { color: "#fd7e14" }
+              }
+            ]}
+            layout={{ title: "Top Tags", yaxis: { title: "Count" } }}
+          />
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                x: statusRows.map((row) => row.label),
+                y: statusRows.map((row) => row.value),
+                marker: { color: "#7aa7ff" }
+              }
+            ]}
+            layout={{ title: "Score Status Counts", yaxis: { title: "Articles" } }}
+          />
+          <PlotlyChart
+            data={[
+              {
+                type: "scatter",
+                mode: "lines+markers",
+                x: dailyCounts.map((row) => String(row.date || "")),
+                y: dailyCounts.map((row) => toNumber(row.count) || 0),
+                line: { color: "#9d7dff" }
+              }
+            ]}
+            layout={{ title: "Daily Articles (UTC)", yaxis: { title: "Articles" } }}
+          />
+        </div>
         <table className="news-table compact">
           <tbody>
             <tr>
@@ -235,41 +373,86 @@ async function renderSources() {
       .filter((row) => row && typeof row === "object")
       .map((row) => [String(row.source || ""), Number(row.count || 0)])
   );
+  const chartRows = sourceCounts.slice(0, 20).map((row) => {
+    const source = String(row.source || "Unknown");
+    const count = Number(row.count || 0);
+    const scored = scoredLookup.get(source) || 0;
+    return {
+      source,
+      count,
+      scored,
+      coverage: count > 0 ? (scored / count) * 100 : 0
+    };
+  });
 
   return (
-    <div className="panel">
-      <h3>Source Coverage</h3>
-      {sourceCounts.length === 0 ? (
-        <p className="muted">No source data available.</p>
-      ) : (
-        <table className="news-table">
-          <thead>
-            <tr>
-              <th>Source</th>
-              <th>Articles</th>
-              <th>Scored</th>
-              <th>Coverage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sourceCounts.map((row) => {
-              const source = String(row.source || "Unknown");
-              const count = Number(row.count || 0);
-              const scored = scoredLookup.get(source) || 0;
-              const coverage = count > 0 ? scored / count : null;
-              return (
-                <tr key={source}>
-                  <td>{source}</td>
-                  <td>{formatNumber(count)}</td>
-                  <td>{formatNumber(scored)}</td>
-                  <td>{coverage === null ? "n/a" : `${(coverage * 100).toFixed(1)}%`}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+    <>
+      <div className="panel">
+        <h3>Source Charts</h3>
+        {chartRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: chartRows.map((row) => row.source),
+                  y: chartRows.map((row) => row.count),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Article Volume by Source", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: chartRows.map((row) => row.source),
+                  y: chartRows.map((row) => row.coverage),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Scoring Coverage by Source (%)", yaxis: { title: "Coverage %", range: [0, 100] } }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Source Coverage</h3>
+        {sourceCounts.length === 0 ? (
+          <p className="muted">No source data available.</p>
+        ) : (
+          <table className="news-table">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Articles</th>
+                <th>Scored</th>
+                <th>Coverage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sourceCounts.map((row) => {
+                const source = String(row.source || "Unknown");
+                const count = Number(row.count || 0);
+                const scored = scoredLookup.get(source) || 0;
+                const coverage = count > 0 ? scored / count : null;
+                return (
+                  <tr key={source}>
+                    <td>{source}</td>
+                    <td>{formatNumber(count)}</td>
+                    <td>{formatNumber(scored)}</td>
+                    <td>{coverage === null ? "n/a" : `${(coverage * 100).toFixed(1)}%`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -285,6 +468,15 @@ async function renderLenses() {
       : null;
   const avgMaxScore =
     lenses.length > 0 ? lenses.reduce((sum, row) => sum + (toNumber(row.max_total) || 0), 0) / lenses.length : null;
+  const lensRows = lenses.slice(0, 20).map((row) => {
+    const scoredItems = toNumber(row.items_with_scores) || 0;
+    const coverage = itemsTotal && scoredItems !== null ? (scoredItems / itemsTotal) * 100 : 0;
+    return {
+      name: String(row.name || "Unknown Lens"),
+      maxTotal: toNumber(row.max_total) || 0,
+      coverage
+    };
+  });
 
   return (
     <>
@@ -304,6 +496,32 @@ async function renderLenses() {
 
       <div className="panel">
         <h3>Lens Coverage</h3>
+        {lensRows.length > 0 ? (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: lensRows.map((row) => row.name),
+                  y: lensRows.map((row) => row.maxTotal),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Lens Maximum Score Capacity", yaxis: { title: "Max Score" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: lensRows.map((row) => row.name),
+                  y: lensRows.map((row) => row.coverage),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Lens Coverage Across Articles (%)", yaxis: { title: "Coverage %", range: [0, 100] } }}
+            />
+          </div>
+        ) : null}
         {lenses.length === 0 ? (
           <EmptyState />
         ) : (
@@ -347,14 +565,61 @@ async function renderTags() {
   const payload = await fetchStatsPayload();
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
+  const sourceTagViews = asObject(derived.source_tag_views);
   const tagCounts = asArray(derived.tag_counts).slice(0, 30);
   const tagDistribution = asArray(chartAggregates.tag_count_distribution);
+  const sourceTagMatrixRows = asArray(chartAggregates.source_tag_matrix);
+  const sourceLabels = asArray(sourceTagViews.source_labels).slice(0, 10);
+  const tagLabels = asArray(sourceTagViews.tag_labels).slice(0, 12);
+  const matrixLookup = new Map(
+    sourceTagMatrixRows.map((row) => [pairKey(row.source, row.tag), toNumber(row.count) || 0])
+  );
+  const matrix = sourceLabels.map((source) => tagLabels.map((tag) => matrixLookup.get(pairKey(source, tag)) || 0));
   const maxTagCount = tagCounts.reduce((max, row) => Math.max(max, toNumber(row.count) || 0), 0);
 
   return (
     <>
       <div className="panel">
         <h3>Top Tags</h3>
+        {tagCounts.length > 0 ? (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  orientation: "h",
+                  y: tagCounts.map((row) => String(row.tag || "Unknown")).reverse(),
+                  x: tagCounts.map((row) => toNumber(row.count) || 0).reverse(),
+                  marker: { color: "#fd7e14" }
+                }
+              ]}
+              layout={{ title: "Top Tags", xaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: tagDistribution.map((row) => String(row.label || "Unknown")),
+                  y: tagDistribution.map((row) => toNumber(row.count) || 0),
+                  marker: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Tags per Article Distribution", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: tagLabels,
+                  y: sourceLabels,
+                  z: matrix,
+                  colorscale: "Viridis"
+                }
+              ]}
+              layout={{ title: "Source x Tag Intensity" }}
+            />
+          </div>
+        ) : null}
         {tagCounts.length === 0 ? (
           <EmptyState />
         ) : (
@@ -418,11 +683,44 @@ async function renderSourceTagMatrix() {
   const matrixRows = asArray(chartAggregates.source_tag_matrix);
   const sourceTotals = asArray(chartAggregates.source_tag_totals).slice(0, 12);
   const lookup = new Map(
-    matrixRows.map((row) => [`${String(row.source || "")}\u0000${String(row.tag || "")}`, toNumber(row.count) || 0])
+    matrixRows.map((row) => [pairKey(row.source, row.tag), toNumber(row.count) || 0])
   );
+  const matrix = sourceLabels.map((source) => tagLabels.map((tag) => lookup.get(pairKey(source, tag)) || 0));
 
   return (
     <>
+      <div className="panel">
+        <h3>Matrix Visuals</h3>
+        {sourceLabels.length === 0 || tagLabels.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: tagLabels,
+                  y: sourceLabels,
+                  z: matrix,
+                  colorscale: "Viridis"
+                }
+              ]}
+              layout={{ title: "Source x Tag Intensity Heatmap" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: sourceTotals.map((row) => String(row.source || "Unknown")),
+                  y: sourceTotals.map((row) => toNumber(row.count) || 0),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Source Tag Totals", yaxis: { title: "Tag Assignments" } }}
+            />
+          </div>
+        )}
+      </div>
       <div className="panel">
         <h3>Source x Tag Matrix</h3>
         <p className="muted">Showing the top {formatNumber(sourceLabels.length)} sources and top {formatNumber(tagLabels.length)} tags.</p>
@@ -444,7 +742,7 @@ async function renderSourceTagMatrix() {
                   <tr key={source}>
                     <td>{source}</td>
                     {tagLabels.map((tag) => (
-                      <td key={`${source}-${tag}`}>{formatNumber(lookup.get(`${source}\u0000${tag}`) || 0)}</td>
+                      <td key={`${source}-${tag}`}>{formatNumber(lookup.get(pairKey(source, tag)) || 0)}</td>
                     ))}
                   </tr>
                 ))}
@@ -506,6 +804,33 @@ async function renderTrends() {
 
       <div className="panel">
         <h3>Daily Article Counts</h3>
+        {dailyCounts.length > 0 ? (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "lines+markers",
+                  x: dailyCounts.map((row) => String(row.date || "")),
+                  y: dailyCounts.map((row) => toNumber(row.count) || 0),
+                  line: { color: "#4fd1c5" }
+                }
+              ]}
+              layout={{ title: "Daily Articles (UTC)", yaxis: { title: "Articles" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: hourCounts.map((row) => String(row.hour).padStart(2, "0")),
+                  y: hourCounts.map((row) => toNumber(row.count) || 0),
+                  marker: { color: "#7aa7ff" }
+                }
+              ]}
+              layout={{ title: "Publish Hour Distribution (UTC)", xaxis: { title: "Hour" }, yaxis: { title: "Articles" } }}
+            />
+          </div>
+        ) : null}
         {dailyCounts.length === 0 ? (
           <EmptyState />
         ) : (
@@ -763,6 +1088,880 @@ async function renderIntegration() {
   );
 }
 
+function getCorrelationPairRows(lenses, matrix) {
+  const rows = [];
+  for (let i = 0; i < lenses.length; i += 1) {
+    for (let j = i + 1; j < lenses.length; j += 1) {
+      const value = toNumber(asArray(matrix[i])[j]);
+      if (value !== null) {
+        rows.push({ lens_a: lenses[i], lens_b: lenses[j], value });
+      }
+    }
+  }
+  rows.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  return rows;
+}
+
+async function renderLensMatrix() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const lensViews = asObject(derived.lens_views);
+  const lensNames = asArray(lensViews.lens_names);
+  const sourceRows = asArray(lensViews.source_rows);
+  const summary = asObject(lensViews.summary);
+  const topRows = sourceRows.slice(0, 20);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Lens Matrix Summary</h3>
+        <div className="stats-grid">
+          <StatCard label="Coverage Mode" value={lensViews.coverage_mode || "n/a"} />
+          <StatCard label="Sources" value={formatNumber(summary.source_count || sourceRows.length)} />
+          <StatCard label="Lenses" value={formatNumber(lensNames.length)} />
+          <StatCard label="Covered Articles" value={formatNumber(summary.covered_articles)} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Top Sources x Lenses</h3>
+        {topRows.length === 0 || lensNames.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="table-scroll">
+            <table className="news-table compact">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Articles</th>
+                  {lensNames.map((lens) => (
+                    <th key={lens}>{lens}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {topRows.map((row) => {
+                  const means = asObject(row.lens_means);
+                  return (
+                    <tr key={String(row.source || "unknown")}>
+                      <td>{row.source || "Unknown"}</td>
+                      <td>{formatNumber(row.article_count)}</td>
+                      {lensNames.map((lens) => (
+                        <td key={`${row.source}-${lens}`}>{formatAlreadyPercent(means[lens])}</td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderLensCorrelations() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const correlations = asObject(derived.lens_correlations);
+  const lenses = asArray(correlations.lenses);
+  const corrRaw = asArray(asObject(correlations.correlation).raw);
+  const pairRankings = asArray(asObject(correlations.pair_rankings).corr_raw);
+  const topPairs =
+    pairRankings.length > 0
+      ? pairRankings
+          .map((row) => ({
+            lens_a: row?.lens_a,
+            lens_b: row?.lens_b,
+            value: toNumber(row?.value)
+          }))
+          .filter((row) => row.lens_a && row.lens_b && row.value !== null)
+      : getCorrelationPairRows(lenses, corrRaw);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Correlation Summary</h3>
+        <div className="stats-grid">
+          <StatCard label="Lenses" value={formatNumber(lenses.length)} />
+          <StatCard label="Pairs" value={formatNumber(topPairs.length)} />
+          <StatCard label="Matrixes" value="corr/cov/pairwise" />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Top Lens Pairs (Correlation Raw)</h3>
+        {topPairs.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Lens A</th>
+                <th>Lens B</th>
+                <th>Correlation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topPairs.slice(0, 25).map((row, index) => (
+                <tr key={`${row.lens_a}-${row.lens_b}-${index}`}>
+                  <td>{row.lens_a}</td>
+                  <td>{row.lens_b}</td>
+                  <td>{formatDecimal(row.value, 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderLensPca() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const pca = asObject(derived.lens_pca);
+  const explained = asArray(pca.explained_variance);
+  const drivers = asArray(pca.variance_drivers);
+  const centroids = asArray(pca.source_centroids);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>PCA Status</h3>
+        <StatusBlock status={String(pca.status || "unavailable")} reason={String(pca.reason || "")} />
+        <div className="stats-grid">
+          <StatCard label="Articles" value={formatNumber(pca.n_articles)} />
+          <StatCard label="Lenses" value={formatNumber(pca.n_lenses)} />
+          <StatCard label="Components" value={formatNumber(asArray(pca.components).length)} />
+          <StatCard label="Coverage Mode" value={pca.coverage_mode || "n/a"} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Explained Variance</h3>
+        {explained.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Eigenvalue</th>
+                <th>Explained</th>
+                <th>Cumulative</th>
+              </tr>
+            </thead>
+            <tbody>
+              {explained.map((row) => (
+                <tr key={String(row.component)}>
+                  <td>{row.component}</td>
+                  <td>{formatDecimal(row.eigenvalue, 4)}</td>
+                  <td>{formatPercent(row.explained_variance_ratio)}</td>
+                  <td>{formatPercent(row.cumulative_variance_ratio)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Variance Drivers</h3>
+        {drivers.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Lens</th>
+                <th>Weighted Contribution</th>
+                <th>PC1</th>
+                <th>PC2</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drivers.slice(0, 20).map((row) => (
+                <tr key={String(row.lens)}>
+                  <td>{row.lens}</td>
+                  <td>{formatDecimal(row.weighted_contribution, 4)}</td>
+                  <td>{formatDecimal(row.pc1_loading, 4)}</td>
+                  <td>{formatDecimal(row.pc2_loading, 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Source Centroids</h3>
+        {centroids.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Count</th>
+                <th>PC1</th>
+                <th>PC2</th>
+              </tr>
+            </thead>
+            <tbody>
+              {centroids.slice(0, 25).map((row) => (
+                <tr key={String(row.source || "unknown")}>
+                  <td>{row.source || "Unknown"}</td>
+                  <td>{formatNumber(row.count)}</td>
+                  <td>{formatDecimal(row.pc1, 3)}</td>
+                  <td>{formatDecimal(row.pc2, 3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+function SourceDifferentiationBlock({ title, differentiation, confounded = false }) {
+  const data = asObject(differentiation);
+  const multivariate = asObject(data.multivariate);
+  const classification = asObject(data.classification);
+  return (
+    <div className="panel">
+      <h3>{title}</h3>
+      {confounded ? <p className="muted">Label: topic-confounded</p> : null}
+      <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
+      <div className="stats-grid">
+        <StatCard label="Articles" value={formatNumber(data.n_articles)} />
+        <StatCard label="Sources" value={formatNumber(data.n_sources)} />
+        <StatCard label="Lenses" value={formatNumber(data.n_lenses)} />
+        <StatCard label="Permutations" value={formatNumber(data.permutations)} />
+      </div>
+      <table className="news-table compact">
+        <tbody>
+          <tr>
+            <th>Multivariate F</th>
+            <td>{formatDecimal(multivariate.f_stat, 4)}</td>
+          </tr>
+          <tr>
+            <th>Multivariate R²</th>
+            <td>{formatDecimal(multivariate.r_squared, 4)}</td>
+          </tr>
+          <tr>
+            <th>Multivariate p_perm</th>
+            <td>{formatDecimal(multivariate.p_perm, 4)}</td>
+          </tr>
+          <tr>
+            <th>LOOCV Accuracy</th>
+            <td>{formatPercent(classification.accuracy)}</td>
+          </tr>
+          <tr>
+            <th>Baseline Accuracy</th>
+            <td>{formatPercent(classification.baseline_accuracy)}</td>
+          </tr>
+          <tr>
+            <th>Classification p_perm</th>
+            <td>{formatDecimal(classification.p_perm, 4)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+async function renderSourceDifferentiation() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const pooled = asObject(derived.source_differentiation);
+  const topicControl = asObject(derived.source_topic_control);
+  const topics = asArray(topicControl.topics);
+
+  return (
+    <>
+      <SourceDifferentiationBlock title="Pooled Source Differentiation" differentiation={pooled} confounded />
+      <div className="panel">
+        <h3>Within-Topic Source Differentiation</h3>
+        {topics.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Topic</th>
+                <th>Status</th>
+                <th>Articles</th>
+                <th>Sources</th>
+                <th>F-stat</th>
+                <th>LOOCV Acc</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topics.map((topic) => {
+                const diff = asObject(topic.source_differentiation);
+                const multi = asObject(diff.multivariate);
+                const cls = asObject(diff.classification);
+                return (
+                  <tr key={String(topic.topic || "unknown-topic")}>
+                    <td>{topic.topic || "Unknown"}</td>
+                    <td>{String(diff.status || "unavailable")}</td>
+                    <td>{formatNumber(topic.n_articles)}</td>
+                    <td>{formatNumber(topic.n_sources)}</td>
+                    <td>{formatDecimal(multi.f_stat, 3)}</td>
+                    <td>{formatPercent(cls.accuracy)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+function SourceEffectsBlock({ title, effects, confounded = false }) {
+  const data = asObject(effects);
+  const rows = asArray(data.rows);
+  const multipleTesting = asObject(data.multiple_testing);
+  return (
+    <div className="panel">
+      <h3>{title}</h3>
+      {confounded ? <p className="muted">Label: topic-confounded</p> : null}
+      <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
+      <div className="stats-grid">
+        <StatCard label="Rows" value={formatNumber(rows.length)} />
+        <StatCard label="Permutations" value={formatNumber(data.permutations)} />
+        <StatCard label="Multiple Testing" value={multipleTesting.method || "n/a"} />
+        <StatCard label="Tests" value={formatNumber(multipleTesting.n_tests)} />
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <table className="news-table compact">
+          <thead>
+            <tr>
+              <th>Lens</th>
+              <th>F</th>
+              <th>eta²</th>
+              <th>p_perm_raw</th>
+              <th>p_perm_fdr</th>
+              <th>Source Gap</th>
+              <th>Top / Bottom</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 30).map((row) => (
+              <tr key={String(row.lens || "unknown-lens")}>
+                <td>{row.lens || "Unknown"}</td>
+                <td>{formatDecimal(row.f_stat, 3)}</td>
+                <td>{formatDecimal(row.eta_sq, 3)}</td>
+                <td>{formatDecimal(row.p_perm_raw, 4)}</td>
+                <td>{formatDecimal(row.p_perm_fdr, 4)}</td>
+                <td>{formatDecimal(row.source_gap, 2)}</td>
+                <td>
+                  {row.top_source || "n/a"} / {row.bottom_source || "n/a"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+async function renderSourceEffects() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const pooled = asObject(derived.source_lens_effects);
+  const topicControl = asObject(derived.source_topic_control);
+  const topics = asArray(topicControl.topics);
+
+  return (
+    <>
+      <SourceEffectsBlock title="Pooled Source Effects" effects={pooled} confounded />
+      <div className="panel">
+        <h3>Within-Topic Source Effects</h3>
+        {topics.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Topic</th>
+                <th>Status</th>
+                <th>Lens Rows</th>
+                <th>Best Lens</th>
+                <th>Best eta²</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topics.map((topic) => {
+                const effects = asObject(topic.source_lens_effects);
+                const rows = asArray(effects.rows);
+                const best = rows.length > 0 ? rows[0] : null;
+                return (
+                  <tr key={String(topic.topic || "unknown-topic")}>
+                    <td>{topic.topic || "Unknown"}</td>
+                    <td>{String(effects.status || "unavailable")}</td>
+                    <td>{formatNumber(rows.length)}</td>
+                    <td>{best?.lens || "n/a"}</td>
+                    <td>{formatDecimal(best?.eta_sq, 3)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderScoreLab() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const chartAggregates = asObject(derived.chart_aggregates);
+  const scoreStatus = asObject(derived.score_status);
+  const scoreStatusBySource = asArray(chartAggregates.score_status_by_source).slice(0, 20);
+  const scoredBySource = asArray(chartAggregates.scored_by_source).slice(0, 20);
+  const tagDistribution = asArray(chartAggregates.tag_count_distribution);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Score Diagnostics</h3>
+        <div className="stats-grid">
+          <StatCard label="Scored Articles" value={formatNumber(derived.scored_articles)} />
+          <StatCard label="Zero Scores" value={formatNumber(derived.zero_score_articles)} />
+          <StatCard label="Unscorable" value={formatNumber(derived.unscorable_articles)} />
+          <StatCard label="Missing Score Objects" value={formatNumber(derived.score_object_missing_articles)} />
+          <StatCard label="Score Coverage" value={formatPercent(derived.score_coverage_ratio)} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Score Status by Source</h3>
+        {scoreStatusBySource.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Scored</th>
+                <th>Zero</th>
+                <th>Unscorable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scoreStatusBySource.map((row) => (
+                <tr key={String(row.source || "unknown")}>
+                  <td>{row.source || "Unknown"}</td>
+                  <td>{formatNumber(row.scored)}</td>
+                  <td>{formatNumber(row.zero_score)}</td>
+                  <td>{formatNumber(row.unscorable)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Scored Articles by Source</h3>
+        {scoredBySource.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scoredBySource.map((row) => (
+                <tr key={String(row.source || "unknown")}>
+                  <td>{row.source || "Unknown"}</td>
+                  <td>{formatNumber(row.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Tag Count Distribution</h3>
+        {tagDistribution.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Bucket</th>
+                <th>Articles</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tagDistribution.map((row) => (
+                <tr key={String(row.label)}>
+                  <td>{row.label}</td>
+                  <td>{formatNumber(row.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted">
+          Scored: {formatNumber(scoreStatus.scored)} | Positive: {formatNumber(scoreStatus.positive)} | Zero:{" "}
+          {formatNumber(scoreStatus.zero)}
+        </p>
+      </div>
+    </>
+  );
+}
+
+async function renderLensExplorer() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const lensViews = asObject(derived.lens_views);
+  const summary = asObject(lensViews.summary);
+  const articleRows = asArray(lensViews.article_rows).slice(0, 40);
+  const sourceRows = asArray(lensViews.source_rows).slice(0, 20);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Lens Explorer Summary</h3>
+        <div className="stats-grid">
+          <StatCard label="Coverage Mode" value={lensViews.coverage_mode || "n/a"} />
+          <StatCard label="Articles with Lens Scores" value={formatNumber(summary.article_count)} />
+          <StatCard label="Sources" value={formatNumber(summary.source_count)} />
+          <StatCard label="Most Common Strongest Lens" value={summary.top_dominant_lens || "n/a"} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Article Lens Rows</h3>
+        {articleRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Source</th>
+                <th>Strongest Lens</th>
+                <th>Strongest %</th>
+                <th>Gap vs Runner-up</th>
+              </tr>
+            </thead>
+            <tbody>
+              {articleRows.map((row, index) => (
+                <tr key={`${String(row.title || "untitled")}-${index}`}>
+                  <td>{truncateText(row.title || "Untitled", 90)}</td>
+                  <td>{row.source || "Unknown"}</td>
+                  <td>{row.strongest_lens || "n/a"}</td>
+                  <td>{formatAlreadyPercent(row.strongest_percent)}</td>
+                  <td>{formatDecimal(row.gap_vs_runner_up, 1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Source Lens Means</h3>
+        {sourceRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Articles</th>
+                <th>Strongest Lens</th>
+                <th>Strongest Gap</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sourceRows.map((row) => (
+                <tr key={String(row.source || "unknown")}>
+                  <td>{row.source || "Unknown"}</td>
+                  <td>{formatNumber(row.article_count)}</td>
+                  <td>{row.strongest_lens || "n/a"}</td>
+                  <td>{formatDecimal(row.strongest_gap, 1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderLensBySource() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const lensViews = asObject(derived.lens_views);
+  const lensNames = asArray(lensViews.lens_names);
+  const sourceRows = asArray(lensViews.source_rows).slice(0, 20);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Source x Lens Matrix</h3>
+        <div className="stats-grid">
+          <StatCard label="Sources" value={formatNumber(sourceRows.length)} />
+          <StatCard label="Lenses" value={formatNumber(lensNames.length)} />
+          <StatCard label="Coverage Mode" value={lensViews.coverage_mode || "n/a"} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Lens Means by Source</h3>
+        {sourceRows.length === 0 || lensNames.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="table-scroll">
+            <table className="news-table compact">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Articles</th>
+                  {lensNames.map((lens) => (
+                    <th key={lens}>{lens}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sourceRows.map((row) => {
+                  const means = asObject(row.lens_means);
+                  return (
+                    <tr key={String(row.source || "unknown")}>
+                      <td>{row.source || "Unknown"}</td>
+                      <td>{formatNumber(row.article_count)}</td>
+                      {lensNames.map((lens) => (
+                        <td key={`${row.source}-${lens}`}>{formatAlreadyPercent(means[lens])}</td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderLensStability() {
+  const payload = await fetchStatsPayload();
+  const derived = getStatsDerived(payload);
+  const lensViews = asObject(derived.lens_views);
+  const stabilityRows = asArray(lensViews.stability_rows);
+  const summary = asObject(lensViews.summary);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Stability Summary</h3>
+        <div className="stats-grid">
+          <StatCard label="Lenses Analyzed" value={formatNumber(summary.stability_lens_count)} />
+          <StatCard label="Avg Std Dev" value={formatDecimal(summary.stability_avg_stddev, 2)} />
+          <StatCard label="Most Volatile Lens" value={summary.stability_top_lens || "n/a"} />
+          <StatCard label="Total Samples" value={formatNumber(summary.stability_total_samples)} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Lens Stability Table</h3>
+        {stabilityRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Lens</th>
+                <th>Samples</th>
+                <th>Mean</th>
+                <th>Std Dev</th>
+                <th>CV %</th>
+                <th>Source Gap</th>
+                <th>Range</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stabilityRows.slice(0, 30).map((row) => (
+                <tr key={String(row.lens || "unknown")}>
+                  <td>{row.lens || "Unknown"}</td>
+                  <td>{formatNumber(row.count)}</td>
+                  <td>{formatDecimal(row.mean, 2)}</td>
+                  <td>{formatDecimal(row.stddev, 2)}</td>
+                  <td>{formatDecimal(row.cv_percent, 2)}</td>
+                  <td>{formatDecimal(row.source_gap, 2)}</td>
+                  <td>{formatDecimal(row.range, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+async function renderScraped() {
+  const payload = await fetchNewsJson("/api/news/digest?limit=100");
+  const rows = asArray(payload?.data);
+  const grouped = new Map();
+  for (const row of rows) {
+    const source = row?.source_name || asObject(row?.source).name || "Unknown";
+    if (!grouped.has(source)) {
+      grouped.set(source, []);
+    }
+    grouped.get(source).push(row);
+  }
+  const groups = Array.from(grouped.entries()).sort((a, b) => b[1].length - a[1].length);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Raw Scraped Digest</h3>
+        <div className="stats-grid">
+          <StatCard label="Records Loaded" value={formatNumber(rows.length)} />
+          <StatCard label="Sources" value={formatNumber(groups.length)} />
+          <StatCard
+            label="With Scraped Payload"
+            value={formatNumber(rows.filter((row) => asObject(row.scraped) && Object.keys(asObject(row.scraped)).length > 0).length)}
+          />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Grouped by Source</h3>
+        {groups.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Articles</th>
+                <th>Example Title</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.slice(0, 25).map(([source, sourceRows]) => (
+                <tr key={source}>
+                  <td>{source}</td>
+                  <td>{formatNumber(sourceRows.length)}</td>
+                  <td>{truncateText(sourceRows[0]?.title || "Untitled", 120)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+function extractSnapshotMetrics(payload) {
+  const derived = getStatsDerived(payload);
+  const sourceCounts = asArray(derived.source_counts);
+  const tagCounts = asArray(derived.tag_counts);
+  const dailyCounts = asArray(derived.daily_counts_utc);
+  return {
+    total_articles: toNumber(derived.total_articles),
+    scored_articles: toNumber(derived.scored_articles),
+    zero_score_articles: toNumber(derived.zero_score_articles),
+    unscorable_articles: toNumber(derived.unscorable_articles),
+    score_coverage_ratio_percent:
+      toNumber(derived.score_coverage_ratio) !== null ? (toNumber(derived.score_coverage_ratio) || 0) * 100 : null,
+    source_count: sourceCounts.length,
+    tag_count: tagCounts.length,
+    days_covered: dailyCounts.length
+  };
+}
+
+function metricDelta(current, snapshot) {
+  if (current === null || snapshot === null) {
+    return "n/a";
+  }
+  const delta = current - snapshot;
+  return Number.isInteger(delta) ? `${delta >= 0 ? "+" : ""}${delta}` : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+}
+
+function pairKey(a, b) {
+  return `${String(a || "")}\u0000${String(b || "")}`;
+}
+
+async function renderSnapshotCompare(searchParams) {
+  const snapshotDate = snapshotDateFromSearchParams(searchParams);
+  if (!snapshotDate) {
+    return (
+      <div className="panel">
+        <h3>Snapshot Compare</h3>
+        <p className="muted">Add a snapshot date in the query string to compare: <code>?snapshot=YYYY-MM-DD</code></p>
+      </div>
+    );
+  }
+
+  const [currentPayload, snapshotPayload] = await Promise.all([
+    fetchStatsPayload(),
+    fetchStatsPayload(snapshotDate)
+  ]);
+  const currentMetrics = extractSnapshotMetrics(currentPayload);
+  const snapshotMetrics = extractSnapshotMetrics(snapshotPayload);
+  const rows = [
+    ["Total Articles", "total_articles"],
+    ["Scored Articles", "scored_articles"],
+    ["Zero Scores", "zero_score_articles"],
+    ["Unscorable", "unscorable_articles"],
+    ["Score Coverage %", "score_coverage_ratio_percent"],
+    ["Source Count", "source_count"],
+    ["Tag Count", "tag_count"],
+    ["Days Covered", "days_covered"]
+  ];
+
+  return (
+    <div className="panel">
+      <h3>Current vs Snapshot ({snapshotDate})</h3>
+      <table className="news-table compact">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Current</th>
+            <th>Snapshot</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, key]) => (
+            <tr key={key}>
+              <td>{label}</td>
+              <td>{formatDecimal(currentMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
+              <td>{formatDecimal(snapshotMetrics[key], key.includes("ratio") ? 1 : 0)}</td>
+              <td>{metricDelta(currentMetrics[key], snapshotMetrics[key])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function renderPlaceholder(title) {
   return (
     <div className="panel">
@@ -775,7 +1974,7 @@ function renderPlaceholder(title) {
   );
 }
 
-async function renderPageBody(slug, title) {
+async function renderPageBody(slug, title, searchParams) {
   if (slug === "digest") {
     return renderDigest();
   }
@@ -788,6 +1987,33 @@ async function renderPageBody(slug, title) {
   if (slug === "lenses") {
     return renderLenses();
   }
+  if (slug === "lens-matrix") {
+    return renderLensMatrix();
+  }
+  if (slug === "lens-correlations") {
+    return renderLensCorrelations();
+  }
+  if (slug === "lens-pca") {
+    return renderLensPca();
+  }
+  if (slug === "source-differentiation") {
+    return renderSourceDifferentiation();
+  }
+  if (slug === "source-effects") {
+    return renderSourceEffects();
+  }
+  if (slug === "score-lab") {
+    return renderScoreLab();
+  }
+  if (slug === "lens-explorer") {
+    return renderLensExplorer();
+  }
+  if (slug === "lens-by-source") {
+    return renderLensBySource();
+  }
+  if (slug === "lens-stability") {
+    return renderLensStability();
+  }
   if (slug === "tags") {
     return renderTags();
   }
@@ -796,6 +2022,12 @@ async function renderPageBody(slug, title) {
   }
   if (slug === "trends") {
     return renderTrends();
+  }
+  if (slug === "scraped") {
+    return renderScraped();
+  }
+  if (slug === "snapshot-compare") {
+    return renderSnapshotCompare(searchParams);
   }
   if (slug === "data-quality") {
     return renderDataQuality();
@@ -812,7 +2044,7 @@ async function renderPageBody(slug, title) {
   return renderPlaceholder(title);
 }
 
-export default async function NewsDetailPage({ params }) {
+export default async function NewsDetailPage({ params, searchParams }) {
   const page = getNewsPage(params.slug);
   if (!page) {
     notFound();
@@ -821,7 +2053,7 @@ export default async function NewsDetailPage({ params }) {
   let body = null;
   let errorMessage = null;
   try {
-    body = await renderPageBody(page.slug, page.title);
+    body = await renderPageBody(page.slug, page.title, searchParams);
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : String(error);
   }
