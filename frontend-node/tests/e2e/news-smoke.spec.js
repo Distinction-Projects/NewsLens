@@ -151,3 +151,26 @@ test("chart-heavy pages render plot containers when API is available", async ({ 
     await expect(page.locator(".plotly-chart").first()).toBeVisible();
   }
 });
+
+test("lens stability exposes ranking controls and chart output", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/lens-stability`);
+  await expect(page.getByRole("heading", { name: "News Lens Stability" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Stability Filters" })).toBeVisible();
+  await expect(page.locator('select[name="metric"]')).toBeVisible();
+  await expect(page.locator('input[name="top_n"]')).toBeVisible();
+  await expect(page.locator(".plotly-chart").first()).toBeVisible();
+
+  await gotoWithRetry(page, `${baseURL}/news/lens-stability?metric=range&top_n=7`);
+  await expect(page.locator('select[name="metric"]')).toHaveValue("range");
+  await expect(page.locator('input[name="top_n"]')).toHaveValue("7");
+  await expect(page.getByRole("heading", { name: "Stability Visuals" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lens Stability Table" })).toBeVisible();
+  await expect(page.locator(".plotly-chart")).toHaveCount(2);
+});
