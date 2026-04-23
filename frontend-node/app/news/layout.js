@@ -6,7 +6,7 @@ export default function NewsLayout({ children }) {
     <main>
       <h1>News</h1>
       <p className="muted">
-        Incremental migration surface for NewsLens pages backed by the FastAPI contract.
+        NewsLens analytics surface backed by the FastAPI contract.
       </p>
 
       <div className="panel">

@@ -3,23 +3,8 @@ import { NEWS_PAGES } from "../../lib/newsPages";
 
 export const dynamic = "force-dynamic";
 
-const LIVE_PAGE_SLUGS = new Set([
-  "digest",
-  "stats",
-  "sources",
-  "lenses",
-  "tags",
-  "source-tag-matrix",
-  "trends",
-  "data-quality",
-  "workflow-status",
-  "raw-json",
-  "integration"
-]);
-
 export default function NewsIndexPage() {
-  const livePages = NEWS_PAGES.filter((page) => LIVE_PAGE_SLUGS.has(page.slug));
-  const scaffoldedPages = NEWS_PAGES.filter((page) => !LIVE_PAGE_SLUGS.has(page.slug));
+  const livePages = NEWS_PAGES;
   const statsBackedPages = NEWS_PAGES.filter(
     (page) =>
       !["digest", "raw-json", "integration", "scraped"].includes(page.slug) &&
@@ -32,15 +17,14 @@ export default function NewsIndexPage() {
   return (
     <>
       <div className="panel">
-        <h2>Migration Status</h2>
+        <h2>Implementation Status</h2>
         <p className="muted">
-          {livePages.length} news pages now read live data from FastAPI. The remaining routes stay scaffolded while
-          the Dash interactions are ported progressively.
+          {livePages.length} of {NEWS_PAGES.length} news pages are live in Next.js and read from the FastAPI contract.
         </p>
       </div>
 
       <div className="panel">
-        <h2>Live Node Pages</h2>
+        <h2>Live News Pages</h2>
         <ul>
           {livePages.map((page) => (
             <li key={page.slug}>
@@ -51,15 +35,10 @@ export default function NewsIndexPage() {
       </div>
 
       <div className="panel">
-        <h2>Scaffolded Routes</h2>
-        <p className="muted">These routes exist in Next.js and will be migrated in later passes.</p>
-        <ul>
-          {scaffoldedPages.map((page) => (
-            <li key={page.slug}>
-              <Link href={`/news/${page.slug}`}>{page.title}</Link>
-            </li>
-          ))}
-        </ul>
+        <h2>Route Coverage</h2>
+        <p className="muted">
+          There are currently no scaffold-only news routes remaining. All listed `/news/*` routes render live content.
+        </p>
       </div>
 
       <div className="panel">
@@ -79,7 +58,7 @@ export default function NewsIndexPage() {
           </div>
 
           <div className="workflow-arrow" aria-hidden="true">
-            ↓
+            v
           </div>
 
           <div className="workflow-row">
@@ -92,7 +71,7 @@ export default function NewsIndexPage() {
           </div>
 
           <div className="workflow-arrow" aria-hidden="true">
-            ↓
+            v
           </div>
 
           <div className="workflow-row">
@@ -105,7 +84,7 @@ export default function NewsIndexPage() {
           </div>
 
           <div className="workflow-arrow" aria-hidden="true">
-            ↓
+            v
           </div>
 
           <div className="workflow-split">
@@ -135,15 +114,14 @@ export default function NewsIndexPage() {
           </div>
 
           <div className="workflow-arrow" aria-hidden="true">
-            ↓
+            v
           </div>
 
           <div className="workflow-row">
             <div className="workflow-box">
               <strong>5. Next.js News surface</strong>
               <p className="muted">
-                `frontend-node/app/news/[slug]/page.js` renders live data where migrated; scaffolded routes remain
-                linked for progressive porting.
+                `frontend-node/app/news/[slug]/page.js` renders live data for every route listed above.
               </p>
             </div>
           </div>

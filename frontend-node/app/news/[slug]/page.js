@@ -5,31 +5,6 @@ import PlotlyChart from "../../../components/PlotlyChart";
 
 export const dynamic = "force-dynamic";
 
-const MIGRATED_PAGE_SLUGS = new Set([
-  "digest",
-  "stats",
-  "sources",
-  "lenses",
-  "lens-matrix",
-  "lens-correlations",
-  "lens-pca",
-  "source-differentiation",
-  "source-effects",
-  "score-lab",
-  "lens-explorer",
-  "lens-by-source",
-  "lens-stability",
-  "tags",
-  "source-tag-matrix",
-  "trends",
-  "scraped",
-  "snapshot-compare",
-  "data-quality",
-  "workflow-status",
-  "raw-json",
-  "integration"
-]);
-
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -3838,9 +3813,7 @@ export default async function NewsDetailPage({ params, searchParams }) {
     <>
       <div className="page-title-row">
         <h2>{page.title}</h2>
-        <p className="muted">
-          {MIGRATED_PAGE_SLUGS.has(page.slug) ? "Live FastAPI data" : "Routed placeholder for phased migration"}
-        </p>
+        <p className="muted">Live FastAPI data</p>
       </div>
       <PageIntro summary={page.summary} />
 

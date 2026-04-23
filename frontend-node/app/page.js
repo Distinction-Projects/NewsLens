@@ -5,7 +5,7 @@ export default function HomePage() {
     <main>
       <h1>NewsLens Node Frontend</h1>
       <p className="muted">
-        This frontend consumes FastAPI endpoints while Dash routes are migrated over in stages.
+        This frontend consumes FastAPI endpoints and now includes full `/news/*` route coverage.
       </p>
 
       <div className="panel">
@@ -21,7 +21,7 @@ export default function HomePage() {
             <Link href="/about">/about</Link> project method and stack direction
           </li>
           <li>
-            <Link href="/news">/news</Link> migrated news analytics pages
+            <Link href="/news">/news</Link> full news analytics surface
           </li>
           <li>
             <Link href="/supabase-test">/supabase-test</Link> Supabase connectivity check
@@ -30,9 +30,9 @@ export default function HomePage() {
       </div>
 
       <div className="panel">
-        <h2>Migration State</h2>
+        <h2>Architecture State</h2>
         <p>
-          Dash remains online for parity, but the new default path is FastAPI + Next.js.
+          Dash remains online for parity and historical validation, while FastAPI + Next.js is the primary frontend path.
         </p>
       </div>
     </main>
