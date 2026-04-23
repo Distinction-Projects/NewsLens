@@ -3125,21 +3125,21 @@ async function renderScraped(searchParams) {
   const payload = await fetchNewsJson(`/api/news/digest?${digestParams.toString()}`, forceRefresh ? { cache: "no-store" } : {});
   const rows = asArray(payload?.data);
   const meta = asObject(payload?.meta);
-  const filteredRows = onlyScraped
-    ? rows.filter((row) => {
-        const scraped = asObject(row?.scraped);
-        return Object.keys(scraped).length > 0;
-      })
-    : rows;
+  const hasScrapedPayload = (row) => {
+    const scraped = asObject(row?.scraped);
+    return Object.keys(scraped).length > 0;
+  };
+  const sourceNameForRow = (row) => row?.source_name || asObject(row?.source).name || asObject(row?.source).id || "Unknown source";
+  const filteredRows = onlyScraped ? rows.filter((row) => hasScrapedPayload(row)) : rows;
   const grouped = new Map();
   for (const row of filteredRows) {
-    const source = row?.source_name || asObject(row?.source).name || "Unknown";
+    const source = sourceNameForRow(row);
     if (!grouped.has(source)) {
       grouped.set(source, []);
     }
     grouped.get(source).push(row);
   }
-  const groups = Array.from(grouped.entries()).sort((a, b) => b[1].length - a[1].length);
+  const groups = Array.from(grouped.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   const refreshHref = buildQueryHref({
     data_mode: dataMode,
     snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
@@ -3150,10 +3150,8 @@ async function renderScraped(searchParams) {
   });
   const generatedAt = String(meta?.generated_at || "n/a");
   const sourceMode = String(meta?.source_mode || "unknown");
-  const withPayloadCount = rows.filter((row) => {
-    const scraped = asObject(row?.scraped);
-    return Object.keys(scraped).length > 0;
-  }).length;
+  const withPayloadCount = rows.filter((row) => hasScrapedPayload(row)).length;
+  const trailingStatus = onlyScraped ? "filtered to records with scraped payload" : "showing all records";
 
   return (
     <>
@@ -3190,6 +3188,9 @@ async function renderScraped(searchParams) {
       </div>
       <div className="panel">
         <h3>Status</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Records loaded: {formatNumber(rows.length)}; {trailingStatus}
+        </p>
         <div className="stats-grid">
           <StatCard label="Records Loaded" value={formatNumber(rows.length)} />
           <StatCard label="Source Mode" value={sourceMode} />
@@ -3198,9 +3199,9 @@ async function renderScraped(searchParams) {
         </div>
       </div>
       <div className="panel">
-        <h3>Raw Scraped Digest</h3>
+        <h3>Raw Scraped Article Data</h3>
         <div className="stats-grid">
-          <StatCard label="Records Loaded" value={formatNumber(filteredRows.length)} />
+          <StatCard label="Records Shown" value={formatNumber(filteredRows.length)} />
           <StatCard label="Sources" value={formatNumber(groups.length)} />
           <StatCard label="With Scraped Payload" value={formatNumber(withPayloadCount)} />
         </div>
@@ -3209,7 +3210,7 @@ async function renderScraped(searchParams) {
       <div className="panel">
         <h3>Grouped by Source</h3>
         {groups.length === 0 ? (
-          <EmptyState />
+          <p className="muted">No records match the current filters.</p>
         ) : (
           <div>
             {groups.slice(0, 25).map(([source, sourceRows]) => (
@@ -3222,18 +3223,28 @@ async function renderScraped(searchParams) {
                     <div key={`${String(row?.id || row?.link || row?.title || "article")}-${index}`} className="panel">
                       <p style={{ marginTop: 0, marginBottom: "6px" }}>
                         <strong>{row?.title || "Untitled"}</strong>
+                        <span className="muted" style={{ marginLeft: "8px", fontSize: "0.85em" }}>
+                          [{String(row?.id || "no-id")}]
+                        </span>
                       </p>
                       <p className="muted" style={{ marginTop: 0 }}>
-                        {String(row?.published_at || row?.published || "Unknown date")}
+                        Published: {String(row?.published_at || row?.published || "Unknown date")} | Has scraped:{" "}
+                        {hasScrapedPayload(row) ? "yes" : "no"}
                       </p>
                       {row?.link ? (
-                        <p style={{ marginTop: 0, marginBottom: "8px" }}>
-                          <a href={row.link} target="_blank" rel="noreferrer">
+                        <p style={{ marginTop: 0, marginBottom: "8px", display: "inline-block" }}>
+                          <a className="news-nav-link" href={row.link} target="_blank" rel="noreferrer">
                             Open article
                           </a>
                         </p>
-                      ) : null}
-                      <pre className="json-preview">{JSON.stringify(asObject(row?.scraped), null, 2)}</pre>
+                      ) : (
+                        <p className="muted" style={{ marginTop: 0, marginBottom: "8px" }}>
+                          No link
+                        </p>
+                      )}
+                      <pre className="json-preview">
+                        {hasScrapedPayload(row) ? JSON.stringify(asObject(row?.scraped), null, 2) : "No scraped payload."}
+                      </pre>
                     </div>
                   ))}
                 </div>
