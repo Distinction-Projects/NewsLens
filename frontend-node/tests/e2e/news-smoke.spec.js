@@ -27,7 +27,7 @@ const NEWS_ROUTE_EXPECTATIONS = [
 
 test("news shell routes render", async ({ page, baseURL }) => {
   await page.goto(`${baseURL}/news`);
-  await expect(page.getByRole("heading", { name: "News" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "News", exact: true })).toBeVisible();
   const digestNavLink = page.locator('nav.news-nav-grid a[href="/news/digest"]').first();
   await expect(digestNavLink).toBeVisible();
 
@@ -59,5 +59,57 @@ test("news scraped route shows raw payload explorer controls", async ({ page, ba
     await expect(page.getByRole("heading", { name: "Grouped by Source" })).toBeVisible();
   } else {
     await expect(page.getByRole("heading", { name: "API Error" })).toBeVisible();
+  }
+});
+
+test("source differentiation supports pooled and within-topic modes", async ({ page, baseURL }) => {
+  await page.goto(`${baseURL}/news/source-differentiation`);
+  await expect(page.getByRole("heading", { name: "News Source Differentiation" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("link", { name: "Pooled (topic-confounded)" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Within-topic" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pooled Source Differentiation" })).toBeVisible();
+  await expect(page.getByText("Label: topic-confounded")).toBeVisible();
+
+  await page.getByRole("link", { name: "Within-topic" }).click();
+  await expect(page).toHaveURL(/\/news\/source-differentiation\?mode=within-topic/);
+  await expect(page.getByRole("heading", { name: /Within-Topic Source Differentiation/ })).toBeVisible();
+  const topicLinks = page.locator('a[href*="mode=within-topic"][href*="topic="]');
+  if ((await topicLinks.count()) > 0) {
+    await expect(topicLinks.first()).toBeVisible();
+  } else {
+    await expect(page.getByText("No topic slices available for this dataset.")).toBeVisible();
+  }
+});
+
+test("source effects supports pooled and within-topic modes", async ({ page, baseURL }) => {
+  await page.goto(`${baseURL}/news/source-effects`);
+  await expect(page.getByRole("heading", { name: "News Source Effects" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("link", { name: "Pooled (topic-confounded)" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Within-topic" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pooled Source Effects" })).toBeVisible();
+  await expect(page.getByText("Label: topic-confounded")).toBeVisible();
+
+  await page.getByRole("link", { name: "Within-topic" }).click();
+  await expect(page).toHaveURL(/mode=within-topic/);
+  await expect(page.getByRole("heading", { name: /Within-Topic Source Effects/ })).toBeVisible();
+  const topicLinks = page.locator('a[href*="mode=within-topic"][href*="topic="]');
+  if ((await topicLinks.count()) > 0) {
+    await expect(topicLinks.first()).toBeVisible();
+  } else {
+    await expect(page.getByText("No topic slices available for this dataset.")).toBeVisible();
   }
 });

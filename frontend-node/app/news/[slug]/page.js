@@ -2324,10 +2324,13 @@ async function renderLensPca(searchParams) {
   );
 }
 
-function SourceDifferentiationBlock({ title, differentiation, confounded = false }) {
+function SourceDifferentiationBlock({ title, differentiation, confounded = false, reliability }) {
   const data = asObject(differentiation);
   const multivariate = asObject(data.multivariate);
   const classification = asObject(data.classification);
+  const reliabilityView = asObject(reliability);
+  const reliabilityFlags = asArray(reliabilityView.flags);
+  const reliabilityScore = toNumber(reliabilityView.score);
   const sourceCountRows = sourceCountsToRows(data.source_counts).slice(0, 20);
   const accuracy = toNumber(classification.accuracy);
   const baselineAccuracy = toNumber(classification.baseline_accuracy);
@@ -2337,11 +2340,20 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
       <h3>{title}</h3>
       {confounded ? <p className="muted">Label: topic-confounded</p> : null}
       <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
+      <p className="muted">
+        Scope status: {String(data.status || "unknown")}
+        {reliabilityScore !== null
+          ? ` | Reliability: ${String(reliabilityView.tier || "n/a")} (${reliabilityScore.toFixed(2)})`
+          : ""}
+        {reliabilityFlags.length > 0 ? ` | Reliability flags: ${formatNumber(reliabilityFlags.length)}` : ""}
+      </p>
       <div className="stats-grid">
         <StatCard label="Articles" value={formatNumber(data.n_articles)} />
         <StatCard label="Sources" value={formatNumber(data.n_sources)} />
         <StatCard label="Lenses" value={formatNumber(data.n_lenses)} />
         <StatCard label="Permutations" value={formatNumber(data.permutations)} />
+        <StatCard label="LOOCV Accuracy" value={formatPercent(classification.accuracy)} />
+        <StatCard label="Baseline Accuracy" value={formatPercent(classification.baseline_accuracy)} />
       </div>
       {sourceCountRows.length > 0 || showAccuracyChart ? (
         <div className="chart-grid">
@@ -2384,6 +2396,14 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
             <td>{formatDecimal(multivariate.r_squared, 4)}</td>
           </tr>
           <tr>
+            <th>Between df</th>
+            <td>{formatNumber(multivariate.df_between)}</td>
+          </tr>
+          <tr>
+            <th>Within df</th>
+            <td>{formatNumber(multivariate.df_within)}</td>
+          </tr>
+          <tr>
             <th>Multivariate p_perm</th>
             <td>{formatDecimal(multivariate.p_perm, 4)}</td>
           </tr>
@@ -2394,6 +2414,14 @@ function SourceDifferentiationBlock({ title, differentiation, confounded = false
           <tr>
             <th>Baseline Accuracy</th>
             <td>{formatPercent(classification.baseline_accuracy)}</td>
+          </tr>
+          <tr>
+            <th>Evaluated</th>
+            <td>{formatNumber(classification.evaluated)}</td>
+          </tr>
+          <tr>
+            <th>Total</th>
+            <td>{formatNumber(classification.total)}</td>
           </tr>
           <tr>
             <th>Classification p_perm</th>
@@ -2409,6 +2437,7 @@ async function renderSourceDifferentiation(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_differentiation);
+  const sourceReliability = asObject(derived.source_reliability);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
   const mode = normalizeMode(searchParams);
@@ -2419,6 +2448,7 @@ async function renderSourceDifferentiation(searchParams) {
   const selectedTopicDiff = asObject(selectedTopic?.source_differentiation);
   const selectedTopicReason = String(selectedTopicDiff.reason || "");
   const isTopicUnavailable = String(selectedTopicDiff.status || "") !== "ok";
+  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName);
 
   return (
     <>
@@ -2464,11 +2494,17 @@ async function renderSourceDifferentiation(searchParams) {
       </div>
 
       {mode === "pooled" ? (
-        <SourceDifferentiationBlock title="Pooled Source Differentiation" differentiation={pooled} confounded />
+        <SourceDifferentiationBlock
+          title="Pooled Source Differentiation"
+          differentiation={pooled}
+          confounded
+          reliability={reliabilityView}
+        />
       ) : selectedTopic ? (
         <SourceDifferentiationBlock
           title={`Within-Topic Source Differentiation: ${selectedTopicName}`}
           differentiation={selectedTopicDiff}
+          reliability={reliabilityView}
         />
       ) : (
         <div className="panel">
