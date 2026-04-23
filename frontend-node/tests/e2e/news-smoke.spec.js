@@ -174,3 +174,21 @@ test("lens stability exposes ranking controls and chart output", async ({ page, 
   await expect(page.getByRole("heading", { name: "Lens Stability Table" })).toBeVisible();
   await expect(page.locator(".plotly-chart")).toHaveCount(2);
 });
+
+test("evaluation route renders corpus/model controls and visuals", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/evaluation`);
+  await expect(page.getByRole("heading", { name: "Model Evaluation" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Corpus" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Model", exact: true })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.locator('a[href*="/evaluation?dataset=train5"]').first()).toBeVisible();
+  await expect(page.locator('a[href*="model=naive%20bayes"]').first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evaluation Visuals" })).toBeVisible();
+  await expect(page.locator(".plotly-chart")).toHaveCount(2);
+});
