@@ -22,6 +22,7 @@ dash.register_page(
 )
 
 
+
 def _api_get(path: str, params: dict[str, str | int | None]) -> tuple[int, dict]:
     filtered = {key: value for key, value in params.items() if value not in (None, "", [])}
     query = urlencode(filtered, doseq=True)
