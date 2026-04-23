@@ -107,8 +107,17 @@ jobs:
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
           /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
 
+          # Avoid OOM kills during Next.js production build on small droplets.
+          if ! swapon --show | grep -q .; then
+            ${SUDO} fallocate -l 2G /swapfile || ${SUDO} dd if=/dev/zero of=/swapfile bs=1M count=2048
+            ${SUDO} chmod 600 /swapfile
+            ${SUDO} mkswap /swapfile
+            ${SUDO} swapon /swapfile
+          fi
+
           run_as_app_user npm --prefix /srv/newslens/app/frontend-node ci
           run_as_app_user env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
+            NODE_OPTIONS=--max-old-space-size=1024 \
             npm --prefix /srv/newslens/app/frontend-node run build
 
           ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens.service /etc/systemd/system/newslens.service
