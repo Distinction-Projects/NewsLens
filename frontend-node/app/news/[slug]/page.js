@@ -2015,9 +2015,94 @@ async function renderLensPca(searchParams) {
   const derived = getStatsDerived(payload);
   const pca = asObject(derived.lens_pca);
   const mds = asObject(derived.lens_mds);
+  const lensTimeSeries = asObject(derived.lens_time_series);
+  const temporalPca = asObject(derived.lens_temporal_embedding);
+  const temporalMds = asObject(derived.lens_temporal_embedding_mds);
   const explained = asArray(pca.explained_variance);
   const drivers = asArray(pca.variance_drivers);
   const centroids = asArray(pca.source_centroids);
+  const loadings = asObject(pca.loadings);
+  const loadingLenses = asArray(loadings.lenses).map((value) => String(value || ""));
+  const loadingComponents = asArray(loadings.components).map((value) => String(value || ""));
+  const loadingMatrixRaw = asArray(loadings.matrix);
+  const loadingMatrix = loadingMatrixRaw.map((row) =>
+    asArray(row).slice(0, loadingLenses.length).map((value) => toNumber(value) || 0)
+  );
+  const maxAbsLoading = Math.max(...loadingMatrix.flat().map((value) => Math.abs(value)), 1);
+  const selectedComponent = loadingComponents[0] || null;
+  const selectedComponentIndex = selectedComponent ? loadingComponents.indexOf(selectedComponent) : -1;
+  const selectedLoadings =
+    selectedComponentIndex >= 0 && selectedComponentIndex < loadingMatrix.length
+      ? loadingLenses
+          .map((lens, lensIndex) => ({ lens, loading: toNumber(loadingMatrix[selectedComponentIndex][lensIndex]) || 0 }))
+          .sort((a, b) => Math.abs(b.loading) - Math.abs(a.loading))
+      : [];
+  const componentSummaryRows = asArray(pca.component_summary);
+  const timeSeriesRows = asArray(lensTimeSeries.series)
+    .map((row) => ({
+      lens: String(row?.lens || ""),
+      points: asArray(row?.points)
+        .map((point) => ({
+          date: String(point?.date || ""),
+          mean: toNumber(point?.mean),
+          median: toNumber(point?.median),
+          min: toNumber(point?.min),
+          max: toNumber(point?.max),
+          count: toNumber(point?.count)
+        }))
+        .filter((point) => point.date && point.mean !== null)
+    }))
+    .filter((row) => row.lens && row.points.length > 0)
+    .sort((a, b) => {
+      const aMaxCount = Math.max(...a.points.map((point) => point.count || 0), 0);
+      const bMaxCount = Math.max(...b.points.map((point) => point.count || 0), 0);
+      if (bMaxCount !== aMaxCount) {
+        return bMaxCount - aMaxCount;
+      }
+      return a.lens.localeCompare(b.lens);
+    })
+    .slice(0, 8);
+  const temporalPcaPointRows = asArray(temporalPca.points)
+    .map((row) => ({
+      title: String(row?.title || "Untitled"),
+      source: String(row?.source || "Unknown"),
+      date: String(row?.date || ""),
+      strongestLens: String(row?.strongest_lens || "Unknown"),
+      dayIndex: toNumber(row?.day_index),
+      pc1: toNumber(row?.pc1),
+      pc2: toNumber(row?.pc2)
+    }))
+    .filter((row) => row.dayIndex !== null && row.pc1 !== null && row.pc2 !== null);
+  const temporalPcaCentroidRows = asArray(temporalPca.day_centroids)
+    .map((row) => ({
+      date: String(row?.date || ""),
+      dayIndex: toNumber(row?.day_index),
+      count: toNumber(row?.count) || 0,
+      pc1: toNumber(row?.pc1),
+      pc2: toNumber(row?.pc2)
+    }))
+    .filter((row) => row.dayIndex !== null && row.pc1 !== null && row.pc2 !== null)
+    .sort((a, b) => (a.dayIndex || 0) - (b.dayIndex || 0));
+  const temporalMdsPointRows = asArray(temporalMds.points)
+    .map((row) => ({
+      title: String(row?.title || "Untitled"),
+      source: String(row?.source || "Unknown"),
+      date: String(row?.date || ""),
+      strongestLens: String(row?.strongest_lens || "Unknown"),
+      dayIndex: toNumber(row?.day_index),
+      mds1: toNumber(row?.mds1),
+      mds2: toNumber(row?.mds2)
+    }))
+    .filter((row) => row.dayIndex !== null && row.mds1 !== null && row.mds2 !== null);
+  const temporalMdsCentroidRows = asArray(temporalMds.day_centroids)
+    .map((row) => ({
+      date: String(row?.date || ""),
+      dayIndex: toNumber(row?.day_index),
+      mds1: toNumber(row?.mds1),
+      mds2: toNumber(row?.mds2)
+    }))
+    .filter((row) => row.dayIndex !== null && row.mds1 !== null && row.mds2 !== null)
+    .sort((a, b) => (a.dayIndex || 0) - (b.dayIndex || 0));
   const explainedRows = explained
     .map((row) => ({
       component: String(row?.component || ""),
@@ -2080,6 +2165,44 @@ async function renderLensPca(searchParams) {
   };
   const pcaGroupedRows = groupBySource(pcaArticleRows);
   const mdsGroupedRows = groupBySource(mdsArticleRows);
+  const topDriverRows = drivers
+    .map((row) => ({
+      lens: String(row?.lens || ""),
+      weightedContribution: toNumber(row?.weighted_contribution)
+    }))
+    .filter((row) => row.lens && row.weightedContribution !== null)
+    .sort((a, b) => (b.weightedContribution || 0) - (a.weightedContribution || 0))
+    .slice(0, 12);
+  const topDriverTotal = topDriverRows.reduce((acc, row) => acc + (row.weightedContribution || 0), 0);
+  const temporalVolumeByDay = {};
+  for (const row of temporalPcaPointRows) {
+    const key = String(row.dayIndex);
+    temporalVolumeByDay[key] = (temporalVolumeByDay[key] || 0) + 1;
+  }
+  const temporalPcaDrift = temporalPcaCentroidRows.map((row, index) => {
+    if (index === 0) {
+      return 0;
+    }
+    const previous = temporalPcaCentroidRows[index - 1];
+    const dx = (row.pc1 || 0) - (previous.pc1 || 0);
+    const dy = (row.pc2 || 0) - (previous.pc2 || 0);
+    return Math.sqrt(dx * dx + dy * dy);
+  });
+  const temporalMdsByDay = new Map(temporalMdsCentroidRows.map((row) => [row.dayIndex, row]));
+  const temporalMdsDrift = temporalPcaCentroidRows.map((row, index) => {
+    if (index === 0) {
+      return 0;
+    }
+    const previousPca = temporalPcaCentroidRows[index - 1];
+    const current = temporalMdsByDay.get(row.dayIndex);
+    const previous = temporalMdsByDay.get(previousPca.dayIndex);
+    if (!current || !previous) {
+      return null;
+    }
+    const dx = (current.mds1 || 0) - (previous.mds1 || 0);
+    const dy = (current.mds2 || 0) - (previous.mds2 || 0);
+    return Math.sqrt(dx * dx + dy * dy);
+  });
 
   return (
     <>
@@ -2213,6 +2336,237 @@ async function renderLensPca(searchParams) {
       </div>
 
       <div className="panel">
+        <h3>Temporal Lens Geometry</h3>
+        {timeSeriesRows.length === 0 &&
+        temporalPcaPointRows.length === 0 &&
+        temporalMdsPointRows.length === 0 &&
+        temporalPcaCentroidRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            <div className="chart-grid">
+              {timeSeriesRows.length > 0 ? (
+                <PlotlyChart
+                  data={timeSeriesRows.map((series) => ({
+                    type: "scatter",
+                    mode: "lines+markers",
+                    name: series.lens,
+                    x: series.points.map((point) => point.date),
+                    y: series.points.map((point) => point.mean),
+                    customdata: series.points.map((point) => [point.count, point.median, point.min, point.max]),
+                    hovertemplate:
+                      "Lens: " +
+                      series.lens +
+                      "<br>Date: %{x}<br>Mean: %{y:.2f}<br>N: %{customdata[0]}<br>" +
+                      "Median: %{customdata[1]:.2f}<br>Min/Max: %{customdata[2]:.2f} / %{customdata[3]:.2f}<extra></extra>"
+                  }))}
+                  layout={{
+                    title: "Lens Time Series (Daily Mean Percent)",
+                    xaxis: { title: "Date (UTC)" },
+                    yaxis: { title: "Lens Percent" }
+                  }}
+                />
+              ) : null}
+              {temporalPcaPointRows.length > 0 ? (
+                <PlotlyChart
+                  data={[
+                    {
+                      type: "scatter",
+                      mode: "markers",
+                      name: "Articles",
+                      x: temporalPcaPointRows.map((row) => row.pc1),
+                      y: temporalPcaPointRows.map((row) => row.pc2),
+                      text: temporalPcaPointRows.map((row) => row.title),
+                      customdata: temporalPcaPointRows.map((row) => [row.source, row.date, row.strongestLens]),
+                      marker: {
+                        size: 8,
+                        opacity: 0.7,
+                        color: temporalPcaPointRows.map((row) => row.dayIndex),
+                        colorscale: "Viridis",
+                        showscale: true,
+                        colorbar: { title: "Day Index" }
+                      },
+                      hovertemplate:
+                        "Title: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<br>" +
+                        "Source: %{customdata[0]}<br>Date: %{customdata[1]}<br>" +
+                        "Strongest Lens: %{customdata[2]}<extra></extra>"
+                    },
+                    ...(temporalPcaCentroidRows.length > 0
+                      ? [
+                          {
+                            type: "scatter",
+                            mode: "lines+markers",
+                            name: "Daily Centroid Path",
+                            x: temporalPcaCentroidRows.map((row) => row.pc1),
+                            y: temporalPcaCentroidRows.map((row) => row.pc2),
+                            text: temporalPcaCentroidRows.map((row) => row.date),
+                            marker: { size: 9, symbol: "diamond", color: "#111111" },
+                            line: { width: 2, color: "#111111" },
+                            hovertemplate: "Date: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>"
+                          }
+                        ]
+                      : [])
+                  ]}
+                  layout={{ title: "Temporal Trajectory in PC1/PC2", xaxis: { title: "PC1" }, yaxis: { title: "PC2" } }}
+                />
+              ) : null}
+              {temporalMdsPointRows.length > 0 ? (
+                <PlotlyChart
+                  data={[
+                    {
+                      type: "scatter",
+                      mode: "markers",
+                      name: "Articles",
+                      x: temporalMdsPointRows.map((row) => row.mds1),
+                      y: temporalMdsPointRows.map((row) => row.mds2),
+                      text: temporalMdsPointRows.map((row) => row.title),
+                      customdata: temporalMdsPointRows.map((row) => [row.source, row.date, row.strongestLens]),
+                      marker: {
+                        size: 8,
+                        opacity: 0.7,
+                        color: temporalMdsPointRows.map((row) => row.dayIndex),
+                        colorscale: "Plasma",
+                        showscale: true,
+                        colorbar: { title: "Day Index" }
+                      },
+                      hovertemplate:
+                        "Title: %{text}<br>MDS1: %{x:.3f}<br>MDS2: %{y:.3f}<br>" +
+                        "Source: %{customdata[0]}<br>Date: %{customdata[1]}<br>" +
+                        "Strongest Lens: %{customdata[2]}<extra></extra>"
+                    },
+                    ...(temporalMdsCentroidRows.length > 0
+                      ? [
+                          {
+                            type: "scatter",
+                            mode: "lines+markers",
+                            name: "Daily Centroid Path",
+                            x: temporalMdsCentroidRows.map((row) => row.mds1),
+                            y: temporalMdsCentroidRows.map((row) => row.mds2),
+                            text: temporalMdsCentroidRows.map((row) => row.date),
+                            marker: { size: 9, symbol: "diamond", color: "#111111" },
+                            line: { width: 2, color: "#111111" },
+                            hovertemplate: "Date: %{text}<br>MDS1: %{x:.3f}<br>MDS2: %{y:.3f}<extra></extra>"
+                          }
+                        ]
+                      : [])
+                  ]}
+                  layout={{
+                    title: "Temporal Trajectory in MDS1/MDS2",
+                    xaxis: { title: "MDS1" },
+                    yaxis: { title: "MDS2" }
+                  }}
+                />
+              ) : null}
+            </div>
+            {temporalPcaCentroidRows.length > 0 ? (
+              <PlotlyChart
+                data={[
+                  {
+                    type: "bar",
+                    x: temporalPcaCentroidRows.map((row) => row.date),
+                    y: temporalPcaCentroidRows.map((row) => temporalVolumeByDay[String(row.dayIndex)] || 0),
+                    name: "Article Count",
+                    marker: { color: "#6c757d" },
+                    opacity: 0.5,
+                    hovertemplate: "Date: %{x}<br>Articles: %{y}<extra></extra>"
+                  },
+                  {
+                    type: "scatter",
+                    mode: "lines+markers",
+                    x: temporalPcaCentroidRows.map((row) => row.date),
+                    y: temporalPcaDrift,
+                    name: "PCA Centroid Drift",
+                    line: { width: 2, color: "#0d6efd" },
+                    yaxis: "y2",
+                    hovertemplate: "Date: %{x}<br>PCA drift: %{y:.4f}<extra></extra>"
+                  },
+                  ...(temporalMdsDrift.some((value) => value !== null)
+                    ? [
+                        {
+                          type: "scatter",
+                          mode: "lines+markers",
+                          x: temporalPcaCentroidRows.map((row) => row.date),
+                          y: temporalMdsDrift,
+                          name: "MDS Centroid Drift",
+                          line: { width: 2, color: "#198754", dash: "dot" },
+                          yaxis: "y2",
+                          hovertemplate: "Date: %{x}<br>MDS drift: %{y:.4f}<extra></extra>"
+                        }
+                      ]
+                    : [])
+                ]}
+                layout={{
+                  title: "Temporal Diagnostics: Volume and Drift",
+                  xaxis: { title: "Date (UTC)" },
+                  yaxis: { title: "Article Count", rangemode: "tozero" },
+                  yaxis2: { title: "Centroid Drift", overlaying: "y", side: "right", rangemode: "tozero" }
+                }}
+              />
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>PCA Loadings and Variance Drivers</h3>
+        {loadingComponents.length === 0 || loadingLenses.length === 0 || loadingMatrix.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "heatmap",
+                  x: loadingLenses,
+                  y: loadingComponents,
+                  z: loadingMatrix,
+                  zmin: -maxAbsLoading,
+                  zmax: maxAbsLoading,
+                  zmid: 0,
+                  colorscale: "RdBu",
+                  colorbar: { title: "Loading" },
+                  hovertemplate: "Component: %{y}<br>Lens: %{x}<br>Loading: %{z:.4f}<extra></extra>"
+                }
+              ]}
+              layout={{ title: "PCA Component Loadings", xaxis: { title: "Lens" }, yaxis: { title: "Component" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: selectedLoadings.map((row) => row.lens),
+                  y: selectedLoadings.map((row) => row.loading),
+                  marker: {
+                    color: selectedLoadings.map((row) => (row.loading >= 0 ? "#198754" : "#dc3545"))
+                  },
+                  hovertemplate: "Lens: %{x}<br>Loading: %{y:.4f}<extra></extra>"
+                }
+              ]}
+              layout={{
+                title: selectedComponent ? `Lens Loadings for ${selectedComponent}` : "Lens Loadings",
+                xaxis: { title: "Lens" },
+                yaxis: { title: "Loading" }
+              }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: topDriverRows.map((row) => row.lens),
+                  y: topDriverRows.map((row) =>
+                    topDriverTotal > 0 ? ((row.weightedContribution || 0) / topDriverTotal) * 100 : 0
+                  ),
+                  marker: { color: "#fd7e14" },
+                  hovertemplate: "Lens: %{x}<br>Weighted contribution: %{y:.2f}%<extra></extra>"
+                }
+              ]}
+              layout={{ title: "Variance Drivers by Lens", xaxis: { title: "Lens" }, yaxis: { title: "Contribution %" } }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
         <h3>Explained Variance</h3>
         {explained.length === 0 ? (
           <EmptyState />
@@ -2263,6 +2617,50 @@ async function renderLensPca(searchParams) {
                   <td>{formatDecimal(row.pc2_loading, 4)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Component Interpretation</h3>
+        {componentSummaryRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Explained Variance</th>
+                <th>Strongest Loadings</th>
+                <th>Top Positive</th>
+                <th>Top Negative</th>
+              </tr>
+            </thead>
+            <tbody>
+              {componentSummaryRows.map((row, index) => {
+                const strongest = asArray(row?.strongest_loadings)
+                  .slice(0, 3)
+                  .map((entry) => `${String(entry?.lens || "n/a")} (${formatDecimal(entry?.loading, 3)})`)
+                  .join(", ");
+                const positive = asArray(row?.top_positive)
+                  .slice(0, 3)
+                  .map((entry) => `${String(entry?.lens || "n/a")} (${formatDecimal(entry?.loading, 3)})`)
+                  .join(", ");
+                const negative = asArray(row?.top_negative)
+                  .slice(0, 3)
+                  .map((entry) => `${String(entry?.lens || "n/a")} (${formatDecimal(entry?.loading, 3)})`)
+                  .join(", ");
+                return (
+                  <tr key={`${row?.component || "component"}-${index}`}>
+                    <td>{String(row?.component || "n/a")}</td>
+                    <td>{formatPercent(row?.explained_variance_ratio)}</td>
+                    <td>{strongest || "n/a"}</td>
+                    <td>{positive || "n/a"}</td>
+                    <td>{negative || "n/a"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
