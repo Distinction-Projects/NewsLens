@@ -11,9 +11,13 @@
     "e2e:smoke": "playwright test tests/e2e/news-smoke.spec.js"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.104.0",
     "next": "14.2.25",
+    "plotly.js-dist-min": "^3.5.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-plotly.js": "^2.6.0"
   },
   "devDependencies": {
     "@playwright/test": "1.54.2"

@@ -3,14 +3,36 @@ import Link from "next/link";
 export default function HomePage() {
   return (
     <main>
-      <h1>NewsLens Node Frontend (Starter)</h1>
+      <h1>NewsLens Node Frontend</h1>
       <p className="muted">
-        This is the initial split-architecture frontend. It consumes the FastAPI backend, while the Dash app remains unchanged.
+        This frontend consumes FastAPI endpoints while Dash routes are migrated over in stages.
       </p>
+
       <div className="panel">
-        <h2>Next Step</h2>
+        <h2>Available Pages</h2>
+        <ul>
+          <li>
+            <Link href="/evaluation">/evaluation</Link> model metrics by corpus
+          </li>
+          <li>
+            <Link href="/text">/text</Link> interactive sentiment analysis
+          </li>
+          <li>
+            <Link href="/about">/about</Link> project method and stack direction
+          </li>
+          <li>
+            <Link href="/news">/news</Link> migrated news analytics pages
+          </li>
+          <li>
+            <Link href="/supabase-test">/supabase-test</Link> Supabase connectivity check
+          </li>
+        </ul>
+      </div>
+
+      <div className="panel">
+        <h2>Migration State</h2>
         <p>
-          Open <Link href="/news">/news</Link> to verify live reads from FastAPI news endpoints.
+          Dash remains online for parity, but the new default path is FastAPI + Next.js.
         </p>
       </div>
     </main>

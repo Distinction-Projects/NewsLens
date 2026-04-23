@@ -1,5 +1,30 @@
 const { test, expect } = require("@playwright/test");
 
+const NEWS_ROUTE_EXPECTATIONS = [
+  { path: "/news/digest", heading: "News Digest" },
+  { path: "/news/stats", heading: "News Stats" },
+  { path: "/news/sources", heading: "News Sources" },
+  { path: "/news/lenses", heading: "News Lenses" },
+  { path: "/news/lens-matrix", heading: "News Lens Matrix" },
+  { path: "/news/lens-correlations", heading: "News Lens Correlations" },
+  { path: "/news/lens-pca", heading: "News Lens PCA" },
+  { path: "/news/source-differentiation", heading: "News Source Differentiation" },
+  { path: "/news/source-effects", heading: "News Source Effects" },
+  { path: "/news/score-lab", heading: "News Score Lab" },
+  { path: "/news/lens-explorer", heading: "News Lens Explorer" },
+  { path: "/news/lens-by-source", heading: "News Lens by Source" },
+  { path: "/news/lens-stability", heading: "News Lens Stability" },
+  { path: "/news/tags", heading: "News Tags" },
+  { path: "/news/source-tag-matrix", heading: "News Source Tag Matrix" },
+  { path: "/news/trends", heading: "News Trends" },
+  { path: "/news/scraped", heading: "News Scraped" },
+  { path: "/news/workflow-status", heading: "News Workflow Status" },
+  { path: "/news/data-quality", heading: "News Data Quality" },
+  { path: "/news/snapshot-compare", heading: "News Snapshot Compare" },
+  { path: "/news/raw-json", heading: "News Raw JSON" },
+  { path: "/news/integration", heading: "News Integration" }
+];
+
 test("news shell routes render", async ({ page, baseURL }) => {
   await page.goto(`${baseURL}/news`);
   await expect(page.getByRole("heading", { name: "News" })).toBeVisible();
@@ -10,15 +35,11 @@ test("news shell routes render", async ({ page, baseURL }) => {
   await expect(page).toHaveURL(/\/news\/digest$/);
   await expect(page.getByRole("heading", { name: "News Digest" })).toBeVisible();
 
-  await page.goto(`${baseURL}/news/stats`);
-  await expect(page.getByRole("heading", { name: "News Stats" })).toBeVisible();
-
-  await page.goto(`${baseURL}/news/sources`);
-  await expect(page.getByRole("heading", { name: "News Sources" })).toBeVisible();
-
-  for (const path of ["/news/lenses", "/news/tags", "/news/source-tag-matrix", "/news/trends", "/news/data-quality"]) {
+  for (const { path, heading } of NEWS_ROUTE_EXPECTATIONS) {
     await page.goto(`${baseURL}${path}`);
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(page.getByText("Live FastAPI data")).toBeVisible();
+    await expect(page.locator("details.news-page-intro summary")).toContainText("What this page does");
     await expect(page.getByRole("heading", { name: "Migration In Progress" })).toHaveCount(0);
   }
 });

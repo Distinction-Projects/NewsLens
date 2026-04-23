@@ -44,6 +44,23 @@
   - UI work: specific `src/pages/*` + `src/components/*` + page tests
   - deploy work: `.github/workflows` or `deploy/droplet`
 
+## Run safety (avoid stuck agent threads)
+- Never run interactive commands that can block for input.
+  - Avoid prompts for passwords, SSH host verification, confirmations, or editor sessions.
+  - Prefer explicit non-interactive flags (`--yes`, `-y`, `--no-input`, CI-style modes).
+- Prefer bounded commands with explicit limits.
+  - Use command options that cap runtime/work (sample sizes, max rows, explicit test subsets).
+  - Avoid unbounded loops/watchers unless explicitly requested.
+- If a task run appears stuck:
+  1. Attempt one normal cancel/stop action.
+  2. If cancel fails, abandon the run and start a new task/thread.
+  3. Re-run with tighter scope and stricter non-interactive flags.
+- For local troubleshooting, use hard reset tactics when needed:
+  - restart terminal session, reload IDE window, restart integration panel.
+- Keep prompts/tasks scoped and concrete to reduce runaway execution.
+
+See `CODEX_TASK_SAFETY.md` for the full stuck-run playbook and safe task template.
+
 ## Canonical commands
 - Setup/runtime:
   - `python3.11 -m venv .venv && source .venv/bin/activate`

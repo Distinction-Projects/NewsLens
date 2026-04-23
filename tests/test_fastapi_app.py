@@ -1,7 +1,9 @@
 import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.testclient import TestClient
 
 from src.api.fastapi_app import _parse_cors_origins, create_fastapi_app
 
@@ -35,6 +37,38 @@ class FastApiAppTests(unittest.TestCase):
         self.assertEqual(len(cors_layers), 1)
         self.assertEqual(cors_layers[0].kwargs.get("allow_origins"), ["https://frontend.example.com"])
         self.assertTrue(cors_layers[0].kwargs.get("allow_credentials"))
+
+    @patch("src.api.fastapi_app.database_health_snapshot")
+    def test_database_health_ok(self, mock_database_health_snapshot):
+        mock_database_health_snapshot.return_value = {
+            "status": "ok",
+            "configured": True,
+            "checked_at": "2026-01-01T00:00:00Z",
+            "latency_ms": 12.5,
+            "error": None,
+        }
+        client = TestClient(create_fastapi_app())
+        response = client.get("/health/database")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["data"]["status"], "ok")
+
+    @patch("src.api.fastapi_app.database_health_snapshot")
+    def test_database_health_error_returns_503(self, mock_database_health_snapshot):
+        mock_database_health_snapshot.return_value = {
+            "status": "error",
+            "configured": True,
+            "checked_at": "2026-01-01T00:00:00Z",
+            "latency_ms": None,
+            "error": "connection refused",
+        }
+        client = TestClient(create_fastapi_app())
+        response = client.get("/health/database")
+        self.assertEqual(response.status_code, 503)
+        payload = response.json()
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"], "connection refused")
 
 
 if __name__ == "__main__":

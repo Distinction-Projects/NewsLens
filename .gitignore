@@ -7,6 +7,9 @@ src/models/*.json
 NewsLens.code-workspace
 *.code-workspace
 .env
+.env.*
+!.env.example
+.tmp/
 node_modules/
 .next/
 dist/
