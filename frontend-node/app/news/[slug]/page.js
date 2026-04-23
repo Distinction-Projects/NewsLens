@@ -2039,6 +2039,7 @@ async function renderLensPca(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pca = asObject(derived.lens_pca);
+  const mds = asObject(derived.lens_mds);
   const explained = asArray(pca.explained_variance);
   const drivers = asArray(pca.variance_drivers);
   const centroids = asArray(pca.source_centroids);
@@ -2057,6 +2058,53 @@ async function renderLensPca(searchParams) {
       pc2: toNumber(row?.pc2)
     }))
     .filter((row) => row.pc1 !== null && row.pc2 !== null);
+  const pcaArticleRows = asArray(pca.article_points)
+    .map((row) => ({
+      title: String(row?.title || "Untitled"),
+      source: String(row?.source || "Unknown"),
+      strongestLens: String(row?.strongest_lens || "Unknown"),
+      publishedAt: String(row?.published_at || "Unknown"),
+      pc1: toNumber(row?.pc1),
+      pc2: toNumber(row?.pc2)
+    }))
+    .filter((row) => row.pc1 !== null && row.pc2 !== null);
+  const mdsArticleRows = asArray(mds.article_points)
+    .map((row) => ({
+      title: String(row?.title || "Untitled"),
+      source: String(row?.source || "Unknown"),
+      strongestLens: String(row?.strongest_lens || "Unknown"),
+      publishedAt: String(row?.published_at || "Unknown"),
+      mds1: toNumber(row?.mds1),
+      mds2: toNumber(row?.mds2)
+    }))
+    .filter((row) => row.mds1 !== null && row.mds2 !== null);
+  const mdsCentroidRows = asArray(mds.source_centroids)
+    .map((row) => ({
+      source: String(row?.source || "Unknown"),
+      mds1: toNumber(row?.mds1),
+      mds2: toNumber(row?.mds2)
+    }))
+    .filter((row) => row.mds1 !== null && row.mds2 !== null);
+  const mdsStress = toNumber(mds.stress);
+  const groupBySource = (rows) => {
+    const grouped = new Map();
+    for (const row of rows) {
+      const source = String(row?.source || "Unknown");
+      if (!grouped.has(source)) {
+        grouped.set(source, []);
+      }
+      grouped.get(source).push(row);
+    }
+    return Array.from(grouped.entries()).sort((a, b) => {
+      const sizeDelta = b[1].length - a[1].length;
+      if (sizeDelta !== 0) {
+        return sizeDelta;
+      }
+      return String(a[0]).localeCompare(String(b[0]));
+    });
+  };
+  const pcaGroupedRows = groupBySource(pcaArticleRows);
+  const mdsGroupedRows = groupBySource(mdsArticleRows);
 
   return (
     <>
@@ -2074,48 +2122,117 @@ async function renderLensPca(searchParams) {
 
       <div className="panel">
         <h3>PCA Visuals</h3>
-        {explainedRows.length === 0 && centroidRows.length === 0 ? (
+        {explainedRows.length === 0 &&
+        centroidRows.length === 0 &&
+        pcaArticleRows.length === 0 &&
+        mdsArticleRows.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="chart-grid">
-            <PlotlyChart
-              data={[
-                {
-                  type: "bar",
-                  x: explainedRows.map((row) => row.component),
-                  y: explainedRows.map((row) => (row.explained || 0) * 100),
-                  name: "Explained %",
-                  marker: { color: "#4fd1c5" }
-                },
-                {
-                  type: "scatter",
-                  mode: "lines+markers",
-                  x: explainedRows.map((row) => row.component),
-                  y: explainedRows.map((row) => (row.cumulative || 0) * 100),
-                  name: "Cumulative %",
-                  line: { color: "#7aa7ff" }
-                }
-              ]}
-              layout={{ title: "Explained Variance by Component", yaxis: { title: "Percent" } }}
-            />
-            <PlotlyChart
-              data={[
-                {
-                  type: "scatter",
-                  mode: "markers+text",
-                  x: centroidRows.map((row) => row.pc1),
-                  y: centroidRows.map((row) => row.pc2),
-                  text: centroidRows.map((row) => row.source),
-                  textposition: "top center",
-                  marker: {
-                    size: centroidRows.map((row) => Math.max(8, Math.min(28, 6 + Math.sqrt(row.count || 0) * 2))),
-                    color: "#fd7e14",
-                    opacity: 0.8
+          <div>
+            <div style={{ marginBottom: "12px" }}>
+              <PlotlyChart
+                data={[
+                  {
+                    type: "bar",
+                    x: explainedRows.map((row) => row.component),
+                    y: explainedRows.map((row) => (row.explained || 0) * 100),
+                    name: "Explained %",
+                    marker: { color: "#4fd1c5" }
+                  },
+                  {
+                    type: "scatter",
+                    mode: "lines+markers",
+                    x: explainedRows.map((row) => row.component),
+                    y: explainedRows.map((row) => (row.cumulative || 0) * 100),
+                    name: "Cumulative %",
+                    line: { color: "#7aa7ff" }
                   }
-                }
-              ]}
-              layout={{ title: "Source Centroids in PC1/PC2 Space", xaxis: { title: "PC1" }, yaxis: { title: "PC2" } }}
-            />
+                ]}
+                layout={{ title: "Explained Variance by Component", yaxis: { title: "Percent" } }}
+              />
+            </div>
+            <div style={{ marginBottom: "12px" }}>
+              <PlotlyChart
+                data={[
+                  ...pcaGroupedRows.map(([source, rows]) => ({
+                    type: "scatter",
+                    mode: "markers",
+                    name: source,
+                    x: rows.map((row) => row.pc1),
+                    y: rows.map((row) => row.pc2),
+                    text: rows.map((row) => row.title),
+                    customdata: rows.map((row) => [row.source, row.strongestLens, row.publishedAt]),
+                    hovertemplate:
+                      "Title: %{text}<br>" +
+                      "PC1: %{x:.3f}<br>" +
+                      "PC2: %{y:.3f}<br>" +
+                      "Source: %{customdata[0]}<br>" +
+                      "Strongest Lens: %{customdata[1]}<br>" +
+                      "Published: %{customdata[2]}<extra></extra>",
+                    marker: { size: 8, opacity: 0.75 }
+                  })),
+                  ...(centroidRows.length > 0
+                    ? [
+                        {
+                          type: "scatter",
+                          mode: "markers+text",
+                          name: "Source Centroids",
+                          x: centroidRows.map((row) => row.pc1),
+                          y: centroidRows.map((row) => row.pc2),
+                          text: centroidRows.map((row) => row.source),
+                          textposition: "top center",
+                          hovertemplate: "Source: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>",
+                          marker: { symbol: "x", size: 12, color: "#111111" }
+                        }
+                      ]
+                    : [])
+                ]}
+                layout={{ title: "Article Distribution in PC1/PC2 Space", xaxis: { title: "PC1" }, yaxis: { title: "PC2" } }}
+              />
+            </div>
+            <div>
+              <PlotlyChart
+                data={[
+                  ...mdsGroupedRows.map(([source, rows]) => ({
+                    type: "scatter",
+                    mode: "markers",
+                    name: source,
+                    x: rows.map((row) => row.mds1),
+                    y: rows.map((row) => row.mds2),
+                    text: rows.map((row) => row.title),
+                    customdata: rows.map((row) => [row.source, row.strongestLens, row.publishedAt]),
+                    hovertemplate:
+                      "Title: %{text}<br>" +
+                      "MDS1: %{x:.3f}<br>" +
+                      "MDS2: %{y:.3f}<br>" +
+                      "Source: %{customdata[0]}<br>" +
+                      "Strongest Lens: %{customdata[1]}<br>" +
+                      "Published: %{customdata[2]}<extra></extra>",
+                    marker: { size: 8, opacity: 0.75 }
+                  })),
+                  ...(mdsCentroidRows.length > 0
+                    ? [
+                        {
+                          type: "scatter",
+                          mode: "markers+text",
+                          name: "Source Centroids",
+                          x: mdsCentroidRows.map((row) => row.mds1),
+                          y: mdsCentroidRows.map((row) => row.mds2),
+                          text: mdsCentroidRows.map((row) => row.source),
+                          textposition: "top center",
+                          hovertemplate: "Source: %{text}<br>MDS1: %{x:.3f}<br>MDS2: %{y:.3f}<extra></extra>",
+                          marker: { symbol: "x", size: 12, color: "#111111" }
+                        }
+                      ]
+                    : [])
+                ]}
+                layout={{
+                  title: `Article Distribution in MDS1/MDS2 Space${mdsStress !== null ? ` (Stress: ${mdsStress.toFixed(3)})` : ""}`,
+                  xaxis: { title: "MDS1" },
+                  yaxis: { title: "MDS2" }
+                }}
+              />
+            </div>
           </div>
         )}
       </div>
