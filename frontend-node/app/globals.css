@@ -269,3 +269,50 @@ code {
   background: #0f1724;
   overflow: hidden;
 }
+
+.workflow-diagram {
+  border: 1px solid #2a3a56;
+  border-radius: 10px;
+  background: #101a29;
+  padding: 14px;
+}
+
+.workflow-row {
+  display: flex;
+  justify-content: center;
+}
+
+.workflow-box {
+  width: min(100%, 860px);
+  border: 1px solid #385173;
+  border-radius: 10px;
+  background: #142236;
+  padding: 12px;
+}
+
+.workflow-box p {
+  margin-bottom: 0;
+}
+
+.workflow-arrow {
+  text-align: center;
+  color: #8fb1e3;
+  font-size: 1.2rem;
+  margin: 7px 0;
+}
+
+.workflow-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-lane {
+  display: flex;
+}
+
+@media (max-width: 840px) {
+  .workflow-split {
+    grid-template-columns: 1fr;
+  }
+}
