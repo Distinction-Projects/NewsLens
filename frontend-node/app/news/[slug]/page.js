@@ -933,10 +933,29 @@ async function renderSourceTagMatrix(searchParams) {
   const derived = getStatsDerived(payload);
   const chartAggregates = asObject(derived.chart_aggregates);
   const sourceTagViews = asObject(derived.source_tag_views);
-  const sourceLabels = asArray(sourceTagViews.source_labels).slice(0, 10);
-  const tagLabels = asArray(sourceTagViews.tag_labels).slice(0, 10);
+  const summary = asObject(sourceTagViews.summary);
+  const topSources = queryLimit(searchParams, "top_sources", 10, 3, 30);
+  const topTags = queryLimit(searchParams, "top_tags", 15, 5, 40);
+  const topN = queryLimit(searchParams, "top_n", 10, 3, 30);
+  const sourceRows = asArray(sourceTagViews.source_rows);
+  const sourceSlice = sourceRows.slice(0, topSources);
+  const sourceLabels = sourceSlice.map((row) => String(row?.source || "Unknown")).filter(Boolean);
+  const tagLabels = asArray(sourceTagViews.tag_labels).slice(0, topTags).filter(Boolean);
   const matrixRows = asArray(chartAggregates.source_tag_matrix);
-  const sourceTotals = asArray(chartAggregates.source_tag_totals).slice(0, 12);
+  const sourceTotals = sourceSlice.map((row) => ({
+    source: String(row?.source || "Unknown"),
+    count: toNumber(row?.count) || 0
+  }));
+  const sourceParam = String(getQueryParam(searchParams, "source") || "").trim();
+  const selectedSource = sourceLabels.includes(sourceParam) ? sourceParam : sourceLabels[0] || "";
+  const selectedSourceRow = sourceSlice.find((row) => String(row?.source || "") === selectedSource) || null;
+  const selectedSourceTags = asArray(selectedSourceRow?.tags)
+    .filter((row) => String(row?.tag || "").trim() && String(row?.tag || "").trim().toLowerCase() !== "general")
+    .slice(0, topN);
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
+  const matrixRowsCount = toNumber(summary.matrix_rows) ?? matrixRows.length;
+  const nonZeroCells = toNumber(summary.non_zero_cells) ?? matrixRows.filter((row) => (toNumber(row?.count) || 0) > 0).length;
   const lookup = new Map(
     matrixRows.map((row) => [pairKey(row.source, row.tag), toNumber(row.count) || 0])
   );
@@ -944,7 +963,60 @@ async function renderSourceTagMatrix(searchParams) {
 
   return (
     <>
-      <DataModeControls searchParams={searchParams} />
+      <DataModeControls
+        searchParams={searchParams}
+        extraParams={{
+          top_sources: topSources,
+          top_tags: topTags,
+          top_n: topN,
+          source: selectedSource
+        }}
+      />
+      <div className="panel">
+        <h3>Source Tag Filters</h3>
+        <form method="get">
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={dataMode === "snapshot" ? snapshotDateValue : ""} />
+          <div className="filter-grid">
+            <label>
+              Top Sources
+              <input type="number" name="top_sources" min="3" max="30" defaultValue={topSources} />
+            </label>
+            <label>
+              Top Tags
+              <input type="number" name="top_tags" min="5" max="40" defaultValue={topTags} />
+            </label>
+            <label>
+              Selected Source
+              <select name="source" defaultValue={selectedSource}>
+                {sourceLabels.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Selected Source Top Tags
+              <input type="number" name="top_n" min="3" max="30" defaultValue={topN} />
+            </label>
+          </div>
+          <button type="submit" className="news-nav-link" style={{ marginTop: "12px" }}>
+            Apply
+          </button>
+        </form>
+      </div>
+
+      <div className="panel">
+        <h3>Source Tag Summary</h3>
+        <div className="stats-grid">
+          <StatCard label="Sources in View" value={formatNumber(sourceLabels.length)} />
+          <StatCard label="Tags in View" value={formatNumber(tagLabels.length)} />
+          <StatCard label="Non-zero Cells" value={formatNumber(nonZeroCells)} />
+          <StatCard label="Matrix Rows" value={formatNumber(matrixRowsCount)} />
+        </div>
+      </div>
+
       <div className="panel">
         <h3>Matrix Visuals</h3>
         {sourceLabels.length === 0 || tagLabels.length === 0 ? (
@@ -977,6 +1049,26 @@ async function renderSourceTagMatrix(searchParams) {
           </div>
         )}
       </div>
+
+      <div className="panel">
+        <h3>Selected Source Top Tags</h3>
+        {selectedSourceTags.length === 0 ? (
+          <EmptyState children="No tags are available for the selected source." />
+        ) : (
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                orientation: "h",
+                x: selectedSourceTags.map((row) => toNumber(row?.count) || 0),
+                y: selectedSourceTags.map((row) => String(row?.tag || "")),
+                marker: { color: "#198754" }
+              }
+            ]}
+            layout={{ title: `Top Tags for ${selectedSource}`, yaxis: { autorange: "reversed" }, xaxis: { title: "Count" } }}
+          />
+        )}
+      </div>
       <div className="panel">
         <h3>Source x Tag Matrix</h3>
         <p className="muted">Showing the top {formatNumber(sourceLabels.length)} sources and top {formatNumber(tagLabels.length)} tags.</p>
@@ -1005,6 +1097,30 @@ async function renderSourceTagMatrix(searchParams) {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Selected Source Tag Table</h3>
+        {selectedSourceTags.length === 0 ? (
+          <EmptyState children="No tags are available for the selected source." />
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedSourceTags.map((row) => (
+                <tr key={String(row?.tag || "")}>
+                  <td>{String(row?.tag || "")}</td>
+                  <td>{formatNumber(toNumber(row?.count) || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
