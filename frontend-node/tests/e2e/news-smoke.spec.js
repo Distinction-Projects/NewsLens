@@ -43,3 +43,21 @@ test("news shell routes render", async ({ page, baseURL }) => {
     await expect(page.getByRole("heading", { name: "Migration In Progress" })).toHaveCount(0);
   }
 });
+
+test("news scraped route shows raw payload explorer controls", async ({ page, baseURL }) => {
+  await page.goto(`${baseURL}/news/scraped`);
+  await expect(page.getByRole("heading", { name: "News Scraped" })).toBeVisible();
+  const filtersHeading = page.getByRole("heading", { name: "Scraped Filters" });
+  if ((await filtersHeading.count()) > 0) {
+    await expect(filtersHeading).toBeVisible();
+    await expect(page.locator('input[name="source"]')).toBeVisible();
+    await expect(page.locator('input[name="limit"]')).toBeVisible();
+    await expect(page.locator('select[name="only"]')).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apply" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Refresh" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Raw Scraped Article Data" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Grouped by Source" })).toBeVisible();
+  } else {
+    await expect(page.getByRole("heading", { name: "API Error" })).toBeVisible();
+  }
+});

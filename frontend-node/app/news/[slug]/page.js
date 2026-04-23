@@ -154,6 +154,17 @@ function selectedTopicFromQuery(searchParams, topics) {
   return topics.find((topic) => String(topic?.topic || "") === requested) || topics[0] || null;
 }
 
+function selectSourceReliabilityView(sourceReliability, mode, selectedTopic) {
+  const reliability = asObject(sourceReliability);
+  const pooled = asObject(reliability.pooled);
+  if (mode !== "within-topic" || !selectedTopic) {
+    return pooled;
+  }
+  const topicRows = asArray(reliability.topics);
+  const match = topicRows.find((row) => String(row?.topic || "") === selectedTopic);
+  return asObject(match?.assessment) || pooled;
+}
+
 function buildQueryHref(paramsObject) {
   const queryParams = new URLSearchParams();
   for (const [key, value] of Object.entries(paramsObject || {})) {
@@ -166,8 +177,9 @@ function buildQueryHref(paramsObject) {
   return query ? `?${query}` : "?";
 }
 
-function analysisModeQueryHref(mode, topic, dataMode, snapshot) {
+function analysisModeQueryHref(mode, topic, dataMode, snapshot, extraParams = {}) {
   return buildQueryHref({
+    ...extraParams,
     mode,
     topic,
     data_mode: dataMode,
@@ -1797,6 +1809,17 @@ function sourceCountsToRows(sourceCountsValue) {
     .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
 }
 
+function normalizedSourceEffectsFilter(searchParams) {
+  const allowedMaxLens = new Set([5, 10, 15, 20]);
+  const allowedQThreshold = new Set([1.0, 0.1, 0.05, 0.01]);
+  const maxLensesRaw = queryLimit(searchParams, "max_lenses", 10, 1, 20);
+  const qThresholdRaw = toNumber(getQueryParam(searchParams, "q_threshold"));
+  return {
+    maxLenses: allowedMaxLens.has(maxLensesRaw) ? maxLensesRaw : 10,
+    qThreshold: qThresholdRaw !== null && allowedQThreshold.has(qThresholdRaw) ? qThresholdRaw : 1.0
+  };
+}
+
 async function renderLensMatrix(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
@@ -2382,19 +2405,37 @@ async function renderSourceDifferentiation(searchParams) {
   );
 }
 
-function SourceEffectsBlock({ title, effects, confounded = false }) {
+function SourceEffectsBlock({ title, effects, confounded = false, maxLenses, qThreshold, selectedLens, reliability }) {
   const data = asObject(effects);
   const rows = asArray(data.rows);
+  const filteredRows = rows
+    .filter((row) => {
+      if (qThreshold >= 1.0) {
+        return true;
+      }
+      const pPermFdr = toNumber(row?.p_perm_fdr);
+      const pPermRaw = toNumber(row?.p_perm_raw);
+      const pPerm = toNumber(row?.p_perm);
+      const candidate = pPermFdr !== null ? pPermFdr : pPermRaw !== null ? pPermRaw : pPerm;
+      return candidate !== null && candidate <= qThreshold;
+    })
+    .slice(0, maxLenses);
+  const selectedLensRow =
+    filteredRows.find((row) => String(row?.lens || "") === selectedLens) || filteredRows[0] || null;
+  const selectedLensName = selectedLensRow ? String(selectedLensRow?.lens || "") : "";
   const multipleTesting = asObject(data.multiple_testing);
-  const etaRows = rows
+  const reliabilityView = asObject(reliability);
+  const reliabilityFlags = asArray(reliabilityView.flags);
+  const etaRows = filteredRows
     .map((row) => ({
       lens: String(row?.lens || ""),
       etaSq: toNumber(row?.eta_sq),
       sourceMeans: asObject(row?.source_means)
     }))
-    .filter((row) => row.lens && row.etaSq !== null)
-    .slice(0, 20);
-  const focusLens = etaRows[0];
+    .filter((row) => row.lens && row.etaSq !== null);
+  const focusLens = selectedLensName
+    ? etaRows.find((row) => row.lens === selectedLensName) || etaRows[0]
+    : etaRows[0];
   const focusLensMeanRows = focusLens
     ? Object.entries(focusLens.sourceMeans)
         .map(([source, mean]) => ({
@@ -2404,16 +2445,42 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
         .filter((row) => row.mean !== null)
         .sort((a, b) => (b.mean || 0) - (a.mean || 0))
     : [];
+  const bestQValue = Math.min(
+    ...filteredRows
+      .map((row) => toNumber(row?.p_perm_fdr))
+      .filter((value) => value !== null)
+      .map((value) => Number(value))
+  );
+  const bestRawPValue = Math.min(
+    ...filteredRows
+      .map((row) => toNumber(row?.p_perm_raw))
+      .filter((value) => value !== null)
+      .map((value) => Number(value))
+  );
+  const reliabilityScore = toNumber(reliabilityView.score);
+  const thresholdLabel = qThreshold >= 1.0 ? "All" : formatDecimal(qThreshold, 2);
   return (
     <div className="panel">
       <h3>{title}</h3>
       {confounded ? <p className="muted">Label: topic-confounded</p> : null}
       <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
+      <p className="muted">
+        Rows shown: {formatNumber(filteredRows.length)} | q-threshold: {thresholdLabel}
+        {reliabilityScore !== null
+          ? ` | Reliability: ${String(reliabilityView.tier || "n/a")} (${reliabilityScore.toFixed(2)})`
+          : ""}
+        {reliabilityFlags.length > 0 ? ` | Reliability flags: ${formatNumber(reliabilityFlags.length)}` : ""}
+      </p>
       <div className="stats-grid">
-        <StatCard label="Rows" value={formatNumber(rows.length)} />
+        <StatCard label="Rows" value={formatNumber(filteredRows.length)} />
         <StatCard label="Permutations" value={formatNumber(data.permutations)} />
         <StatCard label="Multiple Testing" value={multipleTesting.method || "n/a"} />
         <StatCard label="Tests" value={formatNumber(multipleTesting.n_tests)} />
+        <StatCard label="Best q-value (FDR)" value={Number.isFinite(bestQValue) ? formatDecimal(bestQValue, 4) : "n/a"} />
+        <StatCard
+          label="Best raw p-value"
+          value={Number.isFinite(bestRawPValue) ? formatDecimal(bestRawPValue, 4) : "n/a"}
+        />
       </div>
       {etaRows.length > 0 ? (
         <div className="chart-grid">
@@ -2439,19 +2506,21 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
               }
             ]}
             layout={{
-              title: `Source Means for Top Lens: ${focusLens?.lens || "n/a"}`,
+              title: `Source Means for ${focusLens?.lens || "selected lens"}`,
               yaxis: { title: "Mean Lens Percent" }
             }}
           />
         </div>
       ) : null}
-      {rows.length === 0 ? (
+      {filteredRows.length === 0 ? (
         <EmptyState />
       ) : (
         <table className="news-table compact">
           <thead>
             <tr>
               <th>Lens</th>
+              <th>n</th>
+              <th>Sources</th>
               <th>F</th>
               <th>eta²</th>
               <th>p_perm_raw</th>
@@ -2461,11 +2530,13 @@ function SourceEffectsBlock({ title, effects, confounded = false }) {
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 30).map((row) => (
+            {filteredRows.map((row) => (
               <tr key={String(row.lens || "unknown-lens")}>
                 <td>{row.lens || "Unknown"}</td>
+                <td>{formatNumber(row.n)}</td>
+                <td>{formatNumber(row.n_sources)}</td>
                 <td>{formatDecimal(row.f_stat, 3)}</td>
-                <td>{formatDecimal(row.eta_sq, 3)}</td>
+                <td>{formatDecimal(row.eta_sq, 4)}</td>
                 <td>{formatDecimal(row.p_perm_raw, 4)}</td>
                 <td>{formatDecimal(row.p_perm_fdr, 4)}</td>
                 <td>{formatDecimal(row.source_gap, 2)}</td>
@@ -2485,6 +2556,7 @@ async function renderSourceEffects(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const pooled = asObject(derived.source_lens_effects);
+  const sourceReliability = asObject(derived.source_reliability);
   const topicControl = asObject(derived.source_topic_control);
   const topics = asArray(topicControl.topics);
   const mode = normalizeMode(searchParams);
@@ -2495,22 +2567,44 @@ async function renderSourceEffects(searchParams) {
   const selectedTopicEffects = asObject(selectedTopic?.source_lens_effects);
   const selectedTopicReason = String(selectedTopicEffects.reason || "");
   const isTopicUnavailable = String(selectedTopicEffects.status || "") !== "ok";
+  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName);
+  const { maxLenses, qThreshold } = normalizedSourceEffectsFilter(searchParams);
+  const selectedLens = getQueryParam(searchParams, "lens");
+  const sourceEffectsExtraParams = {
+    max_lenses: maxLenses,
+    q_threshold: qThreshold,
+    lens: selectedLens
+  };
+  const activeEffects = mode === "pooled" ? pooled : selectedTopicEffects;
+  const availableLensOptions = asArray(activeEffects.rows)
+    .map((row) => String(row?.lens || "").trim())
+    .filter((lens) => lens);
+  const selectedLensValue = availableLensOptions.includes(selectedLens) ? selectedLens : availableLensOptions[0] || "";
 
   return (
     <>
-      <DataModeControls searchParams={searchParams} extraParams={{ mode, topic: selectedTopicName }} />
+      <DataModeControls
+        searchParams={searchParams}
+        extraParams={{ mode, topic: selectedTopicName, ...sourceEffectsExtraParams }}
+      />
       <div className="panel">
         <h3>Analysis Mode</h3>
         <div className="top-nav-links">
           <a
             className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("pooled", selectedTopicName, dataMode, snapshotDateValue)}
+            href={analysisModeQueryHref("pooled", selectedTopicName, dataMode, snapshotDateValue, sourceEffectsExtraParams)}
           >
             Pooled (topic-confounded)
           </a>
           <a
             className={`news-nav-link ${mode === "within-topic" ? "active-link" : ""}`}
-            href={analysisModeQueryHref("within-topic", selectedTopicName, dataMode, snapshotDateValue)}
+            href={analysisModeQueryHref(
+              "within-topic",
+              selectedTopicName,
+              dataMode,
+              snapshotDateValue,
+              sourceEffectsExtraParams
+            )}
           >
             Within-topic
           </a>
@@ -2528,7 +2622,13 @@ async function renderSourceEffects(searchParams) {
                   <a
                     key={topicName}
                     className={`news-nav-link ${selected ? "active-link" : ""}`}
-                    href={analysisModeQueryHref("within-topic", topicName, dataMode, snapshotDateValue)}
+                    href={analysisModeQueryHref(
+                      "within-topic",
+                      topicName,
+                      dataMode,
+                      snapshotDateValue,
+                      sourceEffectsExtraParams
+                    )}
                   >
                     {topicName}
                   </a>
@@ -2538,11 +2638,73 @@ async function renderSourceEffects(searchParams) {
           </>
         ) : null}
       </div>
+      <div className="panel">
+        <h3>Effect Filters</h3>
+        <form method="get" className="inline-form-grid">
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={snapshotDateValue} />
+          <input type="hidden" name="mode" value={mode} />
+          <input type="hidden" name="topic" value={selectedTopicName} />
+          <label className="muted" htmlFor="source-effects-max-lenses">
+            Lenses shown
+          </label>
+          <select id="source-effects-max-lenses" name="max_lenses" defaultValue={String(maxLenses)}>
+            {[5, 10, 15, 20].map((value) => (
+              <option key={value} value={String(value)}>
+                {value}
+              </option>
+            ))}
+          </select>
+          <label className="muted" htmlFor="source-effects-q-threshold">
+            Max q-value (FDR)
+          </label>
+          <select id="source-effects-q-threshold" name="q_threshold" defaultValue={String(qThreshold)}>
+            <option value="1">All</option>
+            <option value="0.1">0.10</option>
+            <option value="0.05">0.05</option>
+            <option value="0.01">0.01</option>
+          </select>
+          <label className="muted" htmlFor="source-effects-lens">
+            Lens detail
+          </label>
+          <select id="source-effects-lens" name="lens" defaultValue={selectedLensValue} disabled={availableLensOptions.length === 0}>
+            {availableLensOptions.length === 0 ? (
+              <option value="">No lens rows</option>
+            ) : (
+              availableLensOptions.slice(0, 50).map((lens) => (
+                <option key={lens} value={lens}>
+                  {lens}
+                </option>
+              ))
+            )}
+          </select>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button type="submit" className="news-nav-link active-link">
+              Apply
+            </button>
+          </div>
+        </form>
+      </div>
 
       {mode === "pooled" ? (
-        <SourceEffectsBlock title="Pooled Source Effects" effects={pooled} confounded />
+        <SourceEffectsBlock
+          title="Pooled Source Effects"
+          effects={pooled}
+          confounded
+          maxLenses={maxLenses}
+          qThreshold={qThreshold}
+          selectedLens={selectedLensValue}
+          reliability={reliabilityView}
+        />
       ) : selectedTopic ? (
-        <SourceEffectsBlock title={`Within-Topic Source Effects: ${selectedTopicName}`} effects={selectedTopicEffects} />
+        <SourceEffectsBlock
+          title={`Within-Topic Source Effects: ${selectedTopicName}`}
+          effects={selectedTopicEffects}
+          maxLenses={maxLenses}
+          qThreshold={qThreshold}
+          selectedLens={selectedLensValue}
+          reliability={reliabilityView}
+        />
       ) : (
         <div className="panel">
           <h3>Within-Topic Source Effects</h3>
@@ -3125,21 +3287,21 @@ async function renderScraped(searchParams) {
   const payload = await fetchNewsJson(`/api/news/digest?${digestParams.toString()}`, forceRefresh ? { cache: "no-store" } : {});
   const rows = asArray(payload?.data);
   const meta = asObject(payload?.meta);
-  const filteredRows = onlyScraped
-    ? rows.filter((row) => {
-        const scraped = asObject(row?.scraped);
-        return Object.keys(scraped).length > 0;
-      })
-    : rows;
+  const hasScrapedPayload = (row) => {
+    const scraped = asObject(row?.scraped);
+    return Object.keys(scraped).length > 0;
+  };
+  const sourceNameForRow = (row) => row?.source_name || asObject(row?.source).name || asObject(row?.source).id || "Unknown source";
+  const filteredRows = onlyScraped ? rows.filter((row) => hasScrapedPayload(row)) : rows;
   const grouped = new Map();
   for (const row of filteredRows) {
-    const source = row?.source_name || asObject(row?.source).name || "Unknown";
+    const source = sourceNameForRow(row);
     if (!grouped.has(source)) {
       grouped.set(source, []);
     }
     grouped.get(source).push(row);
   }
-  const groups = Array.from(grouped.entries()).sort((a, b) => b[1].length - a[1].length);
+  const groups = Array.from(grouped.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   const refreshHref = buildQueryHref({
     data_mode: dataMode,
     snapshot: dataMode === "snapshot" ? selectedSnapshotDateValue(searchParams) : "",
@@ -3150,10 +3312,8 @@ async function renderScraped(searchParams) {
   });
   const generatedAt = String(meta?.generated_at || "n/a");
   const sourceMode = String(meta?.source_mode || "unknown");
-  const withPayloadCount = rows.filter((row) => {
-    const scraped = asObject(row?.scraped);
-    return Object.keys(scraped).length > 0;
-  }).length;
+  const withPayloadCount = rows.filter((row) => hasScrapedPayload(row)).length;
+  const trailingStatus = onlyScraped ? "filtered to records with scraped payload" : "showing all records";
 
   return (
     <>
@@ -3190,6 +3350,9 @@ async function renderScraped(searchParams) {
       </div>
       <div className="panel">
         <h3>Status</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Records loaded: {formatNumber(rows.length)}; {trailingStatus}
+        </p>
         <div className="stats-grid">
           <StatCard label="Records Loaded" value={formatNumber(rows.length)} />
           <StatCard label="Source Mode" value={sourceMode} />
@@ -3198,9 +3361,9 @@ async function renderScraped(searchParams) {
         </div>
       </div>
       <div className="panel">
-        <h3>Raw Scraped Digest</h3>
+        <h3>Raw Scraped Article Data</h3>
         <div className="stats-grid">
-          <StatCard label="Records Loaded" value={formatNumber(filteredRows.length)} />
+          <StatCard label="Records Shown" value={formatNumber(filteredRows.length)} />
           <StatCard label="Sources" value={formatNumber(groups.length)} />
           <StatCard label="With Scraped Payload" value={formatNumber(withPayloadCount)} />
         </div>
@@ -3209,7 +3372,7 @@ async function renderScraped(searchParams) {
       <div className="panel">
         <h3>Grouped by Source</h3>
         {groups.length === 0 ? (
-          <EmptyState />
+          <p className="muted">No records match the current filters.</p>
         ) : (
           <div>
             {groups.slice(0, 25).map(([source, sourceRows]) => (
@@ -3222,18 +3385,28 @@ async function renderScraped(searchParams) {
                     <div key={`${String(row?.id || row?.link || row?.title || "article")}-${index}`} className="panel">
                       <p style={{ marginTop: 0, marginBottom: "6px" }}>
                         <strong>{row?.title || "Untitled"}</strong>
+                        <span className="muted" style={{ marginLeft: "8px", fontSize: "0.85em" }}>
+                          [{String(row?.id || "no-id")}]
+                        </span>
                       </p>
                       <p className="muted" style={{ marginTop: 0 }}>
-                        {String(row?.published_at || row?.published || "Unknown date")}
+                        Published: {String(row?.published_at || row?.published || "Unknown date")} | Has scraped:{" "}
+                        {hasScrapedPayload(row) ? "yes" : "no"}
                       </p>
                       {row?.link ? (
-                        <p style={{ marginTop: 0, marginBottom: "8px" }}>
-                          <a href={row.link} target="_blank" rel="noreferrer">
+                        <p style={{ marginTop: 0, marginBottom: "8px", display: "inline-block" }}>
+                          <a className="news-nav-link" href={row.link} target="_blank" rel="noreferrer">
                             Open article
                           </a>
                         </p>
-                      ) : null}
-                      <pre className="json-preview">{JSON.stringify(asObject(row?.scraped), null, 2)}</pre>
+                      ) : (
+                        <p className="muted" style={{ marginTop: 0, marginBottom: "8px" }}>
+                          No link
+                        </p>
+                      )}
+                      <pre className="json-preview">
+                        {hasScrapedPayload(row) ? JSON.stringify(asObject(row?.scraped), null, 2) : "No scraped payload."}
+                      </pre>
                     </div>
                   ))}
                 </div>
