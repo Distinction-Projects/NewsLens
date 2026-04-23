@@ -3688,25 +3688,81 @@ async function renderLensStability(searchParams) {
   const lensViews = asObject(derived.lens_views);
   const stabilityRows = asArray(lensViews.stability_rows);
   const summary = asObject(lensViews.summary);
+  const metricOptions = {
+    stddev: "Std Dev",
+    cv_percent: "Coeff. of Variation",
+    source_gap: "Source Mean Gap",
+    range: "Value Range"
+  };
+  const metricParam = String(getQueryParam(searchParams, "metric") || "stddev");
+  const metric = Object.prototype.hasOwnProperty.call(metricOptions, metricParam) ? metricParam : "stddev";
+  const topN = queryLimit(searchParams, "top_n", 10, 3, 30);
+  const rankedRows = [...stabilityRows]
+    .map((row) => ({
+      lens: String(row?.lens || "Unknown"),
+      count: toNumber(row?.count),
+      mean: toNumber(row?.mean),
+      stddev: toNumber(row?.stddev),
+      cvPercent: toNumber(row?.cv_percent),
+      sourceGap: toNumber(row?.source_gap),
+      range: toNumber(row?.range)
+    }))
+    .sort((a, b) => {
+      const aValue = metric === "cv_percent" ? a.cvPercent : metric === "source_gap" ? a.sourceGap : metric === "range" ? a.range : a.stddev;
+      const bValue = metric === "cv_percent" ? b.cvPercent : metric === "source_gap" ? b.sourceGap : metric === "range" ? b.range : b.stddev;
+      return (bValue || 0) - (aValue || 0);
+    });
+  const topRankedRows = rankedRows.slice(0, topN);
   const scatterRows = stabilityRows
     .map((row) => ({
       lens: String(row?.lens || "Unknown"),
       mean: toNumber(row?.mean),
-      stddev: toNumber(row?.stddev)
+      stddev: toNumber(row?.stddev),
+      sourceGap: toNumber(row?.source_gap) || 0,
+      count: Math.max(6, Math.min(48, (toNumber(row?.count) || 0) * 1.5))
     }))
     .filter((row) => row.mean !== null && row.stddev !== null);
-  const sourceGapRows = stabilityRows
-    .map((row) => ({
-      lens: String(row?.lens || "Unknown"),
-      sourceGap: toNumber(row?.source_gap)
-    }))
-    .filter((row) => row.sourceGap !== null)
-    .sort((a, b) => (b.sourceGap || 0) - (a.sourceGap || 0))
-    .slice(0, 20);
+  const rankedMetricRows = topRankedRows
+    .map((row) => {
+      const value = metric === "cv_percent" ? row.cvPercent : metric === "source_gap" ? row.sourceGap : metric === "range" ? row.range : row.stddev;
+      return {
+        lens: row.lens,
+        value
+      };
+    })
+    .filter((row) => row.value !== null);
+  const dataMode = normalizeDataMode(searchParams);
+  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
 
   return (
     <>
       <DataModeControls searchParams={searchParams} />
+      <div className="panel">
+        <h3>Stability Filters</h3>
+        <form method="get" className="inline-form-grid">
+          <input type="hidden" name="data_mode" value={dataMode} />
+          <input type="hidden" name="snapshot" value={snapshotDateValue} />
+          <label className="muted" htmlFor="lens-stability-metric">
+            Ranking metric
+          </label>
+          <select id="lens-stability-metric" name="metric" defaultValue={metric}>
+            {Object.entries(metricOptions).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <label className="muted" htmlFor="lens-stability-topn">
+            Top N lenses
+          </label>
+          <input id="lens-stability-topn" name="top_n" type="number" min={3} max={30} step={1} defaultValue={topN} />
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <button type="submit" className="news-nav-link active-link">
+              Apply
+            </button>
+          </div>
+        </form>
+      </div>
       <div className="panel">
         <h3>Stability Summary</h3>
         <div className="stats-grid">
@@ -3719,7 +3775,7 @@ async function renderLensStability(searchParams) {
 
       <div className="panel">
         <h3>Stability Visuals</h3>
-        {scatterRows.length === 0 && sourceGapRows.length === 0 ? (
+        {scatterRows.length === 0 && rankedMetricRows.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="chart-grid">
@@ -3732,7 +3788,13 @@ async function renderLensStability(searchParams) {
                   y: scatterRows.map((row) => row.stddev),
                   text: scatterRows.map((row) => row.lens),
                   textposition: "top center",
-                  marker: { color: "#4fd1c5", size: 10 }
+                  marker: {
+                    color: scatterRows.map((row) => row.sourceGap),
+                    colorscale: "Viridis",
+                    showscale: true,
+                    colorbar: { title: "Source Gap" },
+                    size: scatterRows.map((row) => row.count)
+                  }
                 }
               ]}
               layout={{ title: "Lens Mean vs Std Dev", xaxis: { title: "Mean" }, yaxis: { title: "Std Dev" } }}
@@ -3742,12 +3804,15 @@ async function renderLensStability(searchParams) {
                 {
                   type: "bar",
                   orientation: "h",
-                  y: sourceGapRows.map((row) => row.lens).reverse(),
-                  x: sourceGapRows.map((row) => row.sourceGap || 0).reverse(),
-                  marker: { color: "#7aa7ff" }
+                  y: rankedMetricRows.map((row) => row.lens).reverse(),
+                  x: rankedMetricRows.map((row) => row.value || 0).reverse(),
+                  marker: { color: "#dc3545" }
                 }
               ]}
-              layout={{ title: "Top Source Gaps by Lens", xaxis: { title: "Source Gap" } }}
+              layout={{
+                title: `Top Lenses by ${metricOptions[metric]}`,
+                xaxis: { title: metricOptions[metric] }
+              }}
             />
           </div>
         )}
@@ -3755,7 +3820,7 @@ async function renderLensStability(searchParams) {
 
       <div className="panel">
         <h3>Lens Stability Table</h3>
-        {stabilityRows.length === 0 ? (
+        {topRankedRows.length === 0 ? (
           <EmptyState />
         ) : (
           <table className="news-table compact">
@@ -3771,14 +3836,14 @@ async function renderLensStability(searchParams) {
               </tr>
             </thead>
             <tbody>
-              {stabilityRows.slice(0, 30).map((row) => (
+              {topRankedRows.map((row) => (
                 <tr key={String(row.lens || "unknown")}>
                   <td>{row.lens || "Unknown"}</td>
                   <td>{formatNumber(row.count)}</td>
                   <td>{formatDecimal(row.mean, 2)}</td>
                   <td>{formatDecimal(row.stddev, 2)}</td>
-                  <td>{formatDecimal(row.cv_percent, 2)}</td>
-                  <td>{formatDecimal(row.source_gap, 2)}</td>
+                  <td>{formatDecimal(row.cvPercent, 2)}</td>
+                  <td>{formatDecimal(row.sourceGap, 2)}</td>
                   <td>{formatDecimal(row.range, 2)}</td>
                 </tr>
               ))}
