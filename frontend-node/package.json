@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "check:news-renderers": "node scripts/check-news-renderers.mjs",
     "start": "next start -p 3000",
     "lint": "next lint",
     "e2e:install-browsers": "playwright install chromium",

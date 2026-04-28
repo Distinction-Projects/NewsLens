@@ -116,6 +116,24 @@ export function queryLimit(searchParams, key, fallback, min = 1, max = 500) {
   return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }
 
+export function sourceCountsToRows(sourceCountsValue) {
+  if (Array.isArray(sourceCountsValue)) {
+    return sourceCountsValue
+      .map((row) => ({
+        source: String(row?.source || "Unknown"),
+        count: toNumber(row?.count) || 0
+      }))
+      .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
+  }
+  const sourceCounts = asObject(sourceCountsValue);
+  return Object.entries(sourceCounts)
+    .map(([source, count]) => ({
+      source: String(source || "Unknown"),
+      count: toNumber(count) || 0
+    }))
+    .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
+}
+
 export function selectedTopicFromQuery(searchParams, topics) {
   const requested = getQueryParam(searchParams, "topic");
   if (!requested) {
