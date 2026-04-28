@@ -54,7 +54,6 @@ def _source_figure(source_counts: list[dict]) -> go.Figure:
     figure.update_layout(title="Articles by Source", template="plotly_white")
     return figure
 
-
 def _tag_figure(tag_counts: list[dict]) -> go.Figure:
     # Filter out 'general' tag (including case/whitespace variants) and take top 12.
     filtered_tags = [
