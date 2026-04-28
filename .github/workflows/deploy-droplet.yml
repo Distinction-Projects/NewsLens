@@ -133,6 +133,8 @@ jobs:
           ${SUDO} systemctl daemon-reload
           ${SUDO} systemctl disable --now newslens 2>/dev/null || true
           ${SUDO} systemctl enable newslens-api
+          ${SUDO} systemctl kill --kill-who=all newslens-api 2>/dev/null || true
+          ${SUDO} systemctl reset-failed newslens-api 2>/dev/null || true
           timeout 60 ${SUDO} systemctl restart newslens-api
           ${SUDO} systemctl is-active --quiet newslens-api
 
@@ -175,6 +177,8 @@ jobs:
           ${SUDO} systemctl daemon-reload
           ${SUDO} systemctl enable newslens-api newslens-node
 
+          ${SUDO} systemctl kill --kill-who=all newslens-api 2>/dev/null || true
+          ${SUDO} systemctl reset-failed newslens-api 2>/dev/null || true
           timeout 60 ${SUDO} systemctl restart newslens-api
           timeout 60 ${SUDO} systemctl restart newslens-node
           ${SUDO} systemctl is-active --quiet newslens-api

@@ -16,6 +16,9 @@ ExecStart=/srv/newslens/venv/bin/uvicorn \
     --workers 2
 Restart=always
 RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target
