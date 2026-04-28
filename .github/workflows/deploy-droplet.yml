@@ -142,6 +142,7 @@ jobs:
           fi
 
           run_as_app_user npm --prefix /srv/newslens/app/frontend-node ci
+          run_as_app_user npm --prefix /srv/newslens/app/frontend-node run check:news-renderers
           run_as_app_user env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
             NODE_OPTIONS=--max-old-space-size=1024 \
             npm --prefix /srv/newslens/app/frontend-node run build

@@ -90,9 +90,9 @@ export default function AboutPage() {
           <article className="about-card">
             <h3>Web Frameworks</h3>
             <ul>
-              <li>Dash by Plotly (legacy surface)</li>
+              <li>Dash by Plotly (local reference surface)</li>
               <li>FastAPI (analytics API)</li>
-              <li>Next.js (migration frontend)</li>
+              <li>Next.js (public dashboard)</li>
               <li>Plotly.js charts</li>
             </ul>
           </article>
