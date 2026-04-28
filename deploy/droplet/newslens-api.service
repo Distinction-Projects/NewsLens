@@ -13,7 +13,7 @@ ExecStart=/srv/newslens/venv/bin/uvicorn \
     src.api.fastapi_app:app \
     --host 127.0.0.1 \
     --port 9000 \
-    --workers 2
+    --workers 1
 Restart=always
 RestartSec=5
 TimeoutStartSec=30
