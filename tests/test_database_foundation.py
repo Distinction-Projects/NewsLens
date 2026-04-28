@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.api.fastapi_news import _news_client_from_env
+from src.api.news_controller import NewsController
 from src.ingest.rss_to_postgres import import_current
 from src.services.news_postgres import PostgresNewsClient
 from src.services.rss_digest import RssDigestClient
@@ -76,6 +77,15 @@ class _FakeConnection:
         return _FakeCursor()
 
 
+class _FakeJsonClient:
+    def __init__(self, bundle):
+        self.bundle = bundle
+        self.max_age_seconds = 36 * 3600
+
+    def get_payload(self, *, force_refresh=False, snapshot_date=None):
+        return self.bundle
+
+
 class DatabaseFoundationTests(unittest.TestCase):
     def test_initial_migration_defines_expected_tables(self):
         migration = Path("supabase/migrations/20260428000000_initial_newslens_schema.sql")
@@ -132,6 +142,41 @@ class DatabaseFoundationTests(unittest.TestCase):
             self.assertIsInstance(_news_client_from_env(), RssDigestClient)
         with patch.dict("os.environ", {"NEWS_DATA_BACKEND": "postgres"}, clear=True):
             self.assertIsInstance(_news_client_from_env(), PostgresNewsClient)
+
+    def test_json_and_postgres_controller_outputs_match_for_same_import_bundle(self):
+        postgres_client = PostgresNewsClient(ttl_seconds=12)
+        with patch.object(postgres_client, "_connect", return_value=_FakeConnection()):
+            postgres_bundle = postgres_client.get_payload()
+
+        json_controller = NewsController(_FakeJsonClient(postgres_bundle))
+        with patch.object(postgres_client, "_connect", return_value=_FakeConnection()):
+            postgres_controller = NewsController(postgres_client)
+
+            json_digest = json_controller.get_digest(
+                refresh=None,
+                date=None,
+                tag=None,
+                source=None,
+                limit="1",
+                snapshot_date=None,
+            )
+            postgres_digest = postgres_controller.get_digest(
+                refresh=None,
+                date=None,
+                tag=None,
+                source=None,
+                limit="1",
+                snapshot_date=None,
+            )
+            self.assertEqual(json_digest.status_code, 200)
+            self.assertEqual(postgres_digest.status_code, 200)
+            self.assertEqual(json_digest.body["status"], postgres_digest.body["status"])
+            self.assertEqual(json_digest.body["data"][0]["id"], postgres_digest.body["data"][0]["id"])
+            self.assertEqual(json_digest.body["meta"]["returned_count"], postgres_digest.body["meta"]["returned_count"])
+
+            json_stats = json_controller.get_stats(refresh=None, snapshot_date=None)
+            postgres_stats = postgres_controller.get_stats(refresh=None, snapshot_date=None)
+            self.assertEqual(json_stats.body["data"]["derived"], postgres_stats.body["data"]["derived"])
 
 
 if __name__ == "__main__":

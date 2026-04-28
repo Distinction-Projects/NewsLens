@@ -19,6 +19,9 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DROPLET_PORT }}
       RSS_DAILY_JSON_URL: ${{ secrets.RSS_DAILY_JSON_URL }}
       RSS_HISTORY_JSON_URL_TEMPLATE: ${{ secrets.RSS_HISTORY_JSON_URL_TEMPLATE }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
+      NEWS_DATA_BACKEND: ${{ secrets.NEWS_DATA_BACKEND }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,6 +62,13 @@ jobs:
           {
             printf 'RSS_DAILY_JSON_URL=%s\n' "${RSS_DAILY_JSON_URL}"
             printf 'RSS_HISTORY_JSON_URL_TEMPLATE=%s\n' "${RSS_HISTORY_JSON_URL_TEMPLATE}"
+            printf 'NEWS_DATA_BACKEND=%s\n' "${NEWS_DATA_BACKEND:-json}"
+            if [ -n "${DATABASE_URL:-}" ]; then
+              printf 'DATABASE_URL=%s\n' "${DATABASE_URL}"
+            fi
+            if [ -n "${SUPABASE_DIRECT_DB_URL:-}" ]; then
+              printf 'SUPABASE_DIRECT_DB_URL=%s\n' "${SUPABASE_DIRECT_DB_URL}"
+            fi
           } > /tmp/newslens.env
 
           scp -P "${DEPLOY_PORT:-22}" /tmp/newslens.env "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/newslens.env"
@@ -107,6 +117,22 @@ jobs:
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
           /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
 
+          if grep -Eq '^(DATABASE_URL|SUPABASE_DIRECT_DB_URL)=' /etc/newslens/newslens.env; then
+            ${SUDO} apt-get update
+            ${SUDO} apt-get install -y postgresql-client
+
+            DB_URL="$(grep -E '^(DATABASE_URL|SUPABASE_DIRECT_DB_URL)=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+            for migration in /srv/newslens/app/supabase/migrations/*.sql; do
+              [ -f "$migration" ] || continue
+              run_as_app_user psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$migration"
+            done
+
+            RSS_URL="$(grep -E '^RSS_DAILY_JSON_URL=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+            RSS_HISTORY_TEMPLATE="$(grep -E '^RSS_HISTORY_JSON_URL_TEMPLATE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+            run_as_app_user env DATABASE_URL="$DB_URL" RSS_DAILY_JSON_URL="$RSS_URL" RSS_HISTORY_JSON_URL_TEMPLATE="$RSS_HISTORY_TEMPLATE" \
+              /srv/newslens/venv/bin/python -m src.ingest.rss_to_postgres --source current --refresh-derived
+          fi
+
           # Avoid OOM kills during Next.js production build on small droplets.
           if ! swapon --show | grep -q .; then
             ${SUDO} fallocate -l 2G /swapfile || ${SUDO} dd if=/dev/zero of=/swapfile bs=1M count=2048
@@ -120,31 +146,22 @@ jobs:
             NODE_OPTIONS=--max-old-space-size=1024 \
             npm --prefix /srv/newslens/app/frontend-node run build
 
-          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens.service /etc/systemd/system/newslens.service
           ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
           ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-node.service /etc/systemd/system/newslens-node.service
           ${SUDO} systemctl daemon-reload
-          ${SUDO} systemctl enable newslens newslens-api newslens-node
+          ${SUDO} systemctl disable --now newslens 2>/dev/null || true
+          ${SUDO} systemctl enable newslens-api newslens-node
 
-          ${SUDO} systemctl restart newslens
           ${SUDO} systemctl restart newslens-api
           ${SUDO} systemctl restart newslens-node
-          ${SUDO} systemctl is-active --quiet newslens
           ${SUDO} systemctl is-active --quiet newslens-api
           ${SUDO} systemctl is-active --quiet newslens-node
 
-          dash_ok=0
-          for i in $(seq 1 36); do
-            if curl -fsS --connect-timeout 3 --max-time 10 http://127.0.0.1:8000/ >/dev/null; then
-              dash_ok=1
-              break
-            fi
-            sleep 5
-          done
-
           api_ok=0
           for i in $(seq 1 36); do
-            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/stats >/dev/null; then
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/stats >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/digest?limit=1 >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/health/database >/dev/null; then
               api_ok=1
               break
             fi
@@ -153,18 +170,18 @@ jobs:
 
           node_ok=0
           for i in $(seq 1 36); do
-            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/news/digest >/dev/null; then
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/ >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/evaluation >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/news/digest >/dev/null; then
               node_ok=1
               break
             fi
             sleep 5
           done
 
-          if [ "$dash_ok" -ne 1 ] || [ "$api_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
-            ${SUDO} systemctl status newslens --no-pager || true
+          if [ "$api_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
             ${SUDO} systemctl status newslens-api --no-pager || true
             ${SUDO} systemctl status newslens-node --no-pager || true
-            ${SUDO} journalctl -u newslens -n 80 --no-pager || true
             ${SUDO} journalctl -u newslens-api -n 120 --no-pager || true
             ${SUDO} journalctl -u newslens-node -n 120 --no-pager || true
             exit 1
@@ -178,8 +195,12 @@ jobs:
 
           nginx_ok=0
           for i in $(seq 1 12); do
-            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/news/digest >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/stats >/dev/null; then
+            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/ >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/evaluation >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/news/digest >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/stats >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/digest?limit=1 >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/health/database >/dev/null; then
               nginx_ok=1
               break
             fi
