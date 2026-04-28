@@ -125,6 +125,8 @@ jobs:
             fi
           }
 
+          cd /srv/newslens/app
+
           if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1; then
             if [ "$(id -u)" -eq 0 ]; then
               curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
