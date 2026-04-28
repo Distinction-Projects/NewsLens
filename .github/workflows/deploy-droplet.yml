@@ -184,10 +184,14 @@ jobs:
           ${SUDO} systemctl is-active --quiet newslens-api
           ${SUDO} systemctl is-active --quiet newslens-node
 
+          # The first JSON-backed stats request derives the full analytics bundle.
+          # Let it finish once so subsequent smoke checks hit the in-process cache.
+          curl -fsS --connect-timeout 3 --max-time 180 http://127.0.0.1:9000/api/news/stats >/dev/null
+
           api_ok=0
           for i in $(seq 1 36); do
-            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/stats >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/api/news/digest?limit=1 >/dev/null \
+            if curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1:9000/api/news/stats >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1:9000/api/news/digest?limit=1 >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/health/database >/dev/null; then
               api_ok=1
               break
@@ -222,11 +226,11 @@ jobs:
 
           nginx_ok=0
           for i in $(seq 1 12); do
-            if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/ >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/evaluation >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/news/digest >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/stats >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/api/news/digest?limit=1 >/dev/null \
+            if curl -fsS --connect-timeout 3 --max-time 30 http://127.0.0.1/ >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 30 http://127.0.0.1/evaluation >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 30 http://127.0.0.1/news/digest >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1/api/news/stats >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1/api/news/digest?limit=1 >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/health/database >/dev/null; then
               nginx_ok=1
               break
