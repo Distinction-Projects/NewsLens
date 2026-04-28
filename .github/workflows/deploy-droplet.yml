@@ -189,8 +189,21 @@ jobs:
           ${SUDO} systemctl is-active --quiet newslens-node
 
           # The first JSON-backed stats request derives the full analytics bundle.
-          # Let it finish once so subsequent smoke checks hit the in-process cache.
-          curl -fsS --connect-timeout 3 --max-time 180 http://127.0.0.1:9000/api/news/stats >/dev/null
+          # Retry startup separately so a transient connection refusal after restart
+          # does not fail an otherwise healthy deploy.
+          warm_ok=0
+          for i in $(seq 1 24); do
+            if curl -fsS --connect-timeout 3 --max-time 180 http://127.0.0.1:9000/api/news/stats >/dev/null; then
+              warm_ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$warm_ok" -ne 1 ]; then
+            ${SUDO} systemctl status newslens-api --no-pager || true
+            ${SUDO} journalctl -u newslens-api -n 120 --no-pager || true
+            exit 1
+          fi
 
           api_ok=0
           for i in $(seq 1 36); do
