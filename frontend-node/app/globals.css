@@ -270,6 +270,101 @@ code {
   overflow: hidden;
 }
 
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.about-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #385173;
+  background: #152439;
+  color: #cfe2ff;
+  font-size: 0.82rem;
+  padding: 3px 9px;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 10px;
+}
+
+.timeline-item {
+  border: 1px solid #2a3a56;
+  border-radius: 8px;
+  background: #101a29;
+  padding: 10px 12px;
+}
+
+.timeline-item h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.timeline-item p {
+  margin: 0;
+  color: #c8d6ee;
+}
+
+.about-phase {
+  display: inline-block;
+  border-radius: 999px;
+  border: 1px solid #3b6ab0;
+  background: #193050;
+  color: #cfe2ff;
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.about-card {
+  border: 1px solid #2a3a56;
+  border-radius: 8px;
+  background: #101a29;
+  padding: 10px 12px;
+}
+
+.about-card h3 {
+  margin-bottom: 8px;
+}
+
+.about-card ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.link-row a {
+  display: inline-block;
+  border: 1px solid #385173;
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: #d8e5ff;
+  text-decoration: none;
+  background: #132235;
+}
+
+.link-row a:hover {
+  border-color: #5b87cc;
+  background: #1a2c45;
+}
+
 .workflow-diagram {
   border: 1px solid #2a3a56;
   border-radius: 10px;

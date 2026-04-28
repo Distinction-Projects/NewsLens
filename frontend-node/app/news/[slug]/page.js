@@ -1,274 +1,42 @@
 import { notFound } from "next/navigation";
 import { fetchNewsJson, newsApiBaseUrl } from "../../../lib/newsApi";
 import { getNewsPage, NEWS_PAGES } from "../../../lib/newsPages";
+import {
+  activeSnapshotDate,
+  analysisModeQueryHref,
+  asArray,
+  asObject,
+  buildQueryHref,
+  fetchStatsForMode,
+  formatAlreadyPercent,
+  formatDecimal,
+  formatNumber,
+  formatPercent,
+  getQueryParam,
+  getStatsDerived,
+  isTruthyQueryValue,
+  normalizeDataMode,
+  normalizeMode,
+  queryLimit,
+  selectSourceReliabilityView,
+  selectedSnapshotDateValue,
+  selectedTopicFromQuery,
+  snapshotDateFromSearchParams,
+  toNumber,
+  truncateText
+} from "../../../lib/newsPageUtils";
 import PlotlyChart from "../../../components/PlotlyChart";
+import {
+  DataModeControls,
+  EmptyState,
+  MiniBar,
+  PageIntro,
+  StatCard,
+  StatusBlock,
+  StatusPill
+} from "../../../components/news/NewsDashboardPrimitives";
 
 export const dynamic = "force-dynamic";
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function asObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function toNumber(value) {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function formatNumber(value) {
-  const number = toNumber(value);
-  if (number === null) {
-    return "n/a";
-  }
-  return new Intl.NumberFormat("en-US").format(number);
-}
-
-function formatDecimal(value, digits = 2) {
-  const number = toNumber(value);
-  if (number === null) {
-    return "n/a";
-  }
-  return number.toFixed(digits);
-}
-
-function formatPercent(value) {
-  const number = toNumber(value);
-  if (number === null) {
-    return "n/a";
-  }
-  return `${(number * 100).toFixed(1)}%`;
-}
-
-function formatAlreadyPercent(value) {
-  const number = toNumber(value);
-  if (number === null) {
-    return "n/a";
-  }
-  return `${number.toFixed(1)}%`;
-}
-
-function truncateText(value, maxLength = 220) {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  if (!text) {
-    return "n/a";
-  }
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
-}
-
-async function fetchStatsPayload(snapshotDate = null) {
-  const query = typeof snapshotDate === "string" && snapshotDate ? `?snapshot_date=${encodeURIComponent(snapshotDate)}` : "";
-  return fetchNewsJson(`/api/news/stats${query}`);
-}
-
-function getStatsDerived(payload) {
-  return asObject(asObject(payload?.data).derived);
-}
-
-function snapshotDateFromSearchParams(searchParams) {
-  const raw = typeof searchParams?.snapshot === "string" ? searchParams.snapshot.trim() : "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
-}
-
-function getQueryParam(searchParams, key) {
-  const raw = searchParams?.[key];
-  if (typeof raw === "string") {
-    return raw.trim();
-  }
-  if (Array.isArray(raw) && typeof raw[0] === "string") {
-    return raw[0].trim();
-  }
-  return "";
-}
-
-function normalizeMode(searchParams) {
-  const raw = getQueryParam(searchParams, "mode").toLowerCase();
-  return raw === "within-topic" ? "within-topic" : "pooled";
-}
-
-function normalizeDataMode(searchParams) {
-  const raw = getQueryParam(searchParams, "data_mode").toLowerCase();
-  return raw === "snapshot" ? "snapshot" : "current";
-}
-
-function selectedSnapshotDateValue(searchParams) {
-  const raw = getQueryParam(searchParams, "snapshot");
-  return raw || "";
-}
-
-function activeSnapshotDate(searchParams) {
-  const date = snapshotDateFromSearchParams(searchParams);
-  const mode = normalizeDataMode(searchParams);
-  if (mode === "snapshot" && date) {
-    return date;
-  }
-  return null;
-}
-
-function isTruthyQueryValue(raw) {
-  const value = String(raw || "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
-}
-
-function queryLimit(searchParams, key, fallback, min = 1, max = 500) {
-  const raw = getQueryParam(searchParams, key);
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.max(min, Math.min(max, Math.trunc(parsed)));
-}
-
-function selectedTopicFromQuery(searchParams, topics) {
-  const requested = getQueryParam(searchParams, "topic");
-  if (!requested) {
-    return topics[0] || null;
-  }
-  return topics.find((topic) => String(topic?.topic || "") === requested) || topics[0] || null;
-}
-
-function selectSourceReliabilityView(sourceReliability, mode, selectedTopic) {
-  const reliability = asObject(sourceReliability);
-  const pooled = asObject(reliability.pooled);
-  if (mode !== "within-topic" || !selectedTopic) {
-    return pooled;
-  }
-  const topicRows = asArray(reliability.topics);
-  const match = topicRows.find((row) => String(row?.topic || "") === selectedTopic);
-  return asObject(match?.assessment) || pooled;
-}
-
-function buildQueryHref(paramsObject) {
-  const queryParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(paramsObject || {})) {
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-    queryParams.set(key, String(value));
-  }
-  const query = queryParams.toString();
-  return query ? `?${query}` : "?";
-}
-
-function analysisModeQueryHref(mode, topic, dataMode, snapshot, extraParams = {}) {
-  return buildQueryHref({
-    ...extraParams,
-    mode,
-    topic,
-    data_mode: dataMode,
-    snapshot: dataMode === "snapshot" ? snapshot : ""
-  });
-}
-
-function dataModeQueryHref(dataMode, snapshot, extraParams = {}) {
-  return buildQueryHref({
-    ...extraParams,
-    data_mode: dataMode,
-    snapshot: dataMode === "snapshot" ? snapshot : ""
-  });
-}
-
-async function fetchStatsForMode(searchParams) {
-  const snapshotDate = activeSnapshotDate(searchParams);
-  return fetchStatsPayload(snapshotDate);
-}
-
-function PageIntro({ summary }) {
-  return (
-    <details className="news-page-intro">
-      <summary>What this page does</summary>
-      <p className="muted">{summary}</p>
-    </details>
-  );
-}
-
-function DataModeControls({ searchParams, extraParams = {} }) {
-  const dataMode = normalizeDataMode(searchParams);
-  const snapshotDateValue = selectedSnapshotDateValue(searchParams);
-  const missingSnapshot = dataMode === "snapshot" && !snapshotDateFromSearchParams(searchParams);
-  const currentHref = dataModeQueryHref("current", snapshotDateValue, extraParams);
-  const snapshotHref = dataModeQueryHref("snapshot", snapshotDateValue, extraParams);
-  return (
-    <div className="panel">
-      <h3>Data Mode</h3>
-      <div className="top-nav-links">
-        <a className={`news-nav-link ${dataMode === "current" ? "active-link" : ""}`} href={currentHref}>
-          Current
-        </a>
-        <a className={`news-nav-link ${dataMode === "snapshot" ? "active-link" : ""}`} href={snapshotHref}>
-          Snapshot
-        </a>
-      </div>
-      <form method="get" style={{ marginTop: "10px" }}>
-        {Object.entries(extraParams).map(([key, value]) => (
-          <input key={key} type="hidden" name={key} value={String(value || "")} />
-        ))}
-        <input type="hidden" name="data_mode" value={dataMode} />
-        <label className="muted" htmlFor="snapshot-date-input">
-          Snapshot date
-        </label>
-        <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px" }}>
-          <input
-            id="snapshot-date-input"
-            name="snapshot"
-            type="date"
-            defaultValue={snapshotDateValue}
-            disabled={dataMode !== "snapshot"}
-          />
-          <button type="submit" className="news-nav-link">
-            Apply
-          </button>
-        </div>
-      </form>
-      {missingSnapshot ? (
-        <p className="muted" style={{ marginTop: "10px" }}>
-          Snapshot mode requires a valid date (`YYYY-MM-DD`). Falling back to current data until provided.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function StatCard({ label, value, detail }) {
-  return (
-    <div className="stat-card">
-      <span className="muted">{label}</span>
-      <strong>{value}</strong>
-      {detail ? <small className="muted">{detail}</small> : null}
-    </div>
-  );
-}
-
-function StatusPill({ children, tone = "neutral" }) {
-  return <span className={`status-pill ${tone}`}>{children}</span>;
-}
-
-function EmptyState({ children = "No data available." }) {
-  return <p className="muted">{children}</p>;
-}
-
-function StatusBlock({ status, reason }) {
-  const tone = status === "ok" ? "good" : "bad";
-  return (
-    <p className="muted">
-      <StatusPill tone={tone}>{status || "unknown"}</StatusPill>
-      {reason ? ` ${reason}` : ""}
-    </p>
-  );
-}
-
-function MiniBar({ value, max }) {
-  const number = toNumber(value) || 0;
-  const limit = Math.max(toNumber(max) || 0, number, 1);
-  const width = Math.max(0, Math.min(100, (number / limit) * 100));
-  return (
-    <div className="mini-bar" aria-label={`${formatNumber(number)} of ${formatNumber(limit)}`}>
-      <span style={{ width: `${width}%` }} />
-    </div>
-  );
-}
 
 async function renderDigest(searchParams) {
   const dataMode = normalizeDataMode(searchParams);
@@ -3716,10 +3484,9 @@ async function renderSnapshotCompare(searchParams) {
 function renderPlaceholder(title) {
   return (
     <div className="panel">
-      <h3>Migration In Progress</h3>
+      <h3>Page Unavailable</h3>
       <p className="muted">
-        {title} is routed and ready, but the full interactive port is still pending. This page will be migrated in a
-        later pass while keeping existing Dash behavior intact.
+        {title} is registered in the navigation, but this dashboard view is not available in the current build.
       </p>
     </div>
   );

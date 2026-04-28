@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -13,9 +12,6 @@ DB_URL_ENV_KEYS = (
     "SUPABASE_DIRECT_DB_URL",
     "SUPABASE_DIRECT_CONNECT",
 )
-
-_schema_lock = threading.Lock()
-_schema_ready = False
 
 
 def _clean_value(value: Any) -> str | None:
@@ -59,38 +55,6 @@ def _connect_kwargs(url: str) -> dict[str, Any]:
     if "sslmode=" not in url:
         kwargs["sslmode"] = "require"
     return kwargs
-
-
-def _ensure_schema(conn) -> None:
-    global _schema_ready
-    if _schema_ready:
-        return
-    with _schema_lock:
-        if _schema_ready:
-            return
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS public.analysis_runs (
-                    id BIGSERIAL PRIMARY KEY,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    model TEXT NOT NULL,
-                    sentiment TEXT NOT NULL,
-                    score DOUBLE PRECISION,
-                    input_text TEXT NOT NULL,
-                    processed_text TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-                );
-                """
-            )
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_analysis_runs_created_at
-                ON public.analysis_runs (created_at DESC);
-                """
-            )
-        conn.commit()
-        _schema_ready = True
 
 
 def database_health_snapshot() -> dict[str, Any]:
@@ -160,7 +124,6 @@ def persist_analysis_run(
     meta = metadata or {}
     try:
         with psycopg.connect(url, **_connect_kwargs(url)) as conn:
-            _ensure_schema(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     """
