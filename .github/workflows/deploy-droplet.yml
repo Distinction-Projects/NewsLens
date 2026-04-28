@@ -77,6 +77,7 @@ jobs:
 
           ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" << 'EOF'
           set -euo pipefail
+          set -x
 
           SUDO=""
           if [ "$(id -u)" -ne 0 ]; then
@@ -106,6 +107,16 @@ jobs:
             fi
           }
 
+          run_as_app_user_timeout() {
+            seconds="$1"
+            shift
+            if [ "$(id -u)" -eq 0 ]; then
+              runuser -u newslens -- timeout "$seconds" "$@"
+            else
+              sudo -u newslens timeout "$seconds" "$@"
+            fi
+          }
+
           if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' >/dev/null 2>&1; then
             if [ "$(id -u)" -eq 0 ]; then
               curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -116,7 +127,14 @@ jobs:
           fi
 
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
-          /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
+          timeout 600 /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
+
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
+          ${SUDO} systemctl daemon-reload
+          ${SUDO} systemctl disable --now newslens 2>/dev/null || true
+          ${SUDO} systemctl enable newslens-api
+          timeout 60 ${SUDO} systemctl restart newslens-api
+          ${SUDO} systemctl is-active --quiet newslens-api
 
           DATA_BACKEND="$(grep -E '^NEWS_DATA_BACKEND=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
           DATA_BACKEND="${DATA_BACKEND:-json}"
@@ -147,20 +165,18 @@ jobs:
             ${SUDO} swapon /swapfile
           fi
 
-          run_as_app_user npm --prefix /srv/newslens/app/frontend-node ci
-          run_as_app_user npm --prefix /srv/newslens/app/frontend-node run check:news-renderers
-          run_as_app_user env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
+          run_as_app_user_timeout 600 npm --prefix /srv/newslens/app/frontend-node ci
+          run_as_app_user_timeout 120 npm --prefix /srv/newslens/app/frontend-node run check:news-renderers
+          run_as_app_user_timeout 900 env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
             NODE_OPTIONS=--max-old-space-size=1024 \
             npm --prefix /srv/newslens/app/frontend-node run build
 
-          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
           ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-node.service /etc/systemd/system/newslens-node.service
           ${SUDO} systemctl daemon-reload
-          ${SUDO} systemctl disable --now newslens 2>/dev/null || true
           ${SUDO} systemctl enable newslens-api newslens-node
 
-          ${SUDO} systemctl restart newslens-api
-          ${SUDO} systemctl restart newslens-node
+          timeout 60 ${SUDO} systemctl restart newslens-api
+          timeout 60 ${SUDO} systemctl restart newslens-node
           ${SUDO} systemctl is-active --quiet newslens-api
           ${SUDO} systemctl is-active --quiet newslens-node
 
