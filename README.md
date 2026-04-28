@@ -118,6 +118,51 @@ When `DATABASE_URL` (or one of the alias vars in `.env.example`) is set:
 
 If no DB URL is set, API responses still succeed and persistence reports `unconfigured`.
 
+## Supabase / Postgres data foundation
+
+Supabase schema is migration-managed under `supabase/migrations/`.
+
+Apply migrations with the Supabase CLI in environments that are linked to the project:
+
+```bash
+supabase db push
+```
+
+Import the current RSS contract into Postgres after migrations:
+
+```bash
+source .venv/bin/activate
+python -m src.ingest.rss_to_postgres --source current --refresh-derived
+```
+
+Dry-run the importer without writing to the database:
+
+```bash
+python -m src.ingest.rss_to_postgres --source current --refresh-derived --dry-run
+```
+
+The importer currently writes normalized sources, feeds, articles, article tags, aggregate lens scores, snapshots, derived stats, and import-run metadata. Public dashboards should continue to read through FastAPI rather than writing directly from the browser.
+
+FastAPI can read news data from either the upstream JSON contract or the imported Postgres tables:
+
+```bash
+# Default transitional mode: read from the RSS JSON contract.
+NEWS_DATA_BACKEND=json
+
+# DB-backed mode: read from the latest completed import in Postgres.
+NEWS_DATA_BACKEND=postgres
+```
+
+Rollout order for DB-backed reads:
+
+1. Apply `supabase/migrations`.
+2. Run `python -m src.ingest.rss_to_postgres --source current --refresh-derived`.
+3. Verify `/health/database` is healthy.
+4. Set `NEWS_DATA_BACKEND=postgres` for FastAPI.
+5. Smoke-check `/api/news/digest`, `/api/news/stats`, and `/news/digest`.
+
+Keep `NEWS_DATA_BACKEND=json` available as the parity fallback until Postgres-backed API output has been compared against the JSON-backed mode.
+
 ## App bootstrap rules
 
 The bootstrap in `src/app.py` is intentionally opinionated:

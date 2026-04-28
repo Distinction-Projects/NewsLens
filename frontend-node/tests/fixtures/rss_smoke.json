@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-04-27T16:04:59Z",
+  "contract": "rss_pipeline_precomputed",
+  "digest": {
+    "generated_at": "2026-04-27T16:00:00Z",
+    "run_id": "playwright-smoke"
+  },
+  "summary": {
+    "articles": 4,
+    "scored_articles": 4
+  },
+  "analysis": {
+    "lens_summary": {}
+  },
+  "articles": [
+    {
+      "id": "smoke-1",
+      "title": "OpenAI announces research dashboard",
+      "link": "https://example.com/openai-dashboard",
+      "published": "2026-04-27T15:05:46Z",
+      "summary": "A research dashboard story.",
+      "ai_summary": "OpenAI announces a research dashboard update.",
+      "ai_tags": ["OpenAI", "Research"],
+      "topic_tags": ["AI Policy"],
+      "source": { "id": "source-a", "name": "Source A" },
+      "feed": { "name": "Main", "url": "https://example.com/a.xml" },
+      "scraped": { "title": "OpenAI announces research dashboard", "body_text": "Source A covers research and dashboard details." },
+      "scrape_error": null,
+      "score": {
+        "value": 18,
+        "max_value": 20,
+        "percent": 90,
+        "rubric_count": 2,
+        "lens_scores": {
+          "Conflict Framing": { "value": 7, "max_value": 10, "percent": 70 },
+          "Institutional Trust": { "value": 9, "max_value": 10, "percent": 90 }
+        }
+      }
+    },
+    {
+      "id": "smoke-2",
+      "title": "Regulators debate AI rules",
+      "link": "https://example.com/ai-rules",
+      "published": "2026-04-27T14:05:46Z",
+      "summary": "Regulators debate rules.",
+      "ai_summary": "Regulators discuss AI policy rules.",
+      "ai_tags": ["Policy"],
+      "topic_tags": ["AI Policy"],
+      "source": { "id": "source-b", "name": "Source B" },
+      "feed": { "name": "Main", "url": "https://example.com/b.xml" },
+      "scraped": { "title": "Regulators debate AI rules", "body_text": "Source B covers policy conflict and institutions." },
+      "scrape_error": null,
+      "score": {
+        "value": 12,
+        "max_value": 20,
+        "percent": 60,
+        "rubric_count": 2,
+        "lens_scores": {
+          "Conflict Framing": { "value": 8, "max_value": 10, "percent": 80 },
+          "Institutional Trust": { "value": 4, "max_value": 10, "percent": 40 }
+        }
+      }
+    },
+    {
+      "id": "smoke-3",
+      "title": "Earnings report highlights AI demand",
+      "link": "https://example.com/earnings-ai",
+      "published": "2026-04-26T13:05:46Z",
+      "summary": "AI demand affects earnings.",
+      "ai_summary": "A market story on AI demand.",
+      "ai_tags": ["Markets"],
+      "topic_tags": ["Markets"],
+      "source": { "id": "source-a", "name": "Source A" },
+      "feed": { "name": "Main", "url": "https://example.com/a.xml" },
+      "scraped": { "title": "Earnings report highlights AI demand", "body_text": "Source A covers market demand." },
+      "scrape_error": null,
+      "score": {
+        "value": 10,
+        "max_value": 20,
+        "percent": 50,
+        "rubric_count": 2,
+        "lens_scores": {
+          "Conflict Framing": { "value": 3, "max_value": 10, "percent": 30 },
+          "Institutional Trust": { "value": 7, "max_value": 10, "percent": 70 }
+        }
+      }
+    },
+    {
+      "id": "smoke-4",
+      "title": "Chip supply chain expands",
+      "link": "https://example.com/chips",
+      "published": "2026-04-26T12:05:46Z",
+      "summary": "Chip supply chain expands.",
+      "ai_summary": "A market story on chip supply.",
+      "ai_tags": ["Markets", "Chips"],
+      "topic_tags": ["Markets"],
+      "source": { "id": "source-b", "name": "Source B" },
+      "feed": { "name": "Main", "url": "https://example.com/b.xml" },
+      "scraped": { "title": "Chip supply chain expands", "body_text": "Source B covers chip supply expansion." },
+      "scrape_error": null,
+      "score": {
+        "value": 14,
+        "max_value": 20,
+        "percent": 70,
+        "rubric_count": 2,
+        "lens_scores": {
+          "Conflict Framing": { "value": 4, "max_value": 10, "percent": 40 },
+          "Institutional Trust": { "value": 8, "max_value": 10, "percent": 80 }
+        }
+      }
+    }
+  ]
+}

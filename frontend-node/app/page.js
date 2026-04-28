@@ -3,36 +3,35 @@ import Link from "next/link";
 export default function HomePage() {
   return (
     <main>
-      <h1>NewsLens Node Frontend</h1>
+      <h1>NewsLens Research Dashboard</h1>
       <p className="muted">
-        This frontend consumes FastAPI endpoints and now includes full `/news/*` route coverage.
+        Explore sentiment-model evaluation and AI-assisted news analysis through a public, read-only dashboard.
       </p>
 
       <div className="panel">
-        <h2>Available Pages</h2>
+        <h2>Core Workspaces</h2>
         <ul>
           <li>
-            <Link href="/evaluation">/evaluation</Link> model metrics by corpus
+            <Link href="/evaluation">Model Evaluation</Link> compares sentiment model performance across corpora.
           </li>
           <li>
-            <Link href="/text">/text</Link> interactive sentiment analysis
+            <Link href="/text">Text Analysis</Link> runs focused sentiment checks on short passages.
           </li>
           <li>
-            <Link href="/about">/about</Link> project method and stack direction
+            <Link href="/about">About</Link> explains the project method, data pipeline, and research boundaries.
           </li>
           <li>
-            <Link href="/news">/news</Link> full news analytics surface
-          </li>
-          <li>
-            <Link href="/supabase-test">/supabase-test</Link> Supabase connectivity check
+            <Link href="/news">News Analytics</Link> provides source, topic, lens, and workflow diagnostics.
           </li>
         </ul>
       </div>
 
       <div className="panel">
-        <h2>Architecture State</h2>
+        <h2>Research Focus</h2>
         <p>
-          Dash remains online for parity and historical validation, while FastAPI + Next.js is the primary frontend path.
+          NewsLens is designed for exploratory analysis. It supports transparent comparisons of model behavior,
+          source-level framing patterns, topic-controlled differences, and data quality signals without treating
+          automated scores as final judgments.
         </p>
       </div>
     </main>

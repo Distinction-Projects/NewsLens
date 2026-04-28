@@ -37,7 +37,7 @@ export default function NewsIndexPage() {
       <div className="panel">
         <h2>Route Coverage</h2>
         <p className="muted">
-          There are currently no scaffold-only news routes remaining. All listed `/news/*` routes render live content.
+          All listed `/news/*` routes render live content from the FastAPI news contract.
         </p>
       </div>
 

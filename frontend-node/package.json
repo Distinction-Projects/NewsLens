@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "check:news-renderers": "node scripts/check-news-renderers.mjs",
     "start": "next start -p 3000",
     "lint": "next lint",
     "e2e:install-browsers": "playwright install chromium",
-    "e2e:smoke": "playwright test tests/e2e/news-smoke.spec.js"
+    "e2e:smoke": "playwright test tests/e2e/news-smoke.spec.js",
+    "e2e:smoke:live": "PLAYWRIGHT_START_FASTAPI=1 playwright test tests/e2e/news-smoke.spec.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",

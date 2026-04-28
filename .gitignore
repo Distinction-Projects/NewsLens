@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 src/models/*.joblib
 src/models/*.json
+!src/models/metrics.json
 NewsLens.code-workspace
 *.code-workspace
 .env

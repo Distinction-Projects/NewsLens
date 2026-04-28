@@ -32,7 +32,7 @@ def _model_key(model_name: str) -> str:
 
 
 def _dataset_payload(dataset_key: str | None):
-    metrics = load_cached_metrics()
+    metrics = load_cached_metrics(train_if_missing=False)
     datasets = metrics.get("datasets", {}) if isinstance(metrics, dict) else {}
     default_dataset = str(metrics.get("default_dataset", "train5")) if isinstance(metrics, dict) else "train5"
     key = str(dataset_key or default_dataset).strip().lower()

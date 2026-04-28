@@ -2,8 +2,8 @@ import "./globals.css";
 import Link from "next/link";
 
 export const metadata = {
-  title: "NewsLens Node Frontend",
-  description: "FastAPI-powered NewsLens frontend scaffold"
+  title: "NewsLens Research Dashboard",
+  description: "Public research dashboard for sentiment models and AI news analytics"
 };
 
 export default function RootLayout({ children }) {
