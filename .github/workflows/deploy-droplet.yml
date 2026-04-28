@@ -13,6 +13,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DEPLOY_HOST: ${{ secrets.DROPLET_HOST }}
       DEPLOY_USER: ${{ secrets.DROPLET_USER }}
@@ -117,7 +118,10 @@ jobs:
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
           /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
 
-          if grep -Eq '^(DATABASE_URL|SUPABASE_DIRECT_DB_URL)=' /etc/newslens/newslens.env; then
+          DATA_BACKEND="$(grep -E '^NEWS_DATA_BACKEND=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+          DATA_BACKEND="${DATA_BACKEND:-json}"
+
+          if [ "$DATA_BACKEND" = "postgres" ] && grep -Eq '^(DATABASE_URL|SUPABASE_DIRECT_DB_URL)=' /etc/newslens/newslens.env; then
             ${SUDO} apt-get update
             ${SUDO} apt-get install -y postgresql-client
 
@@ -131,6 +135,8 @@ jobs:
             RSS_HISTORY_TEMPLATE="$(grep -E '^RSS_HISTORY_JSON_URL_TEMPLATE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
             run_as_app_user env DATABASE_URL="$DB_URL" RSS_DAILY_JSON_URL="$RSS_URL" RSS_HISTORY_JSON_URL_TEMPLATE="$RSS_HISTORY_TEMPLATE" \
               /srv/newslens/venv/bin/python -m src.ingest.rss_to_postgres --source current --refresh-derived
+          else
+            echo "Skipping Postgres migration/import for NEWS_DATA_BACKEND=${DATA_BACKEND}."
           fi
 
           # Avoid OOM kills during Next.js production build on small droplets.
