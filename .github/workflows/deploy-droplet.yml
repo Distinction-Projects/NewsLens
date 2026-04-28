@@ -23,6 +23,8 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
       NEWS_DATA_BACKEND: json
+      RSS_SOURCE_EFFECT_PERMUTATIONS: 20
+      RSS_CACHE_TTL_SECONDS: 21600
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,6 +66,8 @@ jobs:
             printf 'RSS_DAILY_JSON_URL=%s\n' "${RSS_DAILY_JSON_URL}"
             printf 'RSS_HISTORY_JSON_URL_TEMPLATE=%s\n' "${RSS_HISTORY_JSON_URL_TEMPLATE}"
             printf 'NEWS_DATA_BACKEND=%s\n' "${NEWS_DATA_BACKEND:-json}"
+            printf 'RSS_SOURCE_EFFECT_PERMUTATIONS=%s\n' "${RSS_SOURCE_EFFECT_PERMUTATIONS:-20}"
+            printf 'RSS_CACHE_TTL_SECONDS=%s\n' "${RSS_CACHE_TTL_SECONDS:-21600}"
             if [ -n "${DATABASE_URL:-}" ]; then
               printf 'DATABASE_URL=%s\n' "${DATABASE_URL}"
             fi
