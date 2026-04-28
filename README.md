@@ -163,6 +163,25 @@ Rollout order for DB-backed reads:
 
 Keep `NEWS_DATA_BACKEND=json` available as the parity fallback until Postgres-backed API output has been compared against the JSON-backed mode.
 
+Stats can be served dynamically or from a deterministic precomputed snapshot:
+
+```bash
+# Default local mode: derive stats during the request.
+NEWS_STATS_BACKEND=dynamic
+
+# Production mode: serve /api/news/stats from a generated snapshot artifact.
+NEWS_STATS_BACKEND=precomputed
+NEWS_STATS_SNAPSHOT_PATH=data/processed/news_analytics_snapshot.json
+```
+
+Build the stats snapshot before restarting production services:
+
+```bash
+python -m src.analytics.build_news_snapshot --output data/processed/news_analytics_snapshot.json
+```
+
+If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing or invalid, `/api/news/stats` returns `503` instead of falling back to request-time analytics.
+
 ## App bootstrap rules
 
 The bootstrap in `src/app.py` is intentionally opinionated:

@@ -235,6 +235,22 @@ class RssDigestServiceTests(unittest.TestCase):
             source_topic_control["pooled"]["source_lens_effects"],
             stats["source_lens_effects"],
         )
+        self.assertIn("tag_sliced_analysis", stats)
+        tag_sliced_analysis = stats["tag_sliced_analysis"]
+        self.assertEqual(tag_sliced_analysis["tag_basis"], "topic_tags")
+        self.assertEqual(tag_sliced_analysis["multi_tag_policy"], "duplicate_per_tag")
+        self.assertEqual(tag_sliced_analysis["pooled_label"], "tag-confounded")
+        self.assertIn("pooled", tag_sliced_analysis)
+        self.assertIn("tags", tag_sliced_analysis)
+        self.assertIn("summary", tag_sliced_analysis)
+        self.assertEqual(
+            tag_sliced_analysis["pooled"]["source_differentiation"],
+            stats["source_differentiation"],
+        )
+        self.assertEqual(
+            tag_sliced_analysis["pooled"]["source_lens_effects"],
+            stats["source_lens_effects"],
+        )
         self.assertIn("source_reliability", stats)
         source_reliability = stats["source_reliability"]
         self.assertEqual(source_reliability["method"], "heuristic-v1")
@@ -845,6 +861,167 @@ class RssDigestServiceTests(unittest.TestCase):
                 self.assertAlmostEqual(float(effect_row["p_perm_raw"]), float(effect_row["p_perm"]), places=9)
                 self.assertGreaterEqual(float(effect_row["p_perm_fdr"]), 0.0)
                 self.assertLessEqual(float(effect_row["p_perm_fdr"]), 1.0)
+
+    def test_tag_sliced_analysis_duplicates_multi_tag_and_tracks_untagged(self):
+        payload = {
+            "analysis": {"lens_summary": {"lenses": [{"name": "Evidence", "max_total": 10.0}]}},
+            "articles": [
+                {
+                    "id": "tag-1",
+                    "title": "Multi tag",
+                    "published": "2026-03-02T03:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["Policy", "AI"],
+                    "source": {"name": "Source A"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Multi tag", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 60.0}}},
+                },
+                {
+                    "id": "tag-2",
+                    "title": "Policy lower case",
+                    "published": "2026-03-02T01:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["policy"],
+                    "source": {"name": "Source B"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Policy lower case", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 40.0}}},
+                },
+                {
+                    "id": "tag-3",
+                    "title": "No topic tags",
+                    "published": "2026-03-02T02:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": [],
+                    "source": {"name": "Source C"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "No topic tags", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 50.0}}},
+                },
+            ],
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        tag_sliced = stats["tag_sliced_analysis"]
+        tag_rows = tag_sliced["tags"]
+
+        self.assertEqual(tag_sliced["tag_basis"], "topic_tags")
+        self.assertEqual(tag_sliced["multi_tag_policy"], "duplicate_per_tag")
+        self.assertEqual([row["tag"] for row in tag_rows], ["Policy", "AI", "Untagged"])
+        by_tag = {row["tag"]: row for row in tag_rows}
+        self.assertEqual(by_tag["Policy"]["n_articles"], 2)
+        self.assertEqual(by_tag["Policy"]["n_sources"], 2)
+        self.assertEqual(by_tag["AI"]["n_articles"], 1)
+        self.assertEqual(by_tag["Untagged"]["n_articles"], 1)
+        self.assertEqual(by_tag["Policy"]["lens_summary"]["lenses"][0]["lens"], "Evidence")
+        self.assertIn("daily_counts", by_tag["Policy"]["trends"])
+        self.assertEqual(sum(row["n_articles"] for row in tag_rows), 4)
+        self.assertEqual(tag_sliced["summary"]["tag_count"], 3)
+        self.assertEqual(tag_sliced["summary"]["shown_tag_count"], 3)
+        self.assertEqual(tag_sliced["summary"]["total_memberships"], 4)
+
+    def test_tag_sliced_analysis_marks_unavailable_tag_when_preconditions_fail(self):
+        payload = {
+            "analysis": {"lens_summary": {"lenses": [{"name": "Evidence", "max_total": 10.0}]}},
+            "articles": [
+                {
+                    "id": "tag-u-1",
+                    "title": "Single source one",
+                    "published": "2026-03-02T00:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["SingleTag"],
+                    "source": {"name": "Only Source"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Single source one", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 60.0}}},
+                },
+                {
+                    "id": "tag-u-2",
+                    "title": "Single source two",
+                    "published": "2026-03-02T01:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["SingleTag"],
+                    "source": {"name": "Only Source"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": "Single source two", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": 55.0}}},
+                },
+            ],
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        tag_sliced = stats["tag_sliced_analysis"]
+        self.assertEqual(tag_sliced["summary"]["tag_count"], 1)
+        self.assertEqual(tag_sliced["summary"]["analyzed_tag_count"], 0)
+        self.assertEqual(tag_sliced["summary"]["unavailable_tag_count"], 1)
+
+        tag_row = tag_sliced["tags"][0]
+        self.assertEqual(tag_row["tag"], "SingleTag")
+        self.assertEqual(tag_row["source_differentiation"]["status"], "unavailable")
+        self.assertTrue(tag_row["source_differentiation"]["reason"])
+        self.assertEqual(tag_row["source_lens_effects"]["status"], "unavailable")
+        self.assertTrue(tag_row["source_lens_effects"]["reason"])
+
+    def test_tag_sliced_analysis_can_reduce_pooled_confound_signal(self):
+        articles = []
+        for index, (source_suffix, score) in enumerate((("A", 92), ("A", 90), ("A", 88), ("B", 89)), start=1):
+            articles.append(
+                {
+                    "id": f"tag1-{index}",
+                    "title": f"Tag1 {index}",
+                    "published": f"2026-03-02T0{index}:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["Tag1"],
+                    "source": {"name": f"Source {source_suffix}"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": f"Tag1 {index}", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": float(score)}}},
+                }
+            )
+        for index, (source_suffix, score) in enumerate((("A", 11), ("B", 9), ("B", 10), ("B", 12)), start=1):
+            articles.append(
+                {
+                    "id": f"tag2-{index}",
+                    "title": f"Tag2 {index}",
+                    "published": f"2026-03-03T0{index}:00:00Z",
+                    "ai_tags": ["X"],
+                    "topic_tags": ["Tag2"],
+                    "source": {"name": f"Source {source_suffix}"},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": f"Tag2 {index}", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {"lens_scores": {"Evidence": {"percent": float(score)}}},
+                }
+            )
+
+        payload = {
+            "analysis": {"lens_summary": {"lenses": [{"name": "Evidence", "max_total": 10.0}]}},
+            "articles": articles,
+        }
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        tag_sliced = stats["tag_sliced_analysis"]
+
+        pooled_row = tag_sliced["pooled"]["source_lens_effects"]["rows"][0]
+        pooled_eta = float(pooled_row["eta_sq"])
+        tag_etas = []
+        for tag_row in tag_sliced["tags"]:
+            tag_rows = tag_row["source_lens_effects"]["rows"]
+            self.assertTrue(tag_rows)
+            tag_etas.append(float(tag_rows[0]["eta_sq"]))
+
+        self.assertGreater(pooled_eta, max(tag_etas))
+        self.assertEqual(tag_sliced["summary"]["tag_count"], 2)
+        self.assertEqual(tag_sliced["summary"]["analyzed_tag_count"], 2)
 
     def test_source_lens_effects_fdr_is_monotonic_and_bounded(self):
         articles = []

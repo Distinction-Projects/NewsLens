@@ -13,6 +13,11 @@ from src.services.rss_digest import (
     parse_snapshot_date,
     sort_records_desc,
 )
+from src.services.news_stats_snapshot import (
+    PrecomputedStatsError,
+    load_precomputed_stats_response,
+    stats_backend_mode,
+)
 
 
 @dataclass
@@ -292,9 +297,13 @@ class NewsController:
 
         try:
             snapshot_date_value = parse_snapshot_date(snapshot_date)
+            if snapshot_date_value is None and stats_backend_mode() == "precomputed":
+                return _response_json(200, load_precomputed_stats_response())
             bundle = self.client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date_value)
         except ValueError as exc:
             return _response_json(400, {"status": "bad_request", "error": str(exc)})
+        except PrecomputedStatsError as exc:
+            return _response_json(503, {"status": "precomputed_stats_unavailable", "error": str(exc), "data": None})
         except RssDigestNotFoundError as exc:
             if snapshot_date_value:
                 return _response_json(404, {"status": "not_found", "error": str(exc)})

@@ -45,13 +45,13 @@ export const NEWS_PAGES = [
     slug: "source-differentiation",
     title: "News Source Differentiation",
     summary:
-      "Estimate how separable sources are in lens-score space, including within-topic mode."
+      "Estimate how separable sources are in lens-score space, including within-topic and within-tag modes."
   },
   {
     slug: "source-effects",
     title: "News Source Effects",
     summary:
-      "Compare source effect sizes by lens with pooled vs within-topic views."
+      "Compare source effect sizes by lens with pooled, within-topic, and within-tag views."
   },
   {
     slug: "score-lab",

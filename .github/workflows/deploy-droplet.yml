@@ -23,6 +23,8 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
       NEWS_DATA_BACKEND: json
+      NEWS_STATS_BACKEND: precomputed
+      NEWS_STATS_SNAPSHOT_PATH: /srv/newslens/app/data/processed/news_analytics_snapshot.json
       RSS_SOURCE_EFFECT_PERMUTATIONS: 20
       RSS_CACHE_TTL_SECONDS: 21600
     steps:
@@ -66,6 +68,8 @@ jobs:
             printf 'RSS_DAILY_JSON_URL=%s\n' "${RSS_DAILY_JSON_URL}"
             printf 'RSS_HISTORY_JSON_URL_TEMPLATE=%s\n' "${RSS_HISTORY_JSON_URL_TEMPLATE}"
             printf 'NEWS_DATA_BACKEND=%s\n' "${NEWS_DATA_BACKEND:-json}"
+            printf 'NEWS_STATS_BACKEND=%s\n' "${NEWS_STATS_BACKEND:-dynamic}"
+            printf 'NEWS_STATS_SNAPSHOT_PATH=%s\n' "${NEWS_STATS_SNAPSHOT_PATH:-/srv/newslens/app/data/processed/news_analytics_snapshot.json}"
             printf 'RSS_SOURCE_EFFECT_PERMUTATIONS=%s\n' "${RSS_SOURCE_EFFECT_PERMUTATIONS:-20}"
             printf 'RSS_CACHE_TTL_SECONDS=%s\n' "${RSS_CACHE_TTL_SECONDS:-21600}"
             if [ -n "${DATABASE_URL:-}" ]; then
@@ -133,15 +137,6 @@ jobs:
           ${SUDO} chown -R newslens:newslens /srv/newslens/app
           timeout 600 /srv/newslens/venv/bin/pip install -r /srv/newslens/app/requirements.txt
 
-          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
-          ${SUDO} systemctl daemon-reload
-          ${SUDO} systemctl disable --now newslens 2>/dev/null || true
-          ${SUDO} systemctl enable newslens-api
-          ${SUDO} systemctl kill --kill-who=all newslens-api 2>/dev/null || true
-          ${SUDO} systemctl reset-failed newslens-api 2>/dev/null || true
-          timeout 60 ${SUDO} systemctl restart newslens-api
-          ${SUDO} systemctl is-active --quiet newslens-api
-
           DATA_BACKEND="$(grep -E '^NEWS_DATA_BACKEND=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
           DATA_BACKEND="${DATA_BACKEND:-json}"
 
@@ -162,6 +157,29 @@ jobs:
           else
             echo "Skipping Postgres migration/import for NEWS_DATA_BACKEND=${DATA_BACKEND}."
           fi
+
+          RSS_URL="$(grep -E '^RSS_DAILY_JSON_URL=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+          RSS_HISTORY_TEMPLATE="$(grep -E '^RSS_HISTORY_JSON_URL_TEMPLATE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+          STATS_SNAPSHOT_PATH="$(grep -E '^NEWS_STATS_SNAPSHOT_PATH=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+          STATS_SNAPSHOT_PATH="${STATS_SNAPSHOT_PATH:-/srv/newslens/app/data/processed/news_analytics_snapshot.json}"
+          ${SUDO} install -d -m 775 -o newslens -g newslens "$(dirname "$STATS_SNAPSHOT_PATH")"
+          run_as_app_user_timeout 900 env \
+            NEWS_STATS_BACKEND=dynamic \
+            NEWS_DATA_BACKEND="$DATA_BACKEND" \
+            RSS_DAILY_JSON_URL="$RSS_URL" \
+            RSS_HISTORY_JSON_URL_TEMPLATE="$RSS_HISTORY_TEMPLATE" \
+            RSS_SOURCE_EFFECT_PERMUTATIONS="$(grep -E '^RSS_SOURCE_EFFECT_PERMUTATIONS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            RSS_CACHE_TTL_SECONDS="$(grep -E '^RSS_CACHE_TTL_SECONDS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            /srv/newslens/venv/bin/python -m src.analytics.build_news_snapshot --output "$STATS_SNAPSHOT_PATH"
+
+          ${SUDO} install -m 644 /srv/newslens/app/deploy/droplet/newslens-api.service /etc/systemd/system/newslens-api.service
+          ${SUDO} systemctl daemon-reload
+          ${SUDO} systemctl disable --now newslens 2>/dev/null || true
+          ${SUDO} systemctl enable newslens-api
+          ${SUDO} systemctl kill --kill-who=all newslens-api 2>/dev/null || true
+          ${SUDO} systemctl reset-failed newslens-api 2>/dev/null || true
+          timeout 60 ${SUDO} systemctl restart newslens-api
+          ${SUDO} systemctl is-active --quiet newslens-api
 
           # Avoid OOM kills during Next.js production build on small droplets.
           if ! swapon --show | grep -q .; then
@@ -188,9 +206,9 @@ jobs:
           ${SUDO} systemctl is-active --quiet newslens-api
           ${SUDO} systemctl is-active --quiet newslens-node
 
-          # The first JSON-backed stats request derives the full analytics bundle.
-          # Retry startup separately so a transient connection refusal after restart
-          # does not fail an otherwise healthy deploy.
+          # Stats should be ready from the precomputed snapshot. Retry startup
+          # separately so a transient connection refusal after restart does not
+          # fail an otherwise healthy deploy.
           warm_ok=0
           for i in $(seq 1 24); do
             if curl -fsS --connect-timeout 3 --max-time 180 http://127.0.0.1:9000/api/news/stats >/dev/null; then

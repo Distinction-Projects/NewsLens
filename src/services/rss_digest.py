@@ -2919,6 +2919,213 @@ def _source_topic_control_from_records(
     return base_payload
 
 
+def _tag_slice_lens_summary(
+    rows: list[dict[str, float]],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    discovered = {
+        lens_name
+        for row in rows
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float))
+    }
+    lens_names = _ordered_lenses(preferred_lenses or [], discovered)
+    lens_rows: list[dict[str, Any]] = []
+    for lens_name in lens_names:
+        values = [float(row[lens_name]) for row in rows if isinstance(row.get(lens_name), (int, float))]
+        if not values:
+            continue
+        lens_rows.append(
+            {
+                "lens": lens_name,
+                "n": len(values),
+                "mean_percent": sum(values) / len(values),
+                "min_percent": min(values),
+                "max_percent": max(values),
+            }
+        )
+    lens_rows.sort(key=lambda row: (-float(row.get("mean_percent", 0.0)), str(row.get("lens", "")).lower()))
+    return {"lenses": lens_rows, "lens_count": len(lens_rows)}
+
+
+def _tag_slice_trends(
+    rows: list[dict[str, float]],
+    article_meta_rows: list[dict[str, Any]],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    if len(rows) != len(article_meta_rows):
+        return {"daily_counts": [], "daily_lens_means": []}
+
+    daily_counter: Counter[str] = Counter()
+    daily_lens_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    discovered: set[str] = set()
+    for lens_row, meta in zip(rows, article_meta_rows):
+        published = parse_datetime(meta.get("published_at") if isinstance(meta, dict) else None)
+        if published is None:
+            continue
+        day = published.date().isoformat()
+        daily_counter[day] += 1
+        for lens_name, value in lens_row.items():
+            if isinstance(lens_name, str) and isinstance(value, (int, float)):
+                discovered.add(lens_name)
+                daily_lens_values[day][lens_name].append(float(value))
+
+    lens_names = _ordered_lenses(preferred_lenses or [], discovered)
+    daily_counts = [{"date": day, "count": daily_counter[day]} for day in sorted(daily_counter.keys())]
+    daily_lens_means: list[dict[str, Any]] = []
+    for day in sorted(daily_lens_values.keys()):
+        row: dict[str, Any] = {"date": day}
+        for lens_name in lens_names:
+            values = daily_lens_values[day].get(lens_name, [])
+            if values:
+                row[lens_name] = sum(values) / len(values)
+        daily_lens_means.append(row)
+    return {"daily_counts": daily_counts, "daily_lens_means": daily_lens_means}
+
+
+def _tag_sliced_analysis_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    tag_keys_for_lens_rows: list[list[str]],
+    tag_display_labels: dict[str, str],
+    article_meta_rows: list[dict[str, Any]],
+    pooled_source_differentiation: dict[str, Any],
+    pooled_source_lens_effects: dict[str, Any],
+    preferred_lenses: list[str] | None = None,
+    top_n: int = 20,
+) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
+        "tag_basis": "topic_tags",
+        "multi_tag_policy": "duplicate_per_tag",
+        "pooled_label": "tag-confounded",
+        "top_n": top_n,
+        "pooled": {
+            "source_differentiation": (
+                pooled_source_differentiation if isinstance(pooled_source_differentiation, dict) else {}
+            ),
+            "source_lens_effects": pooled_source_lens_effects if isinstance(pooled_source_lens_effects, dict) else {},
+        },
+        "tags": [],
+        "summary": {
+            "tag_count": 0,
+            "shown_tag_count": 0,
+            "analyzed_tag_count": 0,
+            "unavailable_tag_count": 0,
+            "total_memberships": 0,
+        },
+    }
+    if (
+        not article_lens_percentages
+        or len(article_lens_percentages) != len(source_labels)
+        or len(article_lens_percentages) != len(tag_keys_for_lens_rows)
+        or len(article_lens_percentages) != len(article_meta_rows)
+    ):
+        return base_payload
+
+    tag_display = dict(tag_display_labels)
+    tag_display.setdefault("__untagged__", "Untagged")
+
+    tag_buckets: dict[str, dict[str, Any]] = defaultdict(lambda: {"rows": [], "source_labels": [], "article_meta_rows": []})
+    total_memberships = 0
+    for lens_row, source_label, tag_keys, meta_row in zip(
+        article_lens_percentages,
+        source_labels,
+        tag_keys_for_lens_rows,
+        article_meta_rows,
+    ):
+        effective_keys: list[str] = []
+        if isinstance(tag_keys, list):
+            for tag_key in tag_keys:
+                if not isinstance(tag_key, str):
+                    continue
+                normalized_key = tag_key.strip().lower()
+                if normalized_key:
+                    effective_keys.append(normalized_key)
+        if not effective_keys:
+            effective_keys = ["__untagged__"]
+
+        unique_keys = list(dict.fromkeys(effective_keys))
+        for tag_key in unique_keys:
+            tag_buckets[tag_key]["rows"].append(lens_row)
+            tag_buckets[tag_key]["source_labels"].append(source_label)
+            tag_buckets[tag_key]["article_meta_rows"].append(meta_row)
+            total_memberships += 1
+
+    all_tag_keys = sorted(
+        tag_buckets.keys(),
+        key=lambda key: (-len(tag_buckets[key]["rows"]), str(tag_display.get(key) or key).lower()),
+    )
+    shown_keys = all_tag_keys[: max(top_n, 0)]
+    if "__untagged__" in tag_buckets and "__untagged__" not in shown_keys:
+        shown_keys.append("__untagged__")
+
+    tag_rows: list[dict[str, Any]] = []
+    analyzed_tag_count = 0
+    unavailable_tag_count = 0
+    for tag_key in shown_keys:
+        bucket = tag_buckets[tag_key]
+        tag_rows_data = bucket["rows"] if isinstance(bucket.get("rows"), list) else []
+        tag_source_labels = bucket["source_labels"] if isinstance(bucket.get("source_labels"), list) else []
+        tag_meta_rows = bucket["article_meta_rows"] if isinstance(bucket.get("article_meta_rows"), list) else []
+        source_counts_counter: Counter[str] = Counter(tag_source_labels)
+        source_counts = {
+            source_name: count
+            for source_name, count in sorted(
+                source_counts_counter.items(),
+                key=lambda item: (-item[1], item[0].lower()),
+            )
+        }
+
+        tag_source_lens_effects = _source_lens_effects_from_records(
+            tag_rows_data,
+            tag_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+        tag_source_differentiation = _source_differentiation_from_records(
+            tag_rows_data,
+            tag_source_labels,
+            preferred_lenses=preferred_lenses,
+        )
+
+        differentiation_ok = (
+            isinstance(tag_source_differentiation, dict)
+            and str(tag_source_differentiation.get("status") or "") == "ok"
+        )
+        effects_ok = (
+            isinstance(tag_source_lens_effects, dict)
+            and str(tag_source_lens_effects.get("status") or "") == "ok"
+        )
+        if differentiation_ok or effects_ok:
+            analyzed_tag_count += 1
+        else:
+            unavailable_tag_count += 1
+
+        tag_rows.append(
+            {
+                "tag": tag_display.get(tag_key) or tag_key,
+                "tag_key": tag_key,
+                "n_articles": len(tag_rows_data),
+                "n_sources": len(source_counts_counter),
+                "source_counts": source_counts,
+                "lens_summary": _tag_slice_lens_summary(tag_rows_data, preferred_lenses=preferred_lenses),
+                "trends": _tag_slice_trends(tag_rows_data, tag_meta_rows, preferred_lenses=preferred_lenses),
+                "source_differentiation": tag_source_differentiation,
+                "source_lens_effects": tag_source_lens_effects,
+            }
+        )
+
+    tag_rows.sort(key=lambda row: (-int(row.get("n_articles", 0)), str(row.get("tag", "")).lower()))
+    base_payload["tags"] = tag_rows
+    base_payload["summary"] = {
+        "tag_count": len(all_tag_keys),
+        "shown_tag_count": len(tag_rows),
+        "analyzed_tag_count": analyzed_tag_count,
+        "unavailable_tag_count": unavailable_tag_count,
+        "total_memberships": total_memberships,
+    }
+    return base_payload
+
+
 def _source_reliability_assessment(
     source_differentiation: dict[str, Any] | None,
     source_lens_effects: dict[str, Any] | None,
@@ -3322,6 +3529,16 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         pooled_source_lens_effects=source_lens_effects,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    tag_sliced_analysis = _tag_sliced_analysis_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        topic_keys_for_lens_rows,
+        topic_display_labels,
+        article_meta_for_lens_rows,
+        pooled_source_differentiation=source_differentiation,
+        pooled_source_lens_effects=source_lens_effects,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
     source_reliability = _source_reliability_from_topic_control(
         source_differentiation,
         source_lens_effects,
@@ -3377,6 +3594,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "source_topic_control": source_topic_control,
+        "tag_sliced_analysis": tag_sliced_analysis,
         "source_reliability": source_reliability,
         "lens_views": lens_views,
         "source_tag_views": source_tag_views,

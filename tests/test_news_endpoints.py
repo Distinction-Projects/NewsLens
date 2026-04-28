@@ -224,6 +224,20 @@ class NewsEndpointTests(unittest.TestCase):
             source_topic_control["pooled"]["source_lens_effects"],
             source_lens_effects,
         )
+        tag_sliced_analysis = stats_payload["data"]["derived"]["tag_sliced_analysis"]
+        self.assertEqual(tag_sliced_analysis["tag_basis"], "topic_tags")
+        self.assertEqual(tag_sliced_analysis["multi_tag_policy"], "duplicate_per_tag")
+        self.assertEqual(tag_sliced_analysis["pooled_label"], "tag-confounded")
+        self.assertIn("tags", tag_sliced_analysis)
+        self.assertIn("summary", tag_sliced_analysis)
+        self.assertEqual(
+            tag_sliced_analysis["pooled"]["source_differentiation"],
+            source_differentiation,
+        )
+        self.assertEqual(
+            tag_sliced_analysis["pooled"]["source_lens_effects"],
+            source_lens_effects,
+        )
         self.assertIn("source_reliability", stats_payload["data"]["derived"])
         source_reliability = stats_payload["data"]["derived"]["source_reliability"]
         self.assertEqual(source_reliability["method"], "heuristic-v1")

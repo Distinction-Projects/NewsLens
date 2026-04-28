@@ -97,6 +97,7 @@ test("source differentiation supports pooled and within-topic modes", async ({ p
 
   await expect(page.getByRole("link", { name: "Pooled (topic-confounded)" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Within-topic" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Within-tag" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pooled Source Differentiation" })).toBeVisible();
   await expect(page.getByText("Label: topic-confounded")).toBeVisible();
 
@@ -108,6 +109,21 @@ test("source differentiation supports pooled and within-topic modes", async ({ p
     await expect(topicLinks.first()).toBeVisible();
   } else {
     await expect(page.getByText("No topic slices available for this dataset.")).toBeVisible();
+  }
+
+  await page.getByRole("link", { name: "Within-tag" }).click();
+  await expect(page).toHaveURL(/\/news\/source-differentiation\?.*mode=within-tag/);
+  await expect(page.getByRole("heading", { name: /Within-Tag Source Differentiation/ })).toBeVisible();
+  const tagLinks = page.locator('a[href*="mode=within-tag"][href*="tag_slice="]');
+  if ((await tagLinks.count()) > 0) {
+    await expect(tagLinks.first()).toBeVisible();
+  } else {
+    const apiErrorAfterTag = page.getByRole("heading", { name: "API Error" });
+    if ((await apiErrorAfterTag.count()) > 0) {
+      await expect(apiErrorAfterTag).toBeVisible();
+    } else {
+      await expect(page.getByText("No data available.").first()).toBeVisible();
+    }
   }
 });
 
@@ -123,6 +139,7 @@ test("source effects supports pooled and within-topic modes", async ({ page, bas
 
   await expect(page.getByRole("link", { name: "Pooled (topic-confounded)" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Within-topic" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Within-tag" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pooled Source Effects" })).toBeVisible();
   await expect(page.getByText("Label: topic-confounded")).toBeVisible();
 
@@ -134,6 +151,21 @@ test("source effects supports pooled and within-topic modes", async ({ page, bas
     await expect(topicLinks.first()).toBeVisible();
   } else {
     await expect(page.getByText("No topic slices available for this dataset.")).toBeVisible();
+  }
+
+  await page.getByRole("link", { name: "Within-tag" }).click();
+  await expect(page).toHaveURL(/mode=within-tag/);
+  await expect(page.getByRole("heading", { name: /Within-Tag Source Effects/ })).toBeVisible();
+  const tagLinks = page.locator('a[href*="mode=within-tag"][href*="tag_slice="]');
+  if ((await tagLinks.count()) > 0) {
+    await expect(tagLinks.first()).toBeVisible();
+  } else {
+    const apiErrorAfterTag = page.getByRole("heading", { name: "API Error" });
+    if ((await apiErrorAfterTag.count()) > 0) {
+      await expect(apiErrorAfterTag).toBeVisible();
+    } else {
+      await expect(page.getByText("No data available.").first()).toBeVisible();
+    }
   }
 });
 
