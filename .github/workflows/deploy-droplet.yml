@@ -22,7 +22,7 @@ jobs:
       RSS_HISTORY_JSON_URL_TEMPLATE: ${{ secrets.RSS_HISTORY_JSON_URL_TEMPLATE }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
-      NEWS_DATA_BACKEND: ${{ secrets.NEWS_DATA_BACKEND }}
+      NEWS_DATA_BACKEND: json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
