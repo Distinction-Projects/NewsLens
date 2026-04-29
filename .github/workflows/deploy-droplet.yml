@@ -198,7 +198,10 @@ jobs:
           RSS_HISTORY_TEMPLATE="$(grep -E '^RSS_HISTORY_JSON_URL_TEMPLATE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
           STATS_SNAPSHOT_PATH="$(grep -E '^NEWS_STATS_SNAPSHOT_PATH=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
           STATS_SNAPSHOT_PATH="${STATS_SNAPSHOT_PATH:-/srv/newslens/app/data/processed/news_analytics_snapshot.json}"
+          EVENT_CACHE_PATH="$(grep -E '^NEWS_EVENT_EMBEDDING_CACHE_PATH=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)"
+          EVENT_CACHE_PATH="${EVENT_CACHE_PATH:-/srv/newslens/app/data/cache/news_event_embeddings.sqlite}"
           ${SUDO} install -d -m 775 -o newslens -g newslens "$(dirname "$STATS_SNAPSHOT_PATH")"
+          ${SUDO} install -d -m 775 -o newslens -g newslens "$(dirname "$EVENT_CACHE_PATH")"
           run_as_app_user_timeout 900 env \
             NEWS_STATS_BACKEND=dynamic \
             NEWS_DATA_BACKEND="$DATA_BACKEND" \
