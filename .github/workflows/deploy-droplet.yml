@@ -285,18 +285,18 @@ jobs:
           stats_contract_ok=0
           for i in $(seq 1 12); do
             if /srv/newslens/venv/bin/python - << 'PY'
-import json
-import urllib.request
+          import json
+          import urllib.request
 
-with urllib.request.urlopen("http://127.0.0.1:9000/api/news/stats", timeout=120) as response:
-    payload = json.loads(response.read().decode("utf-8"))
+          with urllib.request.urlopen("http://127.0.0.1:9000/api/news/stats", timeout=120) as response:
+              payload = json.loads(response.read().decode("utf-8"))
 
-derived = payload.get("data", {}).get("derived", {})
-required = ["source_topic_control", "tag_sliced_analysis", "event_control"]
-missing = [key for key in required if not isinstance(derived.get(key), dict)]
-if missing:
-    raise SystemExit(f"missing derived fields: {missing}")
-PY
+          derived = payload.get("data", {}).get("derived", {})
+          required = ["source_topic_control", "tag_sliced_analysis", "event_control"]
+          missing = [key for key in required if not isinstance(derived.get(key), dict)]
+          if missing:
+              raise SystemExit(f"missing derived fields: {missing}")
+          PY
             then
               stats_contract_ok=1
               break
