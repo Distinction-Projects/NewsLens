@@ -57,6 +57,7 @@ class NewsSnapshotBuilderTests(unittest.TestCase):
             self.assertIn("data", written)
             self.assertIn("derived", written["data"])
             self.assertIn("tag_sliced_analysis", written["data"]["derived"])
+            self.assertIn("event_control", written["data"]["derived"])
             self.assertEqual(written["meta"]["stats_backend"], "precomputed")
             self.assertEqual(written["snapshot"]["snapshot_schema_version"], "1.0")
 

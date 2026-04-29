@@ -103,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
     derived = payload.get("data", {}).get("derived", {}) if isinstance(payload.get("data"), dict) else {}
     tag_sliced = derived.get("tag_sliced_analysis") if isinstance(derived, dict) else {}
     tag_summary = tag_sliced.get("summary") if isinstance(tag_sliced, dict) else {}
+    event_control = derived.get("event_control") if isinstance(derived, dict) else {}
+    event_summary = event_control.get("summary") if isinstance(event_control, dict) else {}
+    event_cache = event_control.get("cache") if isinstance(event_control, dict) else {}
     print(
         json.dumps(
             {
@@ -111,6 +114,16 @@ def main(argv: list[str] | None = None) -> int:
                 "runtime_seconds": payload.get("snapshot", {}).get("runtime_seconds"),
                 "derived_key_count": len(derived) if isinstance(derived, dict) else 0,
                 "tag_sliced_summary": tag_summary if isinstance(tag_summary, dict) else {},
+                "event_control": {
+                    "status": event_control.get("status") if isinstance(event_control, dict) else None,
+                    "event_count": event_summary.get("event_count") if isinstance(event_summary, dict) else None,
+                    "multi_source_event_count": event_summary.get("multi_source_event_count")
+                    if isinstance(event_summary, dict)
+                    else None,
+                    "cache_hits": event_cache.get("hits") if isinstance(event_cache, dict) else None,
+                    "cache_misses": event_cache.get("misses") if isinstance(event_cache, dict) else None,
+                    "cache_stored": event_cache.get("stored") if isinstance(event_cache, dict) else None,
+                },
             },
             sort_keys=True,
         )

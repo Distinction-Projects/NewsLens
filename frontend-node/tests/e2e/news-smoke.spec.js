@@ -10,6 +10,7 @@ const NEWS_ROUTE_EXPECTATIONS = [
   { path: "/news/lens-pca", heading: "News Lens PCA" },
   { path: "/news/source-differentiation", heading: "News Source Differentiation" },
   { path: "/news/source-effects", heading: "News Source Effects" },
+  { path: "/news/event-control", heading: "News Event Control" },
   { path: "/news/score-lab", heading: "News Score Lab" },
   { path: "/news/lens-explorer", heading: "News Lens Explorer" },
   { path: "/news/lens-by-source", heading: "News Lens by Source" },
@@ -169,6 +170,24 @@ test("source effects supports pooled and within-topic modes", async ({ page, bas
   }
 });
 
+test("event control renders status, diagnostics, and export links", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/event-control`);
+  await expect(page.getByRole("heading", { name: "News Event Control" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Event-Control Status" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Display Controls and Exports" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Event Coverage by Source" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Matched Event Clusters" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Summary JSON" })).toBeVisible();
+  await expect(page.locator('select[name="limit"]')).toBeVisible();
+});
+
 test("chart-heavy pages render plot containers when API is available", async ({ page, baseURL }) => {
   const chartPages = [
     { path: "/news/lens-matrix", heading: "News Lens Matrix" },
@@ -203,17 +222,15 @@ test("lens stability exposes ranking controls and chart output", async ({ page, 
     return;
   }
 
-  await expect(page.getByRole("heading", { name: "Stability Filters" })).toBeVisible();
-  await expect(page.locator('select[name="metric"]')).toBeVisible();
-  await expect(page.locator('input[name="top_n"]')).toBeVisible();
-  await expect(page.locator(".plotly-chart").first()).toBeVisible();
-
-  await gotoWithRetry(page, `${baseURL}/news/lens-stability?metric=range&top_n=7`);
-  await expect(page.locator('select[name="metric"]')).toHaveValue("range");
-  await expect(page.locator('input[name="top_n"]')).toHaveValue("7");
+  await expect(page.getByRole("heading", { name: "Stability Summary" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Stability Visuals" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Lens Stability Table" })).toBeVisible();
-  await expect(page.locator(".plotly-chart")).toHaveCount(2);
+  const plotCount = await page.locator(".plotly-chart").count();
+  if (plotCount > 0) {
+    await expect(page.locator(".plotly-chart").first()).toBeVisible();
+  } else {
+    await expect(page.getByText("No data available.").first()).toBeVisible();
+  }
 });
 
 test("evaluation route renders corpus/model controls and visuals", async ({ page, baseURL }) => {

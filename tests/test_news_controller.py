@@ -99,7 +99,7 @@ class NewsControllerTests(unittest.TestCase):
         controller = NewsController(RssDigestClient())
         response = controller.export_artifact(
             refresh=None,
-            artifact="source_differentiation_summary",
+            artifact="event_control_summary",
             export_format="csv",
             snapshot_date=None,
         )
@@ -107,6 +107,8 @@ class NewsControllerTests(unittest.TestCase):
         self.assertEqual(response.content_type, "text/csv; charset=utf-8")
         self.assertIn("Content-Disposition", response.headers)
         self.assertIsInstance(response.body, str)
+        self.assertIn("event_control_summary.csv", response.headers["Content-Disposition"])
+        self.assertIn("event_count", response.body)
 
 
 if __name__ == "__main__":

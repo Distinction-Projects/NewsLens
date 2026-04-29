@@ -1,5 +1,6 @@
 import { render as renderDataQuality } from "./data-quality";
 import { render as renderDigest } from "./digest";
+import { render as renderEventControl } from "./event-control";
 import { render as renderIntegration } from "./integration";
 import { render as renderLensBySource } from "./lens-by-source";
 import { render as renderLensCorrelations } from "./lens-correlations";
@@ -24,6 +25,7 @@ import { render as renderWorkflowStatus } from "./workflow-status";
 const RENDERERS = {
   "data-quality": renderDataQuality,
   digest: renderDigest,
+  "event-control": renderEventControl,
   integration: renderIntegration,
   "lens-by-source": renderLensBySource,
   "lens-correlations": renderLensCorrelations,

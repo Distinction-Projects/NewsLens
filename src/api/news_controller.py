@@ -109,15 +109,44 @@ def _common_meta(bundle: dict[str, Any], filtered_count: int, returned_count: in
     }
 
 
-def _select_lens_correlations(bundle: dict[str, Any]) -> dict[str, Any]:
-    analysis = bundle.get("analysis")
-    analysis_obj = analysis if isinstance(analysis, dict) else {}
+def _stats_obj_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    stats = payload.get("stats")
+    if isinstance(stats, dict):
+        return stats
+    data = payload.get("data")
+    if isinstance(data, dict) and isinstance(data.get("derived"), dict):
+        return data["derived"]
+    return {}
+
+
+def _analysis_obj_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    analysis = payload.get("analysis")
+    if isinstance(analysis, dict):
+        return analysis
+    data = payload.get("data")
+    if isinstance(data, dict) and isinstance(data.get("analysis"), dict):
+        return data["analysis"]
+    return {}
+
+
+def _export_meta_from_payload(payload: dict[str, Any], filtered_count: int, returned_count: int) -> dict[str, Any]:
+    if "source_url" in payload and "fetched_at" in payload:
+        return _common_meta(payload, filtered_count=filtered_count, returned_count=returned_count)
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    return {
+        **meta,
+        "filtered_count": filtered_count,
+        "returned_count": returned_count,
+    }
+
+
+def _select_lens_correlations(payload: dict[str, Any]) -> dict[str, Any]:
+    analysis_obj = _analysis_obj_from_payload(payload)
     upstream = analysis_obj.get("lens_correlations")
     if isinstance(upstream, dict) and isinstance(upstream.get("lenses"), list) and upstream.get("lenses"):
         return upstream
 
-    stats = bundle.get("stats")
-    stats_obj = stats if isinstance(stats, dict) else {}
+    stats_obj = _stats_obj_from_payload(payload)
     derived = stats_obj.get("lens_correlations")
     if isinstance(derived, dict):
         return derived
@@ -165,9 +194,31 @@ def _matrix_pair_rows(lens_correlations: dict[str, Any]) -> list[dict[str, Any]]
     return rows
 
 
-def _export_rows_for_artifact(bundle: dict[str, Any], artifact: str) -> list[dict[str, Any]]:
-    stats = bundle.get("stats")
-    stats_obj = stats if isinstance(stats, dict) else {}
+def _source_differentiation_summary_rows(source_diff: dict[str, Any]) -> list[dict[str, Any]]:
+    classification = source_diff.get("classification") if isinstance(source_diff.get("classification"), dict) else {}
+    multivariate = source_diff.get("multivariate") if isinstance(source_diff.get("multivariate"), dict) else {}
+    source_counts = source_diff.get("source_counts") if isinstance(source_diff.get("source_counts"), dict) else {}
+    return [
+        {
+            "status": source_diff.get("status"),
+            "reason": source_diff.get("reason"),
+            "n_articles": source_diff.get("n_articles"),
+            "n_sources": source_diff.get("n_sources"),
+            "n_lenses": source_diff.get("n_lenses"),
+            "permutations": source_diff.get("permutations"),
+            "multivariate_f_stat": multivariate.get("f_stat"),
+            "multivariate_r_squared": multivariate.get("r_squared"),
+            "multivariate_p_perm": multivariate.get("p_perm"),
+            "classification_accuracy": classification.get("accuracy"),
+            "classification_baseline_accuracy": classification.get("baseline_accuracy"),
+            "classification_p_perm": classification.get("p_perm"),
+            "source_counts": source_counts,
+        }
+    ]
+
+
+def _export_rows_for_artifact(payload: dict[str, Any], artifact: str) -> list[dict[str, Any]]:
+    stats_obj = _stats_obj_from_payload(payload)
     chart_aggregates = stats_obj.get("chart_aggregates") if isinstance(stats_obj.get("chart_aggregates"), dict) else {}
 
     if artifact == "source_tag_matrix":
@@ -177,33 +228,88 @@ def _export_rows_for_artifact(bundle: dict[str, Any], artifact: str) -> list[dic
         rows = chart_aggregates.get("score_status_by_source")
         return rows if isinstance(rows, list) else []
     if artifact == "lens_pair_metrics":
-        return _matrix_pair_rows(_select_lens_correlations(bundle))
+        return _matrix_pair_rows(_select_lens_correlations(payload))
     if artifact == "source_lens_effects":
         rows = stats_obj.get("source_lens_effects") if isinstance(stats_obj.get("source_lens_effects"), dict) else {}
         effect_rows = rows.get("rows") if isinstance(rows.get("rows"), list) else []
         return effect_rows
     if artifact == "source_differentiation_summary":
         source_diff = stats_obj.get("source_differentiation") if isinstance(stats_obj.get("source_differentiation"), dict) else {}
-        classification = source_diff.get("classification") if isinstance(source_diff.get("classification"), dict) else {}
-        multivariate = source_diff.get("multivariate") if isinstance(source_diff.get("multivariate"), dict) else {}
-        source_counts = source_diff.get("source_counts") if isinstance(source_diff.get("source_counts"), dict) else {}
+        return _source_differentiation_summary_rows(source_diff)
+    if artifact == "event_clusters":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        events = event_control.get("events") if isinstance(event_control.get("events"), list) else []
+        return [event for event in events if isinstance(event, dict)]
+    if artifact == "event_control_summary":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        summary = event_control.get("summary") if isinstance(event_control.get("summary"), dict) else {}
+        cache = event_control.get("cache") if isinstance(event_control.get("cache"), dict) else {}
+        config = event_control.get("config") if isinstance(event_control.get("config"), dict) else {}
         return [
             {
-                "status": source_diff.get("status"),
-                "reason": source_diff.get("reason"),
-                "n_articles": source_diff.get("n_articles"),
-                "n_sources": source_diff.get("n_sources"),
-                "n_lenses": source_diff.get("n_lenses"),
-                "permutations": source_diff.get("permutations"),
-                "multivariate_f_stat": multivariate.get("f_stat"),
-                "multivariate_r_squared": multivariate.get("r_squared"),
-                "multivariate_p_perm": multivariate.get("p_perm"),
-                "classification_accuracy": classification.get("accuracy"),
-                "classification_baseline_accuracy": classification.get("baseline_accuracy"),
-                "classification_p_perm": classification.get("p_perm"),
-                "source_counts": source_counts,
+                "status": event_control.get("status"),
+                "reason": event_control.get("reason"),
+                "total_articles_considered": summary.get("total_articles_considered"),
+                "embedded_count": summary.get("embedded_count"),
+                "event_count": summary.get("event_count"),
+                "multi_source_event_count": summary.get("multi_source_event_count"),
+                "singleton_count": summary.get("singleton_count"),
+                "unavailable_reason": summary.get("unavailable_reason"),
+                "cache_enabled": cache.get("enabled"),
+                "cache_hits": cache.get("hits"),
+                "cache_misses": cache.get("misses"),
+                "cache_stored": cache.get("stored"),
+                "embedding_model": config.get("embedding_model"),
+                "embedding_dimensions": config.get("embedding_dimensions"),
+                "similarity_threshold": config.get("similarity_threshold"),
+                "date_window_days": config.get("date_window_days"),
             }
         ]
+    if artifact == "event_source_coverage":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        coverage = event_control.get("event_coverage") if isinstance(event_control.get("event_coverage"), dict) else {}
+        rows = coverage.get("source_rows") if isinstance(coverage.get("source_rows"), list) else []
+        return rows
+    if artifact == "event_source_pair_coverage":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        coverage = event_control.get("event_coverage") if isinstance(event_control.get("event_coverage"), dict) else {}
+        rows = coverage.get("source_pair_rows") if isinstance(coverage.get("source_pair_rows"), list) else []
+        return rows
+    if artifact == "same_event_source_lens_effects":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        effects = (
+            event_control.get("same_event_source_lens_effects")
+            if isinstance(event_control.get("same_event_source_lens_effects"), dict)
+            else {}
+        )
+        rows = effects.get("rows") if isinstance(effects.get("rows"), list) else []
+        return rows
+    if artifact == "same_event_pairwise_source_lens_deltas":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        deltas = (
+            event_control.get("same_event_pairwise_source_lens_deltas")
+            if isinstance(event_control.get("same_event_pairwise_source_lens_deltas"), dict)
+            else {}
+        )
+        rows = deltas.get("rows") if isinstance(deltas.get("rows"), list) else []
+        return rows
+    if artifact == "same_event_variance_decomposition":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        variance = (
+            event_control.get("same_event_variance_decomposition")
+            if isinstance(event_control.get("same_event_variance_decomposition"), dict)
+            else {}
+        )
+        rows = variance.get("rows") if isinstance(variance.get("rows"), list) else []
+        return rows
+    if artifact == "same_event_source_differentiation_summary":
+        event_control = stats_obj.get("event_control") if isinstance(stats_obj.get("event_control"), dict) else {}
+        source_diff = (
+            event_control.get("same_event_source_differentiation")
+            if isinstance(event_control.get("same_event_source_differentiation"), dict)
+            else {}
+        )
+        return _source_differentiation_summary_rows(source_diff)
     return []
 
 
@@ -430,9 +536,17 @@ class NewsController:
         export_format_value = (export_format or "csv").strip().lower()
 
         allowed_artifacts = {
+            "event_clusters",
+            "event_control_summary",
+            "event_source_coverage",
+            "event_source_pair_coverage",
             "source_tag_matrix",
             "source_score_status",
             "lens_pair_metrics",
+            "same_event_source_differentiation_summary",
+            "same_event_source_lens_effects",
+            "same_event_pairwise_source_lens_deltas",
+            "same_event_variance_decomposition",
             "source_lens_effects",
             "source_differentiation_summary",
         }
@@ -450,9 +564,18 @@ class NewsController:
 
         try:
             snapshot_date_value = parse_snapshot_date(snapshot_date)
-            bundle = self.client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date_value)
+            if snapshot_date_value is None and stats_backend_mode() == "precomputed":
+                payload = load_precomputed_stats_response()
+            else:
+                payload = self.client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date_value)
         except ValueError as exc:
             return _response_json(400, {"status": "bad_request", "error": str(exc)})
+        except PrecomputedStatsError as exc:
+            return _response_json(
+                503,
+                {"status": "precomputed_stats_unavailable", "error": str(exc), "rows": []},
+                headers=_no_store_headers(),
+            )
         except RssDigestNotFoundError as exc:
             if snapshot_date_value:
                 return _response_json(404, {"status": "not_found", "error": str(exc)})
@@ -460,8 +583,8 @@ class NewsController:
         except Exception as exc:  # noqa: BLE001
             return _response_json(503, {"status": "upstream_error", "error": f"{type(exc).__name__}: {exc}"})
 
-        rows = _export_rows_for_artifact(bundle, artifact_value)
-        meta = _common_meta(bundle, filtered_count=len(rows), returned_count=len(rows))
+        rows = _export_rows_for_artifact(payload, artifact_value)
+        meta = _export_meta_from_payload(payload, filtered_count=len(rows), returned_count=len(rows))
 
         if export_format_value == "json":
             return _response_json(

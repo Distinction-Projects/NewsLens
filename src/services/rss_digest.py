@@ -14,6 +14,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from src.analytics.news_event_control import build_event_clusters, event_embedding_config_from_env
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - optional dependency guard
@@ -3126,6 +3128,537 @@ def _tag_sliced_analysis_from_records(
     return base_payload
 
 
+def _event_control_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    article_records: list[dict[str, Any]],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    event_control = build_event_clusters(
+        article_records,
+        source_labels,
+        config=event_embedding_config_from_env(),
+    )
+    if str(event_control.get("status") or "") != "ok":
+        return event_control
+
+    event_member_indexes = event_control.pop("_event_member_indexes", [])
+    event_control["event_coverage"] = _event_coverage_from_clusters(
+        source_labels,
+        event_control.get("events", []),
+        event_member_indexes,
+    )
+    event_control["same_event_variance_decomposition"] = _same_event_variance_decomposition(
+        article_lens_percentages,
+        source_labels,
+        event_control.get("events", []),
+        event_member_indexes,
+        preferred_lenses=preferred_lenses,
+    )
+    event_control["same_event_pairwise_source_lens_deltas"] = _same_event_pairwise_source_lens_deltas(
+        article_lens_percentages,
+        source_labels,
+        event_control.get("events", []),
+        event_member_indexes,
+        preferred_lenses=preferred_lenses,
+    )
+    same_event_indexes: list[int] = []
+    for event, member_indexes in zip(event_control.get("events", []), event_member_indexes):
+        if not isinstance(event, dict) or not isinstance(member_indexes, list):
+            continue
+        source_counts = event.get("source_counts") if isinstance(event.get("source_counts"), dict) else {}
+        if len(source_counts) < 2:
+            continue
+        for row_index in member_indexes:
+            if isinstance(row_index, int):
+                same_event_indexes.append(row_index)
+
+    same_event_indexes = list(dict.fromkeys(same_event_indexes))
+    same_event_rows = [
+        article_lens_percentages[row_index]
+        for row_index in same_event_indexes
+        if 0 <= row_index < len(article_lens_percentages)
+    ]
+    same_event_sources = [
+        source_labels[row_index]
+        for row_index in same_event_indexes
+        if 0 <= row_index < len(source_labels)
+    ]
+
+    if not same_event_rows or len(same_event_rows) != len(same_event_sources):
+        reason = "No multi-source event clusters with scored article rows are available."
+        event_control["same_event_source_differentiation"] = _source_differentiation_from_records(
+            [],
+            [],
+            preferred_lenses=preferred_lenses,
+        )
+        event_control["same_event_source_differentiation"]["reason"] = reason
+        event_control["same_event_source_lens_effects"] = _source_lens_effects_from_records(
+            [],
+            [],
+            preferred_lenses=preferred_lenses,
+        )
+        event_control["same_event_source_lens_effects"]["reason"] = reason
+        return event_control
+
+    event_control["same_event_source_differentiation"] = _source_differentiation_from_records(
+        same_event_rows,
+        same_event_sources,
+        preferred_lenses=preferred_lenses,
+    )
+    event_control["same_event_source_lens_effects"] = _source_lens_effects_from_records(
+        same_event_rows,
+        same_event_sources,
+        preferred_lenses=preferred_lenses,
+    )
+    return event_control
+
+
+def _same_event_pairwise_source_lens_deltas(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    events: list[Any],
+    event_member_indexes: list[Any],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    method = "event_source_mean_pairwise_delta_v1"
+    unavailable = {
+        "status": "unavailable",
+        "reason": "No multi-source event clusters with shared lens rows are available.",
+        "method": method,
+        "rows": [],
+        "summary": {
+            "source_pair_count": 0,
+            "lens_count": 0,
+            "row_count": 0,
+            "event_pair_observation_count": 0,
+        },
+    }
+    if not events or not event_member_indexes:
+        return unavailable
+
+    discovered_lenses = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float))
+    }
+    if preferred_lenses:
+        ordered_lenses = [lens_name for lens_name in preferred_lenses if lens_name in discovered_lenses]
+        ordered_lenses.extend(sorted(discovered_lenses - set(ordered_lenses)))
+    else:
+        ordered_lenses = sorted(discovered_lenses)
+
+    deltas_by_key: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for event, member_indexes in zip(events, event_member_indexes):
+        if not isinstance(event, dict) or not isinstance(member_indexes, list):
+            continue
+        event_id = str(event.get("event_id") or "")
+        source_lens_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for row_index in member_indexes:
+            if not isinstance(row_index, int) or row_index < 0 or row_index >= len(article_lens_percentages):
+                continue
+            if row_index >= len(source_labels):
+                continue
+            source_label = source_labels[row_index]
+            lens_row = article_lens_percentages[row_index]
+            for lens_name in ordered_lenses:
+                value = lens_row.get(lens_name)
+                if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                    source_lens_values[source_label][lens_name].append(float(value))
+
+        source_means: dict[str, dict[str, float]] = {}
+        for source_label, lens_values in source_lens_values.items():
+            means = {
+                lens_name: sum(values) / len(values)
+                for lens_name, values in lens_values.items()
+                if values
+            }
+            if means:
+                source_means[source_label] = means
+
+        sorted_sources = sorted(source_means.keys(), key=lambda value: value.lower())
+        if len(sorted_sources) < 2:
+            continue
+        for left_idx, source_a in enumerate(sorted_sources):
+            for source_b in sorted_sources[left_idx + 1 :]:
+                means_a = source_means[source_a]
+                means_b = source_means[source_b]
+                for lens_name in ordered_lenses:
+                    if lens_name not in means_a or lens_name not in means_b:
+                        continue
+                    delta = means_a[lens_name] - means_b[lens_name]
+                    deltas_by_key[(source_a, source_b, lens_name)].append(
+                        {
+                            "event_id": event_id,
+                            "delta": delta,
+                            "source_a_mean": means_a[lens_name],
+                            "source_b_mean": means_b[lens_name],
+                        }
+                    )
+
+    rows: list[dict[str, Any]] = []
+    source_pairs: set[tuple[str, str]] = set()
+    lens_names: set[str] = set()
+    event_pair_observation_count = 0
+    for (source_a, source_b, lens_name), observations in deltas_by_key.items():
+        deltas = [float(obs["delta"]) for obs in observations if isinstance(obs.get("delta"), (int, float))]
+        if not deltas:
+            continue
+        source_pairs.add((source_a, source_b))
+        lens_names.add(lens_name)
+        event_pair_observation_count += len(deltas)
+        event_ids = [str(obs.get("event_id") or "") for obs in observations if obs.get("event_id")]
+        rows.append(
+            {
+                "source_a": source_a,
+                "source_b": source_b,
+                "lens": lens_name,
+                "n_events": len(deltas),
+                "mean_delta_a_minus_b": sum(deltas) / len(deltas),
+                "median_delta_a_minus_b": statistics.median(deltas),
+                "mean_abs_delta": sum(abs(delta) for delta in deltas) / len(deltas),
+                "max_abs_delta": max(abs(delta) for delta in deltas),
+                "source_a_higher_event_count": sum(1 for delta in deltas if delta > 0),
+                "source_b_higher_event_count": sum(1 for delta in deltas if delta < 0),
+                "tied_event_count": sum(1 for delta in deltas if delta == 0),
+                "event_ids": event_ids,
+            }
+        )
+
+    if not rows:
+        return unavailable
+
+    rows.sort(
+        key=lambda row: (
+            -float(row.get("mean_abs_delta") or 0.0),
+            str(row.get("source_a", "")).lower(),
+            str(row.get("source_b", "")).lower(),
+            str(row.get("lens", "")).lower(),
+        )
+    )
+    return {
+        "status": "ok",
+        "reason": "",
+        "method": method,
+        "rows": rows,
+        "summary": {
+            "source_pair_count": len(source_pairs),
+            "lens_count": len(lens_names),
+            "row_count": len(rows),
+            "event_pair_observation_count": event_pair_observation_count,
+        },
+    }
+
+
+def _event_coverage_from_clusters(
+    source_labels: list[str],
+    events: list[Any],
+    event_member_indexes: list[Any],
+) -> dict[str, Any]:
+    method = "event_source_coverage_v1"
+    unavailable = {
+        "status": "unavailable",
+        "reason": "No event clusters are available for source coverage diagnostics.",
+        "method": method,
+        "source_rows": [],
+        "source_pair_rows": [],
+        "summary": {
+            "source_count": 0,
+            "source_pair_count": 0,
+            "event_article_memberships": 0,
+            "multi_source_event_article_memberships": 0,
+        },
+    }
+    if not events or not event_member_indexes:
+        return unavailable
+
+    total_source_articles = Counter(source_labels)
+    source_event_ids: dict[str, set[str]] = defaultdict(set)
+    source_multi_event_ids: dict[str, set[str]] = defaultdict(set)
+    source_event_article_counts: Counter[str] = Counter()
+    source_multi_event_article_counts: Counter[str] = Counter()
+    pair_event_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
+    pair_article_counts: Counter[tuple[str, str]] = Counter()
+
+    for event, member_indexes in zip(events, event_member_indexes):
+        if not isinstance(event, dict) or not isinstance(member_indexes, list):
+            continue
+        event_id = str(event.get("event_id") or "")
+        if not event_id:
+            continue
+        event_sources = []
+        for row_index in member_indexes:
+            if not isinstance(row_index, int) or row_index < 0 or row_index >= len(source_labels):
+                continue
+            source_label = source_labels[row_index]
+            event_sources.append(source_label)
+            source_event_ids[source_label].add(event_id)
+            source_event_article_counts[source_label] += 1
+
+        unique_sources = sorted(set(event_sources), key=lambda value: value.lower())
+        if len(unique_sources) < 2:
+            continue
+
+        for source_label in event_sources:
+            source_multi_event_ids[source_label].add(event_id)
+            source_multi_event_article_counts[source_label] += 1
+
+        event_source_counts = Counter(event_sources)
+        for left_idx, source_a in enumerate(unique_sources):
+            for source_b in unique_sources[left_idx + 1 :]:
+                key = (source_a, source_b)
+                pair_event_ids[key].add(event_id)
+                pair_article_counts[key] += event_source_counts[source_a] + event_source_counts[source_b]
+
+    source_names = sorted(set(total_source_articles) | set(source_event_ids), key=lambda value: value.lower())
+    source_rows = []
+    for source_name in source_names:
+        total_articles = int(total_source_articles.get(source_name, 0))
+        event_articles = int(source_event_article_counts.get(source_name, 0))
+        multi_event_articles = int(source_multi_event_article_counts.get(source_name, 0))
+        source_rows.append(
+            {
+                "source": source_name,
+                "total_scored_articles": total_articles,
+                "event_count": len(source_event_ids.get(source_name, set())),
+                "multi_source_event_count": len(source_multi_event_ids.get(source_name, set())),
+                "event_article_count": event_articles,
+                "multi_source_event_article_count": multi_event_articles,
+                "event_article_coverage_ratio": (event_articles / total_articles) if total_articles else 0.0,
+                "multi_source_event_article_coverage_ratio": (multi_event_articles / total_articles) if total_articles else 0.0,
+            }
+        )
+
+    source_rows.sort(
+        key=lambda row: (
+            -int(row.get("multi_source_event_count", 0)),
+            -int(row.get("multi_source_event_article_count", 0)),
+            str(row.get("source", "")).lower(),
+        )
+    )
+
+    source_pair_rows = []
+    for (source_a, source_b), event_ids in pair_event_ids.items():
+        source_pair_rows.append(
+            {
+                "source_a": source_a,
+                "source_b": source_b,
+                "shared_event_count": len(event_ids),
+                "shared_event_article_count": int(pair_article_counts.get((source_a, source_b), 0)),
+                "event_ids": sorted(event_ids),
+            }
+        )
+    source_pair_rows.sort(
+        key=lambda row: (
+            -int(row.get("shared_event_count", 0)),
+            -int(row.get("shared_event_article_count", 0)),
+            str(row.get("source_a", "")).lower(),
+            str(row.get("source_b", "")).lower(),
+        )
+    )
+
+    if not source_rows and not source_pair_rows:
+        return unavailable
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "method": method,
+        "source_rows": source_rows,
+        "source_pair_rows": source_pair_rows,
+        "summary": {
+            "source_count": len(source_rows),
+            "source_pair_count": len(source_pair_rows),
+            "event_article_memberships": sum(source_event_article_counts.values()),
+            "multi_source_event_article_memberships": sum(source_multi_event_article_counts.values()),
+        },
+    }
+
+
+def _same_event_variance_decomposition(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    events: list[Any],
+    event_member_indexes: list[Any],
+    preferred_lenses: list[str] | None = None,
+) -> dict[str, Any]:
+    method = "event_centered_source_variance_v1"
+    unavailable = {
+        "status": "unavailable",
+        "reason": "No multi-source event clusters with shared lens rows are available.",
+        "method": method,
+        "rows": [],
+        "summary": {"lens_count": 0, "row_count": 0, "event_count": 0, "source_count": 0},
+    }
+    if not events or not event_member_indexes:
+        return unavailable
+
+    observations: list[dict[str, Any]] = []
+    for event, member_indexes in zip(events, event_member_indexes):
+        if not isinstance(event, dict) or not isinstance(member_indexes, list):
+            continue
+        event_id = str(event.get("event_id") or "")
+        source_counts = event.get("source_counts") if isinstance(event.get("source_counts"), dict) else {}
+        if len(source_counts) < 2:
+            continue
+        for row_index in member_indexes:
+            if not isinstance(row_index, int) or row_index < 0 or row_index >= len(article_lens_percentages):
+                continue
+            if row_index >= len(source_labels):
+                continue
+            observations.append(
+                {
+                    "event_id": event_id,
+                    "source": source_labels[row_index],
+                    "lens_row": article_lens_percentages[row_index],
+                }
+            )
+
+    if not observations:
+        return unavailable
+
+    discovered_lenses = {
+        lens_name
+        for obs in observations
+        for lens_name, value in obs["lens_row"].items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        lens_names = [lens_name for lens_name in preferred_lenses if lens_name in discovered_lenses]
+        lens_names.extend(sorted(discovered_lenses - set(lens_names)))
+    else:
+        lens_names = sorted(discovered_lenses)
+
+    rows: list[dict[str, Any]] = []
+    for lens_name in lens_names:
+        values: list[float] = []
+        event_labels: list[str] = []
+        source_labels_for_lens: list[str] = []
+        for obs in observations:
+            value = obs["lens_row"].get(lens_name)
+            if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                continue
+            values.append(float(value))
+            event_labels.append(str(obs["event_id"]))
+            source_labels_for_lens.append(str(obs["source"]))
+
+        if len(values) < 2:
+            continue
+        unique_events = sorted(set(event_labels))
+        unique_sources = sorted(set(source_labels_for_lens))
+        if len(unique_events) < 1 or len(unique_sources) < 2:
+            continue
+
+        grand_mean = sum(values) / len(values)
+        ss_total = sum((value - grand_mean) ** 2 for value in values)
+        if ss_total <= 0:
+            rows.append(
+                {
+                    "lens": lens_name,
+                    "n": len(values),
+                    "event_count": len(unique_events),
+                    "source_count": len(unique_sources),
+                    "overall_mean": grand_mean,
+                    "ss_total": ss_total,
+                    "event_eta_sq": 0.0,
+                    "source_eta_sq_raw": 0.0,
+                    "source_eta_sq_event_centered": 0.0,
+                    "additive_event_source_r_squared": 0.0,
+                    "residual_ss_additive": 0.0,
+                    "strongest_source_after_event_control": None,
+                    "source_residual_means": {},
+                }
+            )
+            continue
+
+        event_values: dict[str, list[float]] = defaultdict(list)
+        source_values: dict[str, list[float]] = defaultdict(list)
+        for value, event_id, source_label in zip(values, event_labels, source_labels_for_lens):
+            event_values[event_id].append(value)
+            source_values[source_label].append(value)
+
+        event_means = {event_id: sum(vals) / len(vals) for event_id, vals in event_values.items() if vals}
+        source_means = {source_label: sum(vals) / len(vals) for source_label, vals in source_values.items() if vals}
+        ss_event = sum(len(event_values[event_id]) * ((event_means[event_id] - grand_mean) ** 2) for event_id in event_means)
+        ss_source_raw = sum(
+            len(source_values[source_label]) * ((source_means[source_label] - grand_mean) ** 2)
+            for source_label in source_means
+        )
+
+        event_centered_values: list[float] = []
+        event_centered_sources: list[str] = []
+        for value, event_id, source_label in zip(values, event_labels, source_labels_for_lens):
+            event_centered_values.append(value - event_means.get(event_id, grand_mean))
+            event_centered_sources.append(source_label)
+        centered_total_mean = sum(event_centered_values) / len(event_centered_values)
+        centered_ss_total = sum((value - centered_total_mean) ** 2 for value in event_centered_values)
+        centered_by_source: dict[str, list[float]] = defaultdict(list)
+        for value, source_label in zip(event_centered_values, event_centered_sources):
+            centered_by_source[source_label].append(value)
+        source_residual_means = {
+            source_label: sum(vals) / len(vals)
+            for source_label, vals in centered_by_source.items()
+            if vals
+        }
+        centered_ss_source = sum(
+            len(centered_by_source[source_label]) * ((source_residual_means[source_label] - centered_total_mean) ** 2)
+            for source_label in source_residual_means
+        )
+
+        additive_residual_ss = 0.0
+        for value, event_id, source_label in zip(values, event_labels, source_labels_for_lens):
+            predicted = event_means.get(event_id, grand_mean) + source_means.get(source_label, grand_mean) - grand_mean
+            additive_residual_ss += (value - predicted) ** 2
+
+        strongest_source = None
+        if source_residual_means:
+            strongest_source = max(source_residual_means.items(), key=lambda item: abs(item[1]))[0]
+
+        rows.append(
+            {
+                "lens": lens_name,
+                "n": len(values),
+                "event_count": len(unique_events),
+                "source_count": len(unique_sources),
+                "overall_mean": grand_mean,
+                "ss_total": ss_total,
+                "event_eta_sq": ss_event / ss_total,
+                "source_eta_sq_raw": ss_source_raw / ss_total,
+                "source_eta_sq_event_centered": (centered_ss_source / centered_ss_total) if centered_ss_total > 0 else 0.0,
+                "additive_event_source_r_squared": max(0.0, min(1.0, 1.0 - (additive_residual_ss / ss_total))),
+                "residual_ss_additive": additive_residual_ss,
+                "strongest_source_after_event_control": strongest_source,
+                "source_residual_means": dict(
+                    sorted(source_residual_means.items(), key=lambda item: (-abs(item[1]), item[0].lower()))
+                ),
+            }
+        )
+
+    if not rows:
+        return unavailable
+
+    rows.sort(
+        key=lambda row: (
+            -float(row.get("source_eta_sq_event_centered") or 0.0),
+            -float(row.get("additive_event_source_r_squared") or 0.0),
+            str(row.get("lens", "")).lower(),
+        )
+    )
+    return {
+        "status": "ok",
+        "reason": "",
+        "method": method,
+        "rows": rows,
+        "summary": {
+            "lens_count": len(rows),
+            "row_count": len(rows),
+            "event_count": len({obs["event_id"] for obs in observations if obs.get("event_id")}),
+            "source_count": len({obs["source"] for obs in observations if obs.get("source")}),
+        },
+    }
+
+
 def _source_reliability_assessment(
     source_differentiation: dict[str, Any] | None,
     source_lens_effects: dict[str, Any] | None,
@@ -3364,6 +3897,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     topic_keys_for_lens_rows: list[list[str]] = []
     topic_display_labels: dict[str, str] = {}
     article_meta_for_lens_rows: list[dict[str, Any]] = []
+    article_records_for_lens_rows: list[dict[str, Any]] = []
 
     scored_articles = 0
     zero_score_articles = 0
@@ -3422,6 +3956,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
             article_lens_percentages.append(lens_percentages)
             source_labels_for_lens_rows.append(source_label)
             topic_keys_for_lens_rows.append(topic_keys)
+            article_records_for_lens_rows.append(record)
             article_meta_for_lens_rows.append(
                 {
                     "id": _clean_text(record.get("id")),
@@ -3539,6 +4074,12 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         pooled_source_lens_effects=source_lens_effects,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    event_control = _event_control_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        article_records_for_lens_rows,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
     source_reliability = _source_reliability_from_topic_control(
         source_differentiation,
         source_lens_effects,
@@ -3595,6 +4136,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "source_differentiation": source_differentiation,
         "source_topic_control": source_topic_control,
         "tag_sliced_analysis": tag_sliced_analysis,
+        "event_control": event_control,
         "source_reliability": source_reliability,
         "lens_views": lens_views,
         "source_tag_views": source_tag_views,

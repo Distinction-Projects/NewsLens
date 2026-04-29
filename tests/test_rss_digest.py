@@ -251,6 +251,17 @@ class RssDigestServiceTests(unittest.TestCase):
             tag_sliced_analysis["pooled"]["source_lens_effects"],
             stats["source_lens_effects"],
         )
+        self.assertIn("event_control", stats)
+        event_control = stats["event_control"]
+        self.assertIn(event_control["status"], {"ok", "unavailable"})
+        self.assertIn("config", event_control)
+        self.assertIn("summary", event_control)
+        self.assertIn("events", event_control)
+        self.assertIn("same_event_source_differentiation", event_control)
+        self.assertIn("same_event_source_lens_effects", event_control)
+        self.assertIn("same_event_pairwise_source_lens_deltas", event_control)
+        self.assertIn("event_coverage", event_control)
+        self.assertIn("same_event_variance_decomposition", event_control)
         self.assertIn("source_reliability", stats)
         source_reliability = stats["source_reliability"]
         self.assertEqual(source_reliability["method"], "heuristic-v1")

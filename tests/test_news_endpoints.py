@@ -239,6 +239,16 @@ class NewsEndpointTests(unittest.TestCase):
             tag_sliced_analysis["pooled"]["source_lens_effects"],
             source_lens_effects,
         )
+        event_control = stats_payload["data"]["derived"]["event_control"]
+        self.assertIn(event_control["status"], {"ok", "unavailable"})
+        self.assertIn("config", event_control)
+        self.assertIn("summary", event_control)
+        self.assertIn("events", event_control)
+        self.assertIn("same_event_source_differentiation", event_control)
+        self.assertIn("same_event_source_lens_effects", event_control)
+        self.assertIn("same_event_pairwise_source_lens_deltas", event_control)
+        self.assertIn("event_coverage", event_control)
+        self.assertIn("same_event_variance_decomposition", event_control)
         self.assertIn("source_reliability", stats_payload["data"]["derived"])
         source_reliability = stats_payload["data"]["derived"]["source_reliability"]
         self.assertEqual(source_reliability["method"], "heuristic-v1")
@@ -394,6 +404,59 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(source_summary_payload["artifact"], "source_differentiation_summary")
         self.assertIsInstance(source_summary_payload["rows"], list)
         self.assertEqual(len(source_summary_payload["rows"]), 1)
+
+        export_event_summary = self.client.get("/api/news/export?artifact=event_control_summary&format=json")
+        self.assertEqual(export_event_summary.status_code, 200)
+        event_summary_payload = export_event_summary.get_json()
+        self.assertEqual(event_summary_payload["artifact"], "event_control_summary")
+        self.assertIsInstance(event_summary_payload["rows"], list)
+        self.assertEqual(len(event_summary_payload["rows"]), 1)
+        self.assertIn("event_count", event_summary_payload["rows"][0])
+
+        export_events = self.client.get("/api/news/export?artifact=event_clusters&format=json")
+        self.assertEqual(export_events.status_code, 200)
+        events_payload = export_events.get_json()
+        self.assertEqual(events_payload["artifact"], "event_clusters")
+        self.assertIsInstance(events_payload["rows"], list)
+
+        export_source_coverage = self.client.get("/api/news/export?artifact=event_source_coverage&format=json")
+        self.assertEqual(export_source_coverage.status_code, 200)
+        source_coverage_payload = export_source_coverage.get_json()
+        self.assertEqual(source_coverage_payload["artifact"], "event_source_coverage")
+        self.assertIsInstance(source_coverage_payload["rows"], list)
+
+        export_pair_coverage = self.client.get("/api/news/export?artifact=event_source_pair_coverage&format=json")
+        self.assertEqual(export_pair_coverage.status_code, 200)
+        pair_coverage_payload = export_pair_coverage.get_json()
+        self.assertEqual(pair_coverage_payload["artifact"], "event_source_pair_coverage")
+        self.assertIsInstance(pair_coverage_payload["rows"], list)
+
+        export_same_event_effects = self.client.get("/api/news/export?artifact=same_event_source_lens_effects&format=json")
+        self.assertEqual(export_same_event_effects.status_code, 200)
+        same_event_effects_payload = export_same_event_effects.get_json()
+        self.assertEqual(same_event_effects_payload["artifact"], "same_event_source_lens_effects")
+        self.assertIsInstance(same_event_effects_payload["rows"], list)
+
+        export_pairwise_deltas = self.client.get("/api/news/export?artifact=same_event_pairwise_source_lens_deltas&format=json")
+        self.assertEqual(export_pairwise_deltas.status_code, 200)
+        pairwise_deltas_payload = export_pairwise_deltas.get_json()
+        self.assertEqual(pairwise_deltas_payload["artifact"], "same_event_pairwise_source_lens_deltas")
+        self.assertIsInstance(pairwise_deltas_payload["rows"], list)
+
+        export_variance = self.client.get("/api/news/export?artifact=same_event_variance_decomposition&format=json")
+        self.assertEqual(export_variance.status_code, 200)
+        variance_payload = export_variance.get_json()
+        self.assertEqual(variance_payload["artifact"], "same_event_variance_decomposition")
+        self.assertIsInstance(variance_payload["rows"], list)
+
+        export_same_event_summary = self.client.get(
+            "/api/news/export?artifact=same_event_source_differentiation_summary&format=json"
+        )
+        self.assertEqual(export_same_event_summary.status_code, 200)
+        same_event_summary_payload = export_same_event_summary.get_json()
+        self.assertEqual(same_event_summary_payload["artifact"], "same_event_source_differentiation_summary")
+        self.assertIsInstance(same_event_summary_payload["rows"], list)
+        self.assertEqual(len(same_event_summary_payload["rows"]), 1)
 
         bad_artifact = self.client.get("/api/news/export?artifact=unknown")
         self.assertEqual(bad_artifact.status_code, 400)

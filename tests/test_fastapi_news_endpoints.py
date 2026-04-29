@@ -133,6 +133,7 @@ class FastApiNewsEndpointTests(unittest.TestCase):
         self.assertIn("derived", payload["data"])
         self.assertIn("source_topic_control", payload["data"]["derived"])
         self.assertIn("tag_sliced_analysis", payload["data"]["derived"])
+        self.assertIn("event_control", payload["data"]["derived"])
 
         snapshot = self.client.get(f"/api/news/stats?snapshot_date={self.snapshot_date}")
         self.assertEqual(snapshot.status_code, 200)
@@ -149,7 +150,28 @@ class FastApiNewsEndpointTests(unittest.TestCase):
             "status": "ok",
             "meta": {"source_url": "file://precomputed.json", "source_mode": "current"},
             "data": {
-                "derived": {"total_articles": 1, "tag_sliced_analysis": {"summary": {"tag_count": 0}}},
+                "derived": {
+                    "total_articles": 1,
+                    "tag_sliced_analysis": {"summary": {"tag_count": 0}},
+                    "event_control": {
+                        "status": "ok",
+                        "reason": "",
+                        "summary": {
+                            "total_articles_considered": 3,
+                            "embedded_count": 3,
+                            "event_count": 1,
+                            "multi_source_event_count": 1,
+                            "singleton_count": 1,
+                        },
+                        "cache": {"enabled": True, "hits": 3, "misses": 0, "stored": 0},
+                        "config": {
+                            "embedding_model": "test-model",
+                            "embedding_dimensions": 3,
+                            "similarity_threshold": 0.86,
+                            "date_window_days": 3,
+                        },
+                    },
+                },
                 "summary": {},
                 "analysis": {},
             },
@@ -170,11 +192,23 @@ class FastApiNewsEndpointTests(unittest.TestCase):
             self.assertEqual(payload["data"]["derived"]["total_articles"], 1)
             self.assertEqual(payload["meta"]["stats_backend"], "precomputed")
 
+            exported = self.client.get("/api/news/export?artifact=event_control_summary&format=json")
+            self.assertEqual(exported.status_code, 200)
+            export_payload = exported.json()
+            self.assertEqual(export_payload["meta"]["stats_backend"], "precomputed")
+            self.assertEqual(export_payload["rows"][0]["event_count"], 1)
+            self.assertEqual(export_payload["rows"][0]["cache_hits"], 3)
+
             os.environ["NEWS_STATS_SNAPSHOT_PATH"] = str(self.temp_dir / "missing_precomputed_stats.json")
             missing = self.client.get("/api/news/stats")
             self.assertEqual(missing.status_code, 503)
             self.assertEqual(missing.headers.get("cache-control"), "no-store")
             self.assertEqual(missing.json()["status"], "precomputed_stats_unavailable")
+
+            missing_export = self.client.get("/api/news/export?artifact=event_control_summary&format=json")
+            self.assertEqual(missing_export.status_code, 503)
+            self.assertEqual(missing_export.headers.get("cache-control"), "no-store")
+            self.assertEqual(missing_export.json()["status"], "precomputed_stats_unavailable")
         finally:
             if previous_backend is None:
                 os.environ.pop("NEWS_STATS_BACKEND", None)

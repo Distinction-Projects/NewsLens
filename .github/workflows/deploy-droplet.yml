@@ -22,15 +22,24 @@ jobs:
       RSS_HISTORY_JSON_URL_TEMPLATE: ${{ secrets.RSS_HISTORY_JSON_URL_TEMPLATE }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SUPABASE_DIRECT_DB_URL: ${{ secrets.SUPABASE_DIRECT_DB_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       NEWS_DATA_BACKEND: json
       NEWS_STATS_BACKEND: precomputed
       NEWS_STATS_SNAPSHOT_PATH: /srv/newslens/app/data/processed/news_analytics_snapshot.json
+      NEWS_EVENT_EMBEDDINGS_ENABLED: true
+      NEWS_EVENT_EMBEDDING_MODEL: text-embedding-3-small
+      NEWS_EVENT_EMBEDDING_DIMENSIONS: 512
+      NEWS_EVENT_SIMILARITY_THRESHOLD: 0.86
+      NEWS_EVENT_DATE_WINDOW_DAYS: 3
+      NEWS_EVENT_EMBEDDING_CACHE_PATH: /srv/newslens/app/data/cache/news_event_embeddings.sqlite
+      NEWS_EVENT_EMBEDDING_BATCH_SIZE: 128
       NEWS_HTTP_CACHE_SECONDS: 300
       NEWS_STATS_HTTP_CACHE_SECONDS: 300
       NEWS_HTTP_STALE_SECONDS: 3600
       NEWS_SNAPSHOT_HTTP_CACHE_SECONDS: 86400
       NEWS_SNAPSHOT_HTTP_STALE_SECONDS: 604800
       NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS: 300
+      NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS: 20000
       NEXT_PUBLIC_SITE_URL: https://lab.spectralresidue.com
       RSS_SOURCE_EFFECT_PERMUTATIONS: 20
       RSS_CACHE_TTL_SECONDS: 21600
@@ -77,12 +86,20 @@ jobs:
             printf 'NEWS_DATA_BACKEND=%s\n' "${NEWS_DATA_BACKEND:-json}"
             printf 'NEWS_STATS_BACKEND=%s\n' "${NEWS_STATS_BACKEND:-dynamic}"
             printf 'NEWS_STATS_SNAPSHOT_PATH=%s\n' "${NEWS_STATS_SNAPSHOT_PATH:-/srv/newslens/app/data/processed/news_analytics_snapshot.json}"
+            printf 'NEWS_EVENT_EMBEDDINGS_ENABLED=%s\n' "${NEWS_EVENT_EMBEDDINGS_ENABLED:-true}"
+            printf 'NEWS_EVENT_EMBEDDING_MODEL=%s\n' "${NEWS_EVENT_EMBEDDING_MODEL:-text-embedding-3-small}"
+            printf 'NEWS_EVENT_EMBEDDING_DIMENSIONS=%s\n' "${NEWS_EVENT_EMBEDDING_DIMENSIONS:-512}"
+            printf 'NEWS_EVENT_SIMILARITY_THRESHOLD=%s\n' "${NEWS_EVENT_SIMILARITY_THRESHOLD:-0.86}"
+            printf 'NEWS_EVENT_DATE_WINDOW_DAYS=%s\n' "${NEWS_EVENT_DATE_WINDOW_DAYS:-3}"
+            printf 'NEWS_EVENT_EMBEDDING_CACHE_PATH=%s\n' "${NEWS_EVENT_EMBEDDING_CACHE_PATH:-/srv/newslens/app/data/cache/news_event_embeddings.sqlite}"
+            printf 'NEWS_EVENT_EMBEDDING_BATCH_SIZE=%s\n' "${NEWS_EVENT_EMBEDDING_BATCH_SIZE:-128}"
             printf 'NEWS_HTTP_CACHE_SECONDS=%s\n' "${NEWS_HTTP_CACHE_SECONDS:-300}"
             printf 'NEWS_STATS_HTTP_CACHE_SECONDS=%s\n' "${NEWS_STATS_HTTP_CACHE_SECONDS:-300}"
             printf 'NEWS_HTTP_STALE_SECONDS=%s\n' "${NEWS_HTTP_STALE_SECONDS:-3600}"
             printf 'NEWS_SNAPSHOT_HTTP_CACHE_SECONDS=%s\n' "${NEWS_SNAPSHOT_HTTP_CACHE_SECONDS:-86400}"
             printf 'NEWS_SNAPSHOT_HTTP_STALE_SECONDS=%s\n' "${NEWS_SNAPSHOT_HTTP_STALE_SECONDS:-604800}"
             printf 'NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=%s\n' "${NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS:-300}"
+            printf 'NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS=%s\n' "${NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS:-20000}"
             printf 'NEXT_PUBLIC_SITE_URL=%s\n' "${NEXT_PUBLIC_SITE_URL:-https://lab.spectralresidue.com}"
             printf 'RSS_SOURCE_EFFECT_PERMUTATIONS=%s\n' "${RSS_SOURCE_EFFECT_PERMUTATIONS:-20}"
             printf 'RSS_CACHE_TTL_SECONDS=%s\n' "${RSS_CACHE_TTL_SECONDS:-21600}"
@@ -91,6 +108,9 @@ jobs:
             fi
             if [ -n "${SUPABASE_DIRECT_DB_URL:-}" ]; then
               printf 'SUPABASE_DIRECT_DB_URL=%s\n' "${SUPABASE_DIRECT_DB_URL}"
+            fi
+            if [ -n "${OPENAI_API_KEY:-}" ]; then
+              printf 'OPENAI_API_KEY=%s\n' "${OPENAI_API_KEY}"
             fi
           } > /tmp/newslens.env
 
@@ -184,6 +204,14 @@ jobs:
             NEWS_DATA_BACKEND="$DATA_BACKEND" \
             RSS_DAILY_JSON_URL="$RSS_URL" \
             RSS_HISTORY_JSON_URL_TEMPLATE="$RSS_HISTORY_TEMPLATE" \
+            OPENAI_API_KEY="$(grep -E '^OPENAI_API_KEY=' /etc/newslens/newslens.env | head -1 | cut -d= -f2- || true)" \
+            NEWS_EVENT_EMBEDDINGS_ENABLED="$(grep -E '^NEWS_EVENT_EMBEDDINGS_ENABLED=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_EMBEDDING_MODEL="$(grep -E '^NEWS_EVENT_EMBEDDING_MODEL=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_EMBEDDING_DIMENSIONS="$(grep -E '^NEWS_EVENT_EMBEDDING_DIMENSIONS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_SIMILARITY_THRESHOLD="$(grep -E '^NEWS_EVENT_SIMILARITY_THRESHOLD=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_DATE_WINDOW_DAYS="$(grep -E '^NEWS_EVENT_DATE_WINDOW_DAYS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_EMBEDDING_CACHE_PATH="$(grep -E '^NEWS_EVENT_EMBEDDING_CACHE_PATH=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_EVENT_EMBEDDING_BATCH_SIZE="$(grep -E '^NEWS_EVENT_EMBEDDING_BATCH_SIZE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             RSS_SOURCE_EFFECT_PERMUTATIONS="$(grep -E '^RSS_SOURCE_EFFECT_PERMUTATIONS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             RSS_CACHE_TTL_SECONDS="$(grep -E '^RSS_CACHE_TTL_SECONDS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             /srv/newslens/venv/bin/python -m src.analytics.build_news_snapshot --output "$STATS_SNAPSHOT_PATH"
@@ -209,6 +237,7 @@ jobs:
           run_as_app_user_timeout 120 npm --prefix /srv/newslens/app/frontend-node run check:news-renderers
           run_as_app_user_timeout 900 env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
             NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS="$(grep -E '^NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS="$(grep -E '^NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             NEXT_PUBLIC_SITE_URL="$(grep -E '^NEXT_PUBLIC_SITE_URL=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             NODE_OPTIONS=--max-old-space-size=1024 \
             npm --prefix /srv/newslens/app/frontend-node run build
@@ -245,8 +274,31 @@ jobs:
           for i in $(seq 1 36); do
             if curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1:9000/api/news/stats >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1:9000/api/news/digest?limit=1 >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 120 'http://127.0.0.1:9000/api/news/export?artifact=event_control_summary&format=json' >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:9000/health/database >/dev/null; then
               api_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          stats_contract_ok=0
+          for i in $(seq 1 12); do
+            if /srv/newslens/venv/bin/python - << 'PY'
+import json
+import urllib.request
+
+with urllib.request.urlopen("http://127.0.0.1:9000/api/news/stats", timeout=120) as response:
+    payload = json.loads(response.read().decode("utf-8"))
+
+derived = payload.get("data", {}).get("derived", {})
+required = ["source_topic_control", "tag_sliced_analysis", "event_control"]
+missing = [key for key in required if not isinstance(derived.get(key), dict)]
+if missing:
+    raise SystemExit(f"missing derived fields: {missing}")
+PY
+            then
+              stats_contract_ok=1
               break
             fi
             sleep 5
@@ -256,14 +308,15 @@ jobs:
           for i in $(seq 1 36); do
             if curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/ >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1:3000/evaluation >/dev/null \
-              && curl -fsS --connect-timeout 3 --max-time 90 http://127.0.0.1:3000/news/digest >/dev/null; then
+              && curl -fsS --connect-timeout 3 --max-time 90 http://127.0.0.1:3000/news/digest >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 90 http://127.0.0.1:3000/news/event-control >/dev/null; then
               node_ok=1
               break
             fi
             sleep 5
           done
 
-          if [ "$api_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
+          if [ "$api_ok" -ne 1 ] || [ "$stats_contract_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
             ${SUDO} systemctl status newslens-api --no-pager || true
             ${SUDO} systemctl status newslens-node --no-pager || true
             ${SUDO} journalctl -u newslens-api -n 120 --no-pager || true
@@ -282,8 +335,10 @@ jobs:
             if curl -fsS --connect-timeout 3 --max-time 30 http://127.0.0.1/ >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 30 http://127.0.0.1/evaluation >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 90 http://127.0.0.1/news/digest >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 90 http://127.0.0.1/news/event-control >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1/api/news/stats >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 120 http://127.0.0.1/api/news/digest?limit=1 >/dev/null \
+              && curl -fsS --connect-timeout 3 --max-time 120 'http://127.0.0.1/api/news/export?artifact=event_control_summary&format=json' >/dev/null \
               && curl -fsS --connect-timeout 3 --max-time 20 http://127.0.0.1/health/database >/dev/null; then
               nginx_ok=1
               break

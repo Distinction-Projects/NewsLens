@@ -177,10 +177,24 @@ NEWS_STATS_SNAPSHOT_PATH=data/processed/news_analytics_snapshot.json
 Build the stats snapshot before restarting production services:
 
 ```bash
+RSS_SOURCE_EFFECT_PERMUTATIONS=20 \
 python -m src.analytics.build_news_snapshot --output data/processed/news_analytics_snapshot.json
 ```
 
 If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing or invalid, `/api/news/stats` returns `503` instead of falling back to request-time analytics.
+
+Event-controlled source analysis is included under `derived.event_control`. It uses embeddings to cluster likely same-story articles, then reruns source differentiation only within multi-source event clusters. Missing embedding credentials do not break stats generation; the event-control block returns `status: unavailable`.
+
+```bash
+NEWS_EVENT_EMBEDDINGS_ENABLED=true
+NEWS_EVENT_EMBEDDING_MODEL=text-embedding-3-small
+NEWS_EVENT_EMBEDDING_DIMENSIONS=512
+NEWS_EVENT_SIMILARITY_THRESHOLD=0.86
+NEWS_EVENT_DATE_WINDOW_DAYS=3
+NEWS_EVENT_EMBEDDING_CACHE_PATH=data/cache/news_event_embeddings.sqlite
+NEWS_EVENT_EMBEDDING_BATCH_SIZE=128
+OPENAI_API_KEY=...
+```
 
 News read endpoints also emit conservative HTTP cache headers by default:
 
@@ -191,6 +205,7 @@ NEWS_HTTP_STALE_SECONDS=3600
 NEWS_SNAPSHOT_HTTP_CACHE_SECONDS=86400
 NEWS_SNAPSHOT_HTTP_STALE_SECONDS=604800
 NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=300
+NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS=20000
 ```
 
 `refresh=1` requests use `Cache-Control: no-store`. Historical `snapshot_date` requests use the longer snapshot cache window.

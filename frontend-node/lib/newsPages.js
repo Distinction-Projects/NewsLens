@@ -54,6 +54,12 @@ export const NEWS_PAGES = [
       "Compare source effect sizes by lens with pooled, within-topic, and within-tag views."
   },
   {
+    slug: "event-control",
+    title: "News Event Control",
+    summary:
+      "Audit same-story event matching and compare source behavior only where outlets cover matched events."
+  },
+  {
     slug: "score-lab",
     title: "News Score Lab",
     summary:
