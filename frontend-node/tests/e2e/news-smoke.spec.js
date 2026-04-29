@@ -169,6 +169,53 @@ test("source effects supports pooled and within-topic modes", async ({ page, bas
   }
 });
 
+test("chart-heavy pages render plot containers when API is available", async ({ page, baseURL }) => {
+  const chartPages = [
+    { path: "/news/lens-matrix", heading: "News Lens Matrix" },
+    { path: "/news/lens-correlations", heading: "News Lens Correlations" },
+    { path: "/news/lens-pca", heading: "News Lens PCA" },
+    { path: "/news/trends", heading: "News Trends" },
+    { path: "/news/source-differentiation", heading: "News Source Differentiation" },
+    { path: "/news/source-effects", heading: "News Source Effects" },
+  ];
+
+  for (const { path, heading } of chartPages) {
+    await gotoWithRetry(page, `${baseURL}${path}`);
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+
+    const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+    if ((await apiErrorHeading.count()) > 0) {
+      await expect(apiErrorHeading).toBeVisible();
+      continue;
+    }
+
+    await expect(page.locator(".plotly-chart").first()).toBeVisible();
+  }
+});
+
+test("lens stability exposes ranking controls and chart output", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/lens-stability`);
+  await expect(page.getByRole("heading", { name: "News Lens Stability" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Stability Filters" })).toBeVisible();
+  await expect(page.locator('select[name="metric"]')).toBeVisible();
+  await expect(page.locator('input[name="top_n"]')).toBeVisible();
+  await expect(page.locator(".plotly-chart").first()).toBeVisible();
+
+  await gotoWithRetry(page, `${baseURL}/news/lens-stability?metric=range&top_n=7`);
+  await expect(page.locator('select[name="metric"]')).toHaveValue("range");
+  await expect(page.locator('input[name="top_n"]')).toHaveValue("7");
+  await expect(page.getByRole("heading", { name: "Stability Visuals" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lens Stability Table" })).toBeVisible();
+  await expect(page.locator(".plotly-chart")).toHaveCount(2);
+});
+
 test("evaluation route renders corpus/model controls and visuals", async ({ page, baseURL }) => {
   await gotoWithRetry(page, `${baseURL}/evaluation`);
   await expect(page.getByRole("heading", { name: "Model Evaluation" })).toBeVisible();
