@@ -328,6 +328,14 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertIn("points", lens_temporal_embedding_mds)
         self.assertIn("day_centroids", lens_temporal_embedding_mds)
         self.assertIn("summary", lens_temporal_embedding_mds)
+        self.assertIn("latent_space_stability", stats)
+        latent_space_stability = stats["latent_space_stability"]
+        self.assertIn(latent_space_stability["status"], {"ok", "unavailable"})
+        self.assertIn("basis", latent_space_stability)
+        self.assertIn("config", latent_space_stability)
+        self.assertIn("components", latent_space_stability)
+        self.assertIn("loading_stability", latent_space_stability)
+        self.assertIn("summary", latent_space_stability)
         self.assertIn("lens_views", stats)
         lens_views = stats["lens_views"]
         self.assertIn("coverage_mode", lens_views)
@@ -542,6 +550,63 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(separation["coverage_mode"], "complete_rows")
         self.assertIsInstance(separation["source_centroids"], list)
         self.assertIsInstance(separation["centroid_distances"], list)
+
+    def test_latent_space_stability_is_derived_for_complete_rows(self):
+        articles = []
+        for idx in range(10):
+            source_name = "Source A" if idx < 5 else "Source B"
+            base = float(idx)
+            articles.append(
+                {
+                    "id": f"stable-{idx}",
+                    "title": f"Stable {idx}",
+                    "published": f"2026-03-{1 + idx:02d}T00:00:00Z",
+                    "ai_tags": ["OpenAI"],
+                    "topic_tags": ["General"],
+                    "source": {"name": source_name},
+                    "feed": {"name": "Feed", "url": "https://example.com/feed"},
+                    "scraped": {"title": f"Stable {idx}", "body_text": "Body"},
+                    "scrape_error": None,
+                    "score": {
+                        "percent": 70.0,
+                        "lens_scores": {
+                            "Evidence": {"percent": 30.0 + base * 4.0},
+                            "Impact": {"percent": 80.0 - base * 3.0},
+                            "Novelty": {"percent": 45.0 + (base % 3.0) * 8.0},
+                        },
+                    },
+                }
+            )
+        payload = {
+            "analysis": {
+                "lens_summary": {
+                    "lenses": [
+                        {"name": "Evidence", "max_total": 10.0},
+                        {"name": "Impact", "max_total": 10.0},
+                        {"name": "Novelty", "max_total": 10.0},
+                    ]
+                }
+            },
+            "articles": articles,
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        stability = stats["latent_space_stability"]
+
+        if stability["status"] == "unavailable":
+            self.assertIn("pca", str(stability.get("reason", "")).lower())
+            return
+
+        self.assertEqual(stability["status"], "ok")
+        self.assertEqual(stability["basis"], "deterministic_subsample_pca")
+        self.assertEqual(stability["config"]["resamples"], 12)
+        self.assertGreater(stability["summary"]["resamples_completed"], 0)
+        self.assertGreaterEqual(stability["summary"]["component_count"], 1)
+        self.assertGreater(len(stability["components"]), 0)
+        self.assertGreater(len(stability["loading_stability"]), 0)
+        self.assertIn("mean_cosine_similarity", stability["components"][0])
+        self.assertIn("max_loading_stddev", stability["loading_stability"][0])
 
     def test_score_status_distinguishes_zero_from_unscorable(self):
         payload = {

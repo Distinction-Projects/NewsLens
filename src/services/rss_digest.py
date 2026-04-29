@@ -2209,6 +2209,217 @@ def _drift_diagnostics_from_records(
     }
 
 
+def _latent_space_stability_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    article_meta_rows: list[dict[str, Any]],
+    full_pca: dict[str, Any],
+    preferred_lenses: list[str] | None = None,
+    *,
+    resamples: int = 12,
+    sample_fraction: float = 0.8,
+    seed: int = 42,
+) -> dict[str, Any]:
+    if str(full_pca.get("status") or "") != "ok":
+        return {
+            "status": "unavailable",
+            "reason": "Full PCA is unavailable; latent stability cannot be computed.",
+            "basis": "deterministic_subsample_pca",
+            "config": {"resamples": resamples, "sample_fraction": sample_fraction, "seed": seed},
+            "components": [],
+            "loading_stability": [],
+            "summary": {"stable_component_count": 0, "component_count": 0, "resamples_completed": 0},
+        }
+
+    if len(article_lens_percentages) < 6 or len(article_lens_percentages) != len(source_labels):
+        return {
+            "status": "unavailable",
+            "reason": "Need at least 6 aligned article lens rows for latent stability.",
+            "basis": "deterministic_subsample_pca",
+            "config": {"resamples": resamples, "sample_fraction": sample_fraction, "seed": seed},
+            "components": [],
+            "loading_stability": [],
+            "summary": {"stable_component_count": 0, "component_count": 0, "resamples_completed": 0},
+        }
+
+    full_loadings = full_pca.get("loadings")
+    if not isinstance(full_loadings, dict):
+        return {
+            "status": "unavailable",
+            "reason": "Full PCA loadings are missing.",
+            "basis": "deterministic_subsample_pca",
+            "config": {"resamples": resamples, "sample_fraction": sample_fraction, "seed": seed},
+            "components": [],
+            "loading_stability": [],
+            "summary": {"stable_component_count": 0, "component_count": 0, "resamples_completed": 0},
+        }
+
+    full_lenses = [str(lens) for lens in full_loadings.get("lenses", []) if isinstance(lens, str)]
+    full_components = [str(component) for component in full_loadings.get("components", []) if isinstance(component, str)]
+    full_matrix = full_loadings.get("matrix")
+    if not full_lenses or not full_components or not isinstance(full_matrix, list):
+        return {
+            "status": "unavailable",
+            "reason": "Full PCA loading matrix is incomplete.",
+            "basis": "deterministic_subsample_pca",
+            "config": {"resamples": resamples, "sample_fraction": sample_fraction, "seed": seed},
+            "components": [],
+            "loading_stability": [],
+            "summary": {"stable_component_count": 0, "component_count": 0, "resamples_completed": 0},
+        }
+
+    component_labels = full_components[: min(2, len(full_components))]
+    full_vectors: dict[str, list[float]] = {}
+    for component_index, component_label in enumerate(component_labels):
+        row = full_matrix[component_index] if component_index < len(full_matrix) and isinstance(full_matrix[component_index], list) else []
+        vector = []
+        for value in row[: len(full_lenses)]:
+            coerced = _coerce_float(value)
+            vector.append(float(coerced) if coerced is not None else 0.0)
+        if len(vector) == len(full_lenses):
+            full_vectors[component_label] = vector
+
+    if not full_vectors:
+        return {
+            "status": "unavailable",
+            "reason": "No comparable full PCA component vectors were available.",
+            "basis": "deterministic_subsample_pca",
+            "config": {"resamples": resamples, "sample_fraction": sample_fraction, "seed": seed},
+            "components": [],
+            "loading_stability": [],
+            "summary": {"stable_component_count": 0, "component_count": 0, "resamples_completed": 0},
+        }
+
+    sample_size = max(4, min(len(article_lens_percentages) - 1, int(round(len(article_lens_percentages) * sample_fraction))))
+    component_cosines: dict[str, list[float]] = defaultdict(list)
+    component_explained: dict[str, list[float]] = defaultdict(list)
+    loading_samples: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    completed = 0
+
+    for resample_index in range(max(1, resamples)):
+        rng = random.Random(seed + resample_index)
+        sample_indexes = sorted(rng.sample(range(len(article_lens_percentages)), sample_size))
+        sample_lens_rows = [article_lens_percentages[index] for index in sample_indexes]
+        sample_sources = [source_labels[index] for index in sample_indexes]
+        sample_meta = [
+            article_meta_rows[index] if index < len(article_meta_rows) and isinstance(article_meta_rows[index], dict) else {}
+            for index in sample_indexes
+        ]
+        sample_pca = _lens_pca_from_records(
+            sample_lens_rows,
+            sample_sources,
+            article_meta_rows=sample_meta,
+            preferred_lenses=preferred_lenses,
+            max_components=2,
+        )
+        if str(sample_pca.get("status") or "") != "ok":
+            continue
+        sample_loadings = sample_pca.get("loadings")
+        if not isinstance(sample_loadings, dict):
+            continue
+        sample_lenses = [str(lens) for lens in sample_loadings.get("lenses", []) if isinstance(lens, str)]
+        sample_matrix = sample_loadings.get("matrix")
+        if not sample_lenses or not isinstance(sample_matrix, list):
+            continue
+        sample_lens_index = {lens: idx for idx, lens in enumerate(sample_lenses)}
+        explained_by_component = {
+            str(row.get("component") or ""): _coerce_float(row.get("explained_variance_ratio"))
+            for row in sample_pca.get("explained_variance", [])
+            if isinstance(row, dict)
+        }
+        completed += 1
+        for component_index, component_label in enumerate(component_labels):
+            if component_label not in full_vectors or component_index >= len(sample_matrix) or not isinstance(sample_matrix[component_index], list):
+                continue
+            sample_vector: list[float] = []
+            for lens_name in full_lenses:
+                sample_index = sample_lens_index.get(lens_name)
+                value = sample_matrix[component_index][sample_index] if sample_index is not None and sample_index < len(sample_matrix[component_index]) else 0.0
+                coerced = _coerce_float(value)
+                sample_vector.append(float(coerced) if coerced is not None else 0.0)
+            full_vector = full_vectors[component_label]
+            dot = sum(a * b for a, b in zip(full_vector, sample_vector))
+            if dot < 0:
+                sample_vector = [-value for value in sample_vector]
+                dot = -dot
+            full_norm = math.sqrt(sum(value * value for value in full_vector))
+            sample_norm = math.sqrt(sum(value * value for value in sample_vector))
+            cosine = dot / (full_norm * sample_norm) if full_norm > 0 and sample_norm > 0 else None
+            if cosine is not None:
+                component_cosines[component_label].append(cosine)
+            explained = explained_by_component.get(component_label)
+            if explained is not None:
+                component_explained[component_label].append(float(explained))
+            for lens_name, loading in zip(full_lenses, sample_vector):
+                loading_samples[lens_name][component_label].append(float(loading))
+
+    component_rows: list[dict[str, Any]] = []
+    stable_count = 0
+    for component_label in component_labels:
+        cosines = component_cosines.get(component_label, [])
+        explained_values = component_explained.get(component_label, [])
+        mean_cosine = statistics.fmean(cosines) if cosines else None
+        min_cosine = min(cosines) if cosines else None
+        explained_mean = statistics.fmean(explained_values) if explained_values else None
+        explained_stddev = statistics.pstdev(explained_values) if len(explained_values) > 1 else 0.0 if explained_values else None
+        stable = bool(mean_cosine is not None and mean_cosine >= 0.9 and (min_cosine is None or min_cosine >= 0.75))
+        if stable:
+            stable_count += 1
+        component_rows.append(
+            {
+                "component": component_label,
+                "resamples": len(cosines),
+                "mean_cosine_similarity": mean_cosine,
+                "min_cosine_similarity": min_cosine,
+                "explained_variance_mean": explained_mean,
+                "explained_variance_stddev": explained_stddev,
+                "stable": stable,
+            }
+        )
+
+    loading_rows: list[dict[str, Any]] = []
+    for lens_name in full_lenses:
+        row: dict[str, Any] = {"lens": lens_name}
+        max_stddev = 0.0
+        for component_label in component_labels:
+            samples = loading_samples[lens_name].get(component_label, [])
+            mean_value = statistics.fmean(samples) if samples else None
+            stddev_value = statistics.pstdev(samples) if len(samples) > 1 else 0.0 if samples else None
+            row[f"{component_label.lower()}_loading_mean"] = mean_value
+            row[f"{component_label.lower()}_loading_stddev"] = stddev_value
+            if isinstance(stddev_value, (int, float)):
+                max_stddev = max(max_stddev, float(stddev_value))
+        row["max_loading_stddev"] = max_stddev
+        loading_rows.append(row)
+    loading_rows.sort(key=lambda row: float(row.get("max_loading_stddev") or 0.0), reverse=True)
+
+    return {
+        "status": "ok" if completed else "unavailable",
+        "reason": "" if completed else "No PCA resamples completed successfully.",
+        "basis": "deterministic_subsample_pca",
+        "config": {
+            "resamples": resamples,
+            "sample_fraction": sample_fraction,
+            "sample_size": sample_size,
+            "seed": seed,
+        },
+        "components": component_rows,
+        "loading_stability": loading_rows,
+        "summary": {
+            "stable_component_count": stable_count,
+            "component_count": len(component_rows),
+            "resamples_completed": completed,
+            "mean_component_similarity": statistics.fmean(
+                [float(row["mean_cosine_similarity"]) for row in component_rows if isinstance(row.get("mean_cosine_similarity"), (int, float))]
+            )
+            if any(isinstance(row.get("mean_cosine_similarity"), (int, float)) for row in component_rows)
+            else None,
+            "most_unstable_lens": loading_rows[0].get("lens") if loading_rows else None,
+            "max_loading_stddev": loading_rows[0].get("max_loading_stddev") if loading_rows else None,
+        },
+    }
+
+
 def _lens_temporal_embedding_from_pca(pca_payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(pca_payload, dict):
         return {
@@ -4230,6 +4441,13 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         source_labels_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
+    latent_space_stability = _latent_space_stability_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        article_meta_for_lens_rows,
+        lens_pca,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
     lens_time_series = _lens_time_series_from_records(records, lens_maxima)
     lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
     lens_temporal_embedding_mds = _lens_temporal_embedding_from_mds(lens_mds)
@@ -4318,6 +4536,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_pca": lens_pca,
         "lens_mds": lens_mds,
         "lens_separation": lens_separation,
+        "latent_space_stability": latent_space_stability,
         "lens_time_series": lens_time_series,
         "lens_temporal_embedding": lens_temporal_embedding,
         "lens_temporal_embedding_mds": lens_temporal_embedding_mds,

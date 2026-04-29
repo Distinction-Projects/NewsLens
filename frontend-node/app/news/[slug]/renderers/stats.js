@@ -51,12 +51,14 @@ export async function render(searchParams) {
   const tagSlicedAnalysis = asObject(derived.tag_sliced_analysis);
   const eventControl = asObject(derived.event_control);
   const driftDiagnostics = asObject(derived.drift_diagnostics);
+  const latentStability = asObject(derived.latent_space_stability);
   const sourceReliability = asObject(derived.source_reliability);
   const sourceReliabilityPooled = asObject(sourceReliability.pooled);
   const sourceReliabilityMetrics = asObject(sourceReliabilityPooled.metrics);
   const eventSummary = asObject(eventControl.summary);
   const eventCache = asObject(eventControl.cache);
   const driftSummary = asObject(driftDiagnostics.summary);
+  const latentSummary = asObject(latentStability.summary);
   const topicSummary = asObject(sourceTopicControl.summary);
   const tagSliceSummary = asObject(tagSlicedAnalysis.summary);
   const analysisStatusRows = [
@@ -68,6 +70,7 @@ export async function render(searchParams) {
     { label: "Drift diagnostics", status: driftDiagnostics.status, reason: driftDiagnostics.reason },
     { label: "Lens PCA", status: derived.lens_pca?.status, reason: derived.lens_pca?.reason },
     { label: "Lens MDS", status: derived.lens_mds?.status, reason: derived.lens_mds?.reason },
+    { label: "Latent space stability", status: latentStability.status, reason: latentStability.reason },
     { label: "Lens time series", status: derived.lens_time_series?.status, reason: derived.lens_time_series?.reason }
   ];
   const statusRows = [
@@ -121,6 +124,7 @@ export async function render(searchParams) {
           <StatCard label="Embedding Cache" value={`${formatNumber(eventCache.hits)} hits / ${formatNumber(eventCache.stored)} stored`} />
           <StatCard label="Drift Severity" value={driftSummary.severity || "n/a"} />
           <StatCard label="Drift Score" value={formatDecimal(driftSummary.drift_score, 3)} />
+          <StatCard label="Stable PCA Components" value={`${formatNumber(latentSummary.stable_component_count)} / ${formatNumber(latentSummary.component_count)}`} />
           <StatCard label="Reliability Tier" value={sourceReliabilityPooled.tier || "n/a"} />
         </div>
         <div className="chart-grid">

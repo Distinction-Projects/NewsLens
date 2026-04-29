@@ -108,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     event_cache = event_control.get("cache") if isinstance(event_control, dict) else {}
     drift_diagnostics = derived.get("drift_diagnostics") if isinstance(derived, dict) else {}
     drift_summary = drift_diagnostics.get("summary") if isinstance(drift_diagnostics, dict) else {}
+    latent_stability = derived.get("latent_space_stability") if isinstance(derived, dict) else {}
+    latent_summary = latent_stability.get("summary") if isinstance(latent_stability, dict) else {}
     print(
         json.dumps(
             {
@@ -130,6 +132,13 @@ def main(argv: list[str] | None = None) -> int:
                     "status": drift_diagnostics.get("status") if isinstance(drift_diagnostics, dict) else None,
                     "severity": drift_summary.get("severity") if isinstance(drift_summary, dict) else None,
                     "drift_score": drift_summary.get("drift_score") if isinstance(drift_summary, dict) else None,
+                },
+                "latent_space_stability": {
+                    "status": latent_stability.get("status") if isinstance(latent_stability, dict) else None,
+                    "stable_component_count": latent_summary.get("stable_component_count")
+                    if isinstance(latent_summary, dict)
+                    else None,
+                    "component_count": latent_summary.get("component_count") if isinstance(latent_summary, dict) else None,
                 },
             },
             sort_keys=True,
