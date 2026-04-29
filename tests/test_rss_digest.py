@@ -268,7 +268,10 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(source_reliability["pooled_label"], "topic-confounded")
         self.assertIn("pooled", source_reliability)
         self.assertIn("topics", source_reliability)
+        self.assertIn("tags", source_reliability)
         self.assertIn("summary", source_reliability)
+        self.assertIn("tag_count", source_reliability["summary"])
+        self.assertIn("ok_tag_count", source_reliability["summary"])
         self.assertIn(source_reliability["pooled"].get("status"), {"ok", "unavailable"})
         self.assertIn(
             source_reliability["pooled"].get("tier"),
@@ -836,6 +839,8 @@ class RssDigestServiceTests(unittest.TestCase):
         source_reliability = stats["source_reliability"]
         self.assertEqual(source_reliability["summary"]["topic_count"], 3)
         self.assertEqual(len(source_reliability["topics"]), 3)
+        self.assertEqual(source_reliability["summary"]["tag_count"], 3)
+        self.assertEqual(len(source_reliability["tags"]), 3)
 
     def test_source_topic_control_marks_unavailable_topic_when_preconditions_fail(self):
         payload = {
@@ -1048,6 +1053,12 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(tag_sliced["summary"]["tag_count"], 1)
         self.assertEqual(tag_sliced["summary"]["analyzed_tag_count"], 0)
         self.assertEqual(tag_sliced["summary"]["unavailable_tag_count"], 1)
+        source_reliability = stats["source_reliability"]
+        self.assertEqual(source_reliability["summary"]["tag_count"], 1)
+        self.assertEqual(source_reliability["summary"]["ok_tag_count"], 0)
+        self.assertEqual(source_reliability["summary"]["unavailable_tag_count"], 1)
+        self.assertEqual(source_reliability["tags"][0]["tag"], "SingleTag")
+        self.assertEqual(source_reliability["tags"][0]["assessment"]["status"], "unavailable")
 
         tag_row = tag_sliced["tags"][0]
         self.assertEqual(tag_row["tag"], "SingleTag")

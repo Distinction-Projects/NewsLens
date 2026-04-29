@@ -40,7 +40,7 @@ export async function render(searchParams) {
   const selectedTagReason = String(selectedTagEffects.reason || "");
   const isTopicUnavailable = String(selectedTopicEffects.status || "") !== "ok";
   const isTagUnavailable = String(selectedTagEffects.status || "") !== "ok";
-  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName);
+  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName, selectedTagName);
   const { maxLenses, qThreshold } = normalizedSourceEffectsFilter(searchParams);
   const selectedLens = getQueryParam(searchParams, "lens");
   const sourceEffectsExtraParams = {

@@ -55,6 +55,7 @@ export async function render(searchParams) {
   const sourceReliability = asObject(derived.source_reliability);
   const sourceReliabilityPooled = asObject(sourceReliability.pooled);
   const sourceReliabilityMetrics = asObject(sourceReliabilityPooled.metrics);
+  const sourceReliabilitySummary = asObject(sourceReliability.summary);
   const eventSummary = asObject(eventControl.summary);
   const eventCache = asObject(eventControl.cache);
   const driftSummary = asObject(driftDiagnostics.summary);
@@ -126,6 +127,7 @@ export async function render(searchParams) {
           <StatCard label="Drift Score" value={formatDecimal(driftSummary.drift_score, 3)} />
           <StatCard label="Stable PCA Components" value={`${formatNumber(latentSummary.stable_component_count)} / ${formatNumber(latentSummary.component_count)}`} />
           <StatCard label="Reliability Tier" value={sourceReliabilityPooled.tier || "n/a"} />
+          <StatCard label="Reliable Tag Slices" value={`${formatNumber(sourceReliabilitySummary.ok_tag_count)} / ${formatNumber(sourceReliabilitySummary.tag_count)}`} />
         </div>
         <div className="chart-grid">
           <PlotlyChart

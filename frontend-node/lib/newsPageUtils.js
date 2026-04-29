@@ -153,11 +153,13 @@ export function selectedTagSliceFromQuery(searchParams, tags) {
   return tags.find((tag) => String(tag?.tag || "") === requested) || tags[0] || null;
 }
 
-export function selectSourceReliabilityView(sourceReliability, mode, selectedTopic) {
+export function selectSourceReliabilityView(sourceReliability, mode, selectedTopic, selectedTag) {
   const reliability = asObject(sourceReliability);
   const pooled = asObject(reliability.pooled);
-  if (mode === "within-tag") {
-    return {};
+  if (mode === "within-tag" && selectedTag) {
+    const tagRows = asArray(reliability.tags);
+    const match = tagRows.find((row) => String(row?.tag || "") === selectedTag);
+    return asObject(match?.assessment) || pooled;
   }
   if (mode !== "within-topic" || !selectedTopic) {
     return pooled;

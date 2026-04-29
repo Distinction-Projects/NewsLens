@@ -59,6 +59,7 @@ export function SourceReliabilityBlock({ reliability }) {
   const pooled = asObject(data.pooled);
   const pooledMetrics = asObject(pooled.metrics);
   const topics = asArray(data.topics);
+  const tags = asArray(data.tags);
   const summary = asObject(data.summary);
   const flags = asArray(pooled.flags);
   const topicRows = topics.map((row) => {
@@ -66,6 +67,22 @@ export function SourceReliabilityBlock({ reliability }) {
     const metrics = asObject(assessment.metrics);
     return {
       topic: String(row?.topic || "Unknown"),
+      status: String(assessment.status || "unavailable"),
+      tier: String(assessment.tier || "unavailable"),
+      score: toNumber(assessment.score),
+      articles: toNumber(metrics.n_articles) || 0,
+      sources: toNumber(metrics.n_sources) || 0,
+      lift: toNumber(metrics.classification_lift),
+      bestQ: toNumber(metrics.best_q_value),
+      flags: asArray(assessment.flags),
+      reason: String(assessment.reason || "")
+    };
+  });
+  const tagRows = tags.map((row) => {
+    const assessment = asObject(row?.assessment);
+    const metrics = asObject(assessment.metrics);
+    return {
+      tag: String(row?.tag || "Unknown"),
       status: String(assessment.status || "unavailable"),
       tier: String(assessment.tier || "unavailable"),
       score: toNumber(assessment.score),
@@ -90,6 +107,7 @@ export function SourceReliabilityBlock({ reliability }) {
         <StatCard label="Pooled Tier" value={pooled.tier || "n/a"} />
         <StatCard label="Pooled Score" value={formatDecimal(pooled.score, 2)} />
         <StatCard label="Topics OK" value={`${formatNumber(summary.ok_topic_count)} / ${formatNumber(summary.topic_count)}`} />
+        <StatCard label="Tags OK" value={`${formatNumber(summary.ok_tag_count)} / ${formatNumber(summary.tag_count)}`} />
         <StatCard label="Pooled Flags" value={formatNumber(flags.length)} />
       </div>
       <div className="chart-grid">
@@ -110,6 +128,7 @@ export function SourceReliabilityBlock({ reliability }) {
         />
         <ReliabilityMetricTable metrics={pooledMetrics} />
       </div>
+      <h4>Topic Reliability</h4>
       {topicRows.length === 0 ? (
         <EmptyState>No topic reliability rows available.</EmptyState>
       ) : (
@@ -132,6 +151,45 @@ export function SourceReliabilityBlock({ reliability }) {
             {topicRows.map((row) => (
               <tr key={row.topic}>
                 <td>{row.topic}</td>
+                <td>
+                  <StatusPill tone={row.status === "ok" ? "good" : "neutral"}>{row.status}</StatusPill>
+                </td>
+                <td>{row.tier}</td>
+                <td>{row.score !== null ? formatDecimal(row.score, 2) : "n/a"}</td>
+                <td>{formatNumber(row.articles)}</td>
+                <td>{formatNumber(row.sources)}</td>
+                <td>{formatPercent(row.lift)}</td>
+                <td>{formatDecimal(row.bestQ, 4)}</td>
+                <td>{row.flags.join(", ") || "none"}</td>
+                <td>{row.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h4>Tag Reliability</h4>
+      {tagRows.length === 0 ? (
+        <EmptyState>No tag reliability rows available.</EmptyState>
+      ) : (
+        <table className="news-table compact">
+          <thead>
+            <tr>
+              <th>Tag</th>
+              <th>Status</th>
+              <th>Tier</th>
+              <th>Score</th>
+              <th>Articles</th>
+              <th>Sources</th>
+              <th>Lift</th>
+              <th>Best q</th>
+              <th>Flags</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tagRows.map((row) => (
+              <tr key={row.tag}>
+                <td>{row.tag}</td>
                 <td>
                   <StatusPill tone={row.status === "ok" ? "good" : "neutral"}>{row.status}</StatusPill>
                 </td>

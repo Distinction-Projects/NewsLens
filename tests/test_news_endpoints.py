@@ -255,7 +255,10 @@ class NewsEndpointTests(unittest.TestCase):
         self.assertEqual(source_reliability["pooled_label"], "topic-confounded")
         self.assertIn("pooled", source_reliability)
         self.assertIn("topics", source_reliability)
+        self.assertIn("tags", source_reliability)
         self.assertIn("summary", source_reliability)
+        self.assertIn("tag_count", source_reliability["summary"])
+        self.assertIn("ok_tag_count", source_reliability["summary"])
         self.assertIn(source_reliability["pooled"].get("status"), {"ok", "unavailable"})
         lens_pca = stats_payload["data"]["derived"]["lens_pca"]
         self.assertIn("status", lens_pca)

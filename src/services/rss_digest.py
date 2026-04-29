@@ -4233,6 +4233,7 @@ def _source_reliability_from_topic_control(
     source_differentiation: dict[str, Any],
     source_lens_effects: dict[str, Any],
     source_topic_control: dict[str, Any],
+    tag_sliced_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pooled_assessment = _source_reliability_assessment(source_differentiation, source_lens_effects)
 
@@ -4254,26 +4255,61 @@ def _source_reliability_from_topic_control(
             }
         )
 
-    tier_counter: Counter[str] = Counter()
-    status_counter: Counter[str] = Counter()
+    tag_sliced_analysis = tag_sliced_analysis if isinstance(tag_sliced_analysis, dict) else {}
+    tag_rows = tag_sliced_analysis.get("tags") if isinstance(tag_sliced_analysis.get("tags"), list) else []
+    tag_assessments: list[dict[str, Any]] = []
+    for tag_row in tag_rows:
+        if not isinstance(tag_row, dict):
+            continue
+        tag_name = str(tag_row.get("tag") or "").strip()
+        if not tag_name:
+            continue
+        tag_assessments.append(
+            {
+                "tag": tag_name,
+                "assessment": _source_reliability_assessment(
+                    tag_row.get("source_differentiation") if isinstance(tag_row.get("source_differentiation"), dict) else {},
+                    tag_row.get("source_lens_effects") if isinstance(tag_row.get("source_lens_effects"), dict) else {},
+                ),
+            }
+        )
+
+    topic_tier_counter: Counter[str] = Counter()
+    topic_status_counter: Counter[str] = Counter()
     for topic_item in topic_assessments:
         assessment = topic_item.get("assessment") if isinstance(topic_item.get("assessment"), dict) else {}
-        tier_counter[str(assessment.get("tier") or "unavailable")] += 1
-        status_counter[str(assessment.get("status") or "unavailable")] += 1
+        topic_tier_counter[str(assessment.get("tier") or "unavailable")] += 1
+        topic_status_counter[str(assessment.get("status") or "unavailable")] += 1
+
+    tag_tier_counter: Counter[str] = Counter()
+    tag_status_counter: Counter[str] = Counter()
+    for tag_item in tag_assessments:
+        assessment = tag_item.get("assessment") if isinstance(tag_item.get("assessment"), dict) else {}
+        tag_tier_counter[str(assessment.get("tier") or "unavailable")] += 1
+        tag_status_counter[str(assessment.get("status") or "unavailable")] += 1
 
     return {
         "method": "heuristic-v1",
         "pooled_label": "topic-confounded",
+        "tag_basis": tag_sliced_analysis.get("tag_basis") or "topic_tags",
         "pooled": pooled_assessment,
         "topics": topic_assessments,
+        "tags": tag_assessments,
         "summary": {
             "topic_count": len(topic_assessments),
-            "ok_topic_count": status_counter.get("ok", 0),
-            "unavailable_topic_count": status_counter.get("unavailable", 0),
-            "high_count": tier_counter.get("high", 0),
-            "moderate_count": tier_counter.get("moderate", 0),
-            "low_count": tier_counter.get("low", 0),
-            "unavailable_count": tier_counter.get("unavailable", 0),
+            "ok_topic_count": topic_status_counter.get("ok", 0),
+            "unavailable_topic_count": topic_status_counter.get("unavailable", 0),
+            "high_count": topic_tier_counter.get("high", 0),
+            "moderate_count": topic_tier_counter.get("moderate", 0),
+            "low_count": topic_tier_counter.get("low", 0),
+            "unavailable_count": topic_tier_counter.get("unavailable", 0),
+            "tag_count": len(tag_assessments),
+            "ok_tag_count": tag_status_counter.get("ok", 0),
+            "unavailable_tag_count": tag_status_counter.get("unavailable", 0),
+            "high_tag_count": tag_tier_counter.get("high", 0),
+            "moderate_tag_count": tag_tier_counter.get("moderate", 0),
+            "low_tag_count": tag_tier_counter.get("low", 0),
+            "unavailable_tag_reliability_count": tag_tier_counter.get("unavailable", 0),
         },
     }
 
@@ -4491,6 +4527,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         source_differentiation,
         source_lens_effects,
         source_topic_control,
+        tag_sliced_analysis,
     )
     lens_views = _lens_views_from_records(records, lens_maxima)
     data_quality = _data_quality_from_records(records)

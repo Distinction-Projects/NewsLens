@@ -39,7 +39,7 @@ export async function render(searchParams) {
   const selectedTagReason = String(selectedTagDiff.reason || "");
   const isTopicUnavailable = String(selectedTopicDiff.status || "") !== "ok";
   const isTagUnavailable = String(selectedTagDiff.status || "") !== "ok";
-  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName);
+  const reliabilityView = selectSourceReliabilityView(sourceReliability, mode, selectedTopicName, selectedTagName);
   const dataModeExtraParams = {
     mode,
     topic: mode === "within-topic" ? selectedTopicName : "",
