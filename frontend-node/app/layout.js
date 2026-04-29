@@ -1,9 +1,21 @@
 import "./globals.css";
 import Link from "next/link";
+import { publicSiteUrl } from "../lib/siteConfig";
 
 export const metadata = {
+  metadataBase: new URL(publicSiteUrl()),
   title: "NewsLens Research Dashboard",
-  description: "Public research dashboard for sentiment models and AI news analytics"
+  description: "Public research dashboard for sentiment models and AI news analytics",
+  alternates: {
+    canonical: "/"
+  },
+  openGraph: {
+    title: "NewsLens Research Dashboard",
+    description: "Public research dashboard for sentiment models and AI news analytics",
+    url: "/",
+    siteName: "NewsLens",
+    type: "website"
+  }
 };
 
 export default function RootLayout({ children }) {

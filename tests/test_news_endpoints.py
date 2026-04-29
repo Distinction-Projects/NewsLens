@@ -167,6 +167,7 @@ class NewsEndpointTests(unittest.TestCase):
     def test_stats_and_freshness(self):
         stats = self.client.get("/api/news/stats")
         self.assertEqual(stats.status_code, 200)
+        self.assertIn("public, max-age=", stats.headers.get("Cache-Control", ""))
         stats_payload = stats.get_json()
         self.assertEqual(stats_payload["status"], "ok")
         self.assertIn("derived", stats_payload["data"])

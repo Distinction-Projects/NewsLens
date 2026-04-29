@@ -8,7 +8,10 @@ from src.services.rss_digest import RssDigestClient
 
 def _to_flask_response(response: ControllerResponse):
     if response.content_type == "application/json":
-        return jsonify(response.body), response.status_code
+        flask_response = jsonify(response.body)
+        for header_name, header_value in response.headers.items():
+            flask_response.headers[header_name] = header_value
+        return flask_response, response.status_code
 
     flask_response = make_response(str(response.body), response.status_code)
     flask_response.headers["Content-Type"] = response.content_type

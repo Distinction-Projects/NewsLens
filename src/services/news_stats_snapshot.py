@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_NEWS_STATS_SNAPSHOT_PATH = "data/processed/news_analytics_snapshot.json"
+_SNAPSHOT_CACHE_LOCK = threading.Lock()
+_SNAPSHOT_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
 
 
 class PrecomputedStatsError(RuntimeError):
@@ -45,8 +48,18 @@ def _validate_stats_envelope(payload: Any) -> dict[str, Any]:
 
 def load_precomputed_stats_response(path: Path | None = None) -> dict[str, Any]:
     snapshot_path = path or stats_snapshot_path()
-    if not snapshot_path.exists():
+    try:
+        stat = snapshot_path.stat()
+    except FileNotFoundError as exc:
         raise PrecomputedStatsError(f"Precomputed stats snapshot not found: {snapshot_path}")
+    except OSError as exc:
+        raise PrecomputedStatsError(f"Precomputed stats snapshot could not be read: {exc}") from exc
+
+    cache_key = (str(snapshot_path.resolve()), stat.st_mtime_ns, stat.st_size)
+    with _SNAPSHOT_CACHE_LOCK:
+        cached = _SNAPSHOT_CACHE.get(cache_key)
+        if cached is not None:
+            return deepcopy(cached)
 
     try:
         payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -62,4 +75,7 @@ def load_precomputed_stats_response(path: Path | None = None) -> dict[str, Any]:
         validated["meta"] = meta
     meta["stats_backend"] = "precomputed"
     meta["stats_snapshot_path"] = str(snapshot_path)
+    with _SNAPSHOT_CACHE_LOCK:
+        _SNAPSHOT_CACHE.clear()
+        _SNAPSHOT_CACHE[cache_key] = deepcopy(validated)
     return validated

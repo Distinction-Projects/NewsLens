@@ -164,6 +164,7 @@ class FastApiNewsEndpointTests(unittest.TestCase):
             os.environ["NEWS_STATS_SNAPSHOT_PATH"] = str(precomputed_path)
             response = self.client.get("/api/news/stats")
             self.assertEqual(response.status_code, 200)
+            self.assertIn("public, max-age=", response.headers.get("cache-control", ""))
             payload = response.json()
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["data"]["derived"]["total_articles"], 1)
@@ -172,6 +173,7 @@ class FastApiNewsEndpointTests(unittest.TestCase):
             os.environ["NEWS_STATS_SNAPSHOT_PATH"] = str(self.temp_dir / "missing_precomputed_stats.json")
             missing = self.client.get("/api/news/stats")
             self.assertEqual(missing.status_code, 503)
+            self.assertEqual(missing.headers.get("cache-control"), "no-store")
             self.assertEqual(missing.json()["status"], "precomputed_stats_unavailable")
         finally:
             if previous_backend is None:

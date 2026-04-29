@@ -59,6 +59,8 @@ runuser -u "${APP_USER}" -- env NLTK_DATA="${NLTK_DATA_DIR}" \
 
 runuser -u "${APP_USER}" -- npm --prefix "${APP_DIR}/frontend-node" ci
 runuser -u "${APP_USER}" -- env NEXT_PUBLIC_NEWS_API_BASE_URL="http://127.0.0.1:9000" \
+  NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://lab.spectralresidue.com}" \
+  NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS="${NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS:-300}" \
   npm --prefix "${APP_DIR}/frontend-node" run build
 
 if [[ ! -f "${ENV_FILE}" ]]; then

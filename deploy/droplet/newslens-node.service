@@ -10,6 +10,8 @@ Group=newslens
 WorkingDirectory=/srv/newslens/app/frontend-node
 Environment=NODE_ENV=production
 Environment=NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000
+Environment=NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=300
+Environment=NEXT_PUBLIC_SITE_URL=https://lab.spectralresidue.com
 ExecStart=/usr/bin/npm run start -- -H 127.0.0.1
 Restart=always
 RestartSec=5

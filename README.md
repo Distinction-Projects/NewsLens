@@ -182,6 +182,19 @@ python -m src.analytics.build_news_snapshot --output data/processed/news_analyti
 
 If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing or invalid, `/api/news/stats` returns `503` instead of falling back to request-time analytics.
 
+News read endpoints also emit conservative HTTP cache headers by default:
+
+```bash
+NEWS_HTTP_CACHE_SECONDS=300
+NEWS_STATS_HTTP_CACHE_SECONDS=300
+NEWS_HTTP_STALE_SECONDS=3600
+NEWS_SNAPSHOT_HTTP_CACHE_SECONDS=86400
+NEWS_SNAPSHOT_HTTP_STALE_SECONDS=604800
+NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=300
+```
+
+`refresh=1` requests use `Cache-Control: no-store`. Historical `snapshot_date` requests use the longer snapshot cache window.
+
 ## App bootstrap rules
 
 The bootstrap in `src/app.py` is intentionally opinionated:
@@ -282,6 +295,14 @@ npm run dev
 ```
 
 Set `NEXT_PUBLIC_NEWS_API_BASE_URL` in `.env.local` if your backend URL differs from `http://127.0.0.1:9000`.
+
+When the Next app is served behind a public reverse proxy, set the canonical public URL so generated metadata and absolute URLs do not point back to the raw server IP:
+
+```bash
+NEXT_PUBLIC_SITE_URL=https://lab.spectralresidue.com
+```
+
+The NewsLens droplet can stay on plain HTTP behind the Spectral Residue HTTPS proxy. Its Nginx config preserves incoming `X-Forwarded-Proto` and `X-Forwarded-Host` headers so requests proxied from `https://lab.spectralresidue.com` keep the correct public scheme/host signal.
 
 ## Local verification
 

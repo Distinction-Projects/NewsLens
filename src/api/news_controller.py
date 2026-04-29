@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -44,6 +45,45 @@ def _parse_limit(raw_limit: str | None) -> int | None:
 
 def _parse_refresh(raw_refresh: str | None) -> bool:
     return (raw_refresh or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _parse_cache_seconds(env_name: str, default: int) -> int:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(value, 0)
+
+
+def _cache_control(max_age: int, stale_seconds: int) -> str:
+    if max_age <= 0:
+        return "no-store"
+    return f"public, max-age={max_age}, stale-while-revalidate={max(stale_seconds, 0)}"
+
+
+def _read_cache_headers(
+    *,
+    force_refresh: bool,
+    snapshot_date: str | None,
+    seconds_env: str = "NEWS_HTTP_CACHE_SECONDS",
+    default_seconds: int = 300,
+) -> dict[str, str]:
+    if force_refresh:
+        return {"Cache-Control": "no-store"}
+    if snapshot_date:
+        max_age = _parse_cache_seconds("NEWS_SNAPSHOT_HTTP_CACHE_SECONDS", 86400)
+        stale_seconds = _parse_cache_seconds("NEWS_SNAPSHOT_HTTP_STALE_SECONDS", 604800)
+    else:
+        max_age = _parse_cache_seconds(seconds_env, default_seconds)
+        stale_seconds = _parse_cache_seconds("NEWS_HTTP_STALE_SECONDS", 3600)
+    return {"Cache-Control": _cache_control(max_age, stale_seconds)}
+
+
+def _no_store_headers() -> dict[str, str]:
+    return {"Cache-Control": "no-store"}
 
 
 def _common_meta(bundle: dict[str, Any], filtered_count: int, returned_count: int) -> dict:
@@ -180,8 +220,8 @@ def _rows_to_csv(rows: list[dict[str, Any]]) -> str:
     return output.getvalue()
 
 
-def _response_json(status_code: int, body: dict[str, Any]) -> ControllerResponse:
-    return ControllerResponse(status_code=status_code, body=body)
+def _response_json(status_code: int, body: dict[str, Any], headers: dict[str, str] | None = None) -> ControllerResponse:
+    return ControllerResponse(status_code=status_code, body=body, headers=headers or {})
 
 
 class NewsController:
@@ -232,6 +272,7 @@ class NewsController:
                 "meta": _common_meta(bundle, filtered_count=len(filtered), returned_count=len(ordered)),
                 "data": ordered,
             },
+            headers=_read_cache_headers(force_refresh=force_refresh, snapshot_date=snapshot_date_value),
         )
 
     def get_latest_digest(
@@ -289,6 +330,7 @@ class NewsController:
                 "meta": _common_meta(bundle, filtered_count=len(filtered), returned_count=1),
                 "data": ordered[0],
             },
+            headers=_read_cache_headers(force_refresh=force_refresh, snapshot_date=snapshot_date_value),
         )
 
     def get_stats(self, *, refresh: str | None, snapshot_date: str | None) -> ControllerResponse:
@@ -298,12 +340,25 @@ class NewsController:
         try:
             snapshot_date_value = parse_snapshot_date(snapshot_date)
             if snapshot_date_value is None and stats_backend_mode() == "precomputed":
-                return _response_json(200, load_precomputed_stats_response())
+                return _response_json(
+                    200,
+                    load_precomputed_stats_response(),
+                    headers=_read_cache_headers(
+                        force_refresh=force_refresh,
+                        snapshot_date=None,
+                        seconds_env="NEWS_STATS_HTTP_CACHE_SECONDS",
+                        default_seconds=300,
+                    ),
+                )
             bundle = self.client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date_value)
         except ValueError as exc:
             return _response_json(400, {"status": "bad_request", "error": str(exc)})
         except PrecomputedStatsError as exc:
-            return _response_json(503, {"status": "precomputed_stats_unavailable", "error": str(exc), "data": None})
+            return _response_json(
+                503,
+                {"status": "precomputed_stats_unavailable", "error": str(exc), "data": None},
+                headers=_no_store_headers(),
+            )
         except RssDigestNotFoundError as exc:
             if snapshot_date_value:
                 return _response_json(404, {"status": "not_found", "error": str(exc)})
@@ -324,6 +379,12 @@ class NewsController:
                     "analysis": bundle.get("analysis", {}),
                 },
             },
+            headers=_read_cache_headers(
+                force_refresh=force_refresh,
+                snapshot_date=snapshot_date_value,
+                seconds_env="NEWS_STATS_HTTP_CACHE_SECONDS",
+                default_seconds=300,
+            ),
         )
 
     def get_upstream(self, *, refresh: str | None, snapshot_date: str | None) -> ControllerResponse:
@@ -352,6 +413,7 @@ class NewsController:
                     "upstream": bundle.get("upstream_payload"),
                 },
             },
+            headers=_read_cache_headers(force_refresh=force_refresh, snapshot_date=snapshot_date_value),
         )
 
     def export_artifact(
@@ -411,6 +473,7 @@ class NewsController:
                     "meta": meta,
                     "rows": rows,
                 },
+                headers=_read_cache_headers(force_refresh=force_refresh, snapshot_date=snapshot_date_value),
             )
 
         csv_payload = _rows_to_csv(rows)
@@ -418,7 +481,10 @@ class NewsController:
             status_code=200,
             body=csv_payload,
             content_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{artifact_value}.csv"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{artifact_value}.csv"',
+                **_read_cache_headers(force_refresh=force_refresh, snapshot_date=snapshot_date_value),
+            },
         )
 
     def get_news_freshness(self) -> ControllerResponse:
