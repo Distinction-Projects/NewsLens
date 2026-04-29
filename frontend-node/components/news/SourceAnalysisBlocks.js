@@ -57,6 +57,7 @@ function ReliabilityMetricTable({ metrics }) {
 export function SourceReliabilityBlock({ reliability }) {
   const data = asObject(reliability);
   const pooled = asObject(data.pooled);
+  const eventControlled = asObject(data.event_controlled);
   const pooledMetrics = asObject(pooled.metrics);
   const topics = asArray(data.topics);
   const tags = asArray(data.tags);
@@ -106,6 +107,8 @@ export function SourceReliabilityBlock({ reliability }) {
         <StatCard label="Pooled Label" value={data.pooled_label || "topic-confounded"} />
         <StatCard label="Pooled Tier" value={pooled.tier || "n/a"} />
         <StatCard label="Pooled Score" value={formatDecimal(pooled.score, 2)} />
+        <StatCard label="Event-Control Tier" value={eventControlled.tier || "n/a"} />
+        <StatCard label="Event-Control Score" value={formatDecimal(eventControlled.score, 2)} />
         <StatCard label="Topics OK" value={`${formatNumber(summary.ok_topic_count)} / ${formatNumber(summary.topic_count)}`} />
         <StatCard label="Tags OK" value={`${formatNumber(summary.ok_tag_count)} / ${formatNumber(summary.tag_count)}`} />
         <StatCard label="Pooled Flags" value={formatNumber(flags.length)} />

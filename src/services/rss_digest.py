@@ -4234,8 +4234,18 @@ def _source_reliability_from_topic_control(
     source_lens_effects: dict[str, Any],
     source_topic_control: dict[str, Any],
     tag_sliced_analysis: dict[str, Any] | None = None,
+    event_control: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pooled_assessment = _source_reliability_assessment(source_differentiation, source_lens_effects)
+    event_control = event_control if isinstance(event_control, dict) else {}
+    event_controlled_assessment = _source_reliability_assessment(
+        event_control.get("same_event_source_differentiation")
+        if isinstance(event_control.get("same_event_source_differentiation"), dict)
+        else {},
+        event_control.get("same_event_source_lens_effects")
+        if isinstance(event_control.get("same_event_source_lens_effects"), dict)
+        else {},
+    )
 
     topic_rows = source_topic_control.get("topics") if isinstance(source_topic_control.get("topics"), list) else []
     topic_assessments: list[dict[str, Any]] = []
@@ -4293,6 +4303,7 @@ def _source_reliability_from_topic_control(
         "pooled_label": "topic-confounded",
         "tag_basis": tag_sliced_analysis.get("tag_basis") or "topic_tags",
         "pooled": pooled_assessment,
+        "event_controlled": event_controlled_assessment,
         "topics": topic_assessments,
         "tags": tag_assessments,
         "summary": {
@@ -4310,6 +4321,8 @@ def _source_reliability_from_topic_control(
             "moderate_tag_count": tag_tier_counter.get("moderate", 0),
             "low_tag_count": tag_tier_counter.get("low", 0),
             "unavailable_tag_reliability_count": tag_tier_counter.get("unavailable", 0),
+            "event_controlled_status": event_controlled_assessment.get("status") or "unavailable",
+            "event_controlled_tier": event_controlled_assessment.get("tier") or "unavailable",
         },
     }
 
@@ -4528,6 +4541,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         source_lens_effects,
         source_topic_control,
         tag_sliced_analysis,
+        event_control,
     )
     lens_views = _lens_views_from_records(records, lens_maxima)
     data_quality = _data_quality_from_records(records)

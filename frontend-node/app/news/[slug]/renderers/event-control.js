@@ -327,6 +327,8 @@ export async function render(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const eventControl = asObject(derived.event_control);
+  const sourceReliability = asObject(derived.source_reliability);
+  const eventReliability = asObject(sourceReliability.event_controlled);
   const summary = asObject(eventControl.summary);
   const config = asObject(eventControl.config);
   const cache = asObject(eventControl.cache);
@@ -363,6 +365,8 @@ export async function render(searchParams) {
           <StatCard label="Events" value={formatNumber(summary.event_count)} />
           <StatCard label="Multi-Source Events" value={formatNumber(summary.multi_source_event_count)} />
           <StatCard label="Singletons" value={formatNumber(summary.singleton_count)} />
+          <StatCard label="Reliability Tier" value={eventReliability.tier || "n/a"} />
+          <StatCard label="Reliability Score" value={formatDecimal(eventReliability.score, 2)} />
           <StatCard label="Status" value={<StatusPill tone={eventControl.status === "ok" ? "good" : "bad"}>{eventControl.status || "unknown"}</StatusPill>} />
         </div>
         <ConfigTable config={config} cache={cache} />
@@ -426,10 +430,12 @@ export async function render(searchParams) {
       <SourceDifferentiationBlock
         title="Same-Event Source Differentiation"
         differentiation={sameEventSourceDifferentiation}
+        reliability={eventReliability}
       />
       <SourceEffectsBlock
         title="Same-Event Source Effects"
         effects={sameEventSourceEffects}
+        reliability={eventReliability}
         maxLenses={maxLenses}
         qThreshold={qThreshold}
         selectedLens={selectedLens}

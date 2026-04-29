@@ -187,6 +187,7 @@ test("event control renders status, diagnostics, and export links", async ({ pag
   }
 
   await expect(page.getByRole("heading", { name: "Event-Control Status" })).toBeVisible();
+  await expect(page.getByText("Reliability Tier")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Display Controls and Exports" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Event Coverage by Source" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Same-Event Source Differentiation" })).toBeVisible();

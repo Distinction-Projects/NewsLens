@@ -172,6 +172,15 @@ class NewsEventControlTests(unittest.TestCase):
         effects_rows = payload["same_event_source_lens_effects"]["rows"]
         self.assertEqual(effects_rows[0]["lens"], "Evidence")
         self.assertEqual(effects_rows[0]["source_counts"], {"A": 2, "B": 2})
+        reliability = rss_digest._source_reliability_from_topic_control(
+            {},
+            {},
+            {"topics": []},
+            {"tags": []},
+            payload,
+        )
+        self.assertEqual(reliability["event_controlled"]["status"], "ok")
+        self.assertEqual(reliability["summary"]["event_controlled_status"], "ok")
         deltas = payload["same_event_pairwise_source_lens_deltas"]
         self.assertEqual(deltas["status"], "ok")
         self.assertEqual(deltas["summary"]["source_pair_count"], 1)
