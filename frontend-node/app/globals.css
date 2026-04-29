@@ -20,8 +20,8 @@ body {
   padding: 12px 24px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: clamp(16px, 4vw, 42px);
 }
 
 .top-nav-brand {
@@ -33,7 +33,7 @@ body {
 .top-nav-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px 14px;
 }
 
 .top-nav-links a {
@@ -62,6 +62,12 @@ h1, h2, h3 {
   border-radius: 10px;
   padding: 16px;
   margin-bottom: 16px;
+  min-width: 0;
+  align-self: start;
+}
+
+.panel > :last-child {
+  margin-bottom: 0;
 }
 
 .muted {
@@ -76,8 +82,9 @@ code {
 
 .news-nav-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 8px;
+  align-items: start;
 }
 
 .news-nav-link {
@@ -186,8 +193,9 @@ code {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .stat-card {
@@ -256,9 +264,10 @@ code {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 12px;
   margin-bottom: 12px;
+  align-items: start;
 }
 
 .plotly-chart {
@@ -268,6 +277,60 @@ code {
   border-radius: 8px;
   background: #0f1724;
   overflow: hidden;
+  align-self: start;
+}
+
+.home-page {
+  display: grid;
+  gap: 16px;
+}
+
+.home-hero {
+  max-width: 780px;
+}
+
+.home-hero p {
+  margin-bottom: 0;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.home-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.home-workspace-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #2a3a56;
+  border-radius: 9px;
+  background: #101a29;
+  color: #d8e5ff;
+  text-decoration: none;
+}
+
+.home-workspace-card:hover {
+  border-color: #5b87cc;
+  background: #16253b;
+}
+
+.home-workspace-card span {
+  color: #9fb1cf;
+  line-height: 1.35;
+}
+
+.home-focus-panel p {
+  line-height: 1.5;
 }
 
 .badge-row {
@@ -324,8 +387,9 @@ code {
 
 .about-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .about-card {
@@ -400,6 +464,7 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .workflow-lane {
@@ -407,6 +472,16 @@ code {
 }
 
 @media (max-width: 840px) {
+  .top-nav {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .home-grid {
+    grid-template-columns: 1fr;
+  }
+
   .workflow-split {
     grid-template-columns: 1fr;
   }
