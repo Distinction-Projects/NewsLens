@@ -30,11 +30,21 @@ export async function render(searchParams) {
   const lensTimeSeries = asObject(derived.lens_time_series);
   const temporalPca = asObject(derived.lens_temporal_embedding);
   const temporalMds = asObject(derived.lens_temporal_embedding_mds);
+  const driftDiagnostics = asObject(derived.drift_diagnostics);
   const lensSeriesRows = asArray(lensTimeSeries.series).slice(0, 8);
   const temporalPcaRows = safePointRows(temporalPca.day_centroids, "pc1", "pc2");
   const temporalMdsRows = safePointRows(temporalMds.day_centroids, "mds1", "mds2");
   const lensTimeSummary = asObject(lensTimeSeries.summary);
   const temporalPcaSummary = asObject(temporalPca.summary);
+  const driftSummary = asObject(driftDiagnostics.summary);
+  const driftWindows = asObject(driftDiagnostics.windows);
+  const baselineWindow = asObject(driftWindows.baseline);
+  const recentWindow = asObject(driftWindows.recent);
+  const driftLensRows = asArray(driftDiagnostics.lens_drift).slice(0, 12);
+  const sourceDrift = asObject(driftDiagnostics.source_distribution_drift);
+  const tagDrift = asObject(driftDiagnostics.tag_distribution_drift);
+  const sourceDriftRows = asArray(sourceDrift.rows).slice(0, 12);
+  const tagDriftRows = asArray(tagDrift.rows).slice(0, 12);
   const maxDailyCount = dailyCounts.reduce((max, row) => Math.max(max, toNumber(row.count) || 0), 0);
   const maxHourCount = hourCounts.reduce((max, row) => Math.max(max, toNumber(row.count) || 0), 0);
   const firstDate = dailyCounts[0]?.date || "n/a";
@@ -161,6 +171,89 @@ export async function render(searchParams) {
                   <td>{formatNumber(row.count)}</td>
                   <td>{formatDecimal(row.x, 3)}</td>
                   <td>{formatDecimal(row.y, 3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
+      </div>
+
+      <div className="panel">
+        <h3>Drift Diagnostics</h3>
+        <StatusBlock status={String(driftDiagnostics.status || "unavailable")} reason={String(driftDiagnostics.reason || "")} />
+        <p className="muted">
+          Compares the first half of available publication dates with the second half to flag lens-score, source-mix,
+          tag-mix, and volume shifts.
+        </p>
+        <div className="stats-grid">
+          <StatCard label="Severity" value={driftSummary.severity || "n/a"} />
+          <StatCard label="Drift Score" value={formatDecimal(driftSummary.drift_score, 3)} />
+          <StatCard label="Max Lens Delta" value={formatDecimal(driftSummary.max_abs_lens_delta, 2)} />
+          <StatCard label="Source TVD" value={formatDecimal(driftSummary.source_total_variation_distance, 3)} />
+          <StatCard label="Tag TVD" value={formatDecimal(driftSummary.tag_total_variation_distance, 3)} />
+          <StatCard
+            label="Windows"
+            value={`${baselineWindow.start_date || "n/a"} to ${baselineWindow.end_date || "n/a"} / ${recentWindow.start_date || "n/a"} to ${recentWindow.end_date || "n/a"}`}
+          />
+        </div>
+        {driftLensRows.length === 0 && sourceDriftRows.length === 0 && tagDriftRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  orientation: "h",
+                  y: driftLensRows.map((row) => String(row.lens || "Unknown")).reverse(),
+                  x: driftLensRows.map((row) => toNumber(row.delta) || 0).reverse(),
+                  marker: { color: driftLensRows.map((row) => ((toNumber(row.delta) || 0) >= 0 ? "#4fd1c5" : "#fd7e14")).reverse() }
+                }
+              ]}
+              layout={{ title: "Lens Mean Shift: Recent minus Baseline", xaxis: { title: "Score percentage points" } }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  name: "Source share delta",
+                  x: sourceDriftRows.map((row) => String(row.source || "Unknown")),
+                  y: sourceDriftRows.map((row) => (toNumber(row.share_delta) || 0) * 100),
+                  marker: { color: "#7aa7ff" }
+                },
+                {
+                  type: "bar",
+                  name: "Tag share delta",
+                  x: tagDriftRows.map((row) => String(row.tag || "Unknown")),
+                  y: tagDriftRows.map((row) => (toNumber(row.share_delta) || 0) * 100),
+                  marker: { color: "#9d7dff" }
+                }
+              ]}
+              layout={{ title: "Distribution Share Shifts", yaxis: { title: "Recent minus baseline share, points" } }}
+            />
+          </div>
+        )}
+        {driftLensRows.length > 0 ? (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Lens</th>
+                <th>Baseline Mean</th>
+                <th>Recent Mean</th>
+                <th>Delta</th>
+                <th>Baseline N</th>
+                <th>Recent N</th>
+              </tr>
+            </thead>
+            <tbody>
+              {driftLensRows.map((row) => (
+                <tr key={String(row.lens || "unknown-lens")}>
+                  <td>{row.lens || "Unknown"}</td>
+                  <td>{formatDecimal(row.baseline_mean, 2)}</td>
+                  <td>{formatDecimal(row.recent_mean, 2)}</td>
+                  <td>{formatDecimal(row.delta, 2)}</td>
+                  <td>{formatNumber(row.baseline_count)}</td>
+                  <td>{formatNumber(row.recent_count)}</td>
                 </tr>
               ))}
             </tbody>

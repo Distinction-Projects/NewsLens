@@ -276,6 +276,16 @@ class RssDigestServiceTests(unittest.TestCase):
         )
         self.assertIn("flags", source_reliability["pooled"])
         self.assertIn("metrics", source_reliability["pooled"])
+        self.assertIn("drift_diagnostics", stats)
+        drift_diagnostics = stats["drift_diagnostics"]
+        self.assertIn(drift_diagnostics["status"], {"ok", "unavailable"})
+        self.assertIn("basis", drift_diagnostics)
+        self.assertIn("windows", drift_diagnostics)
+        self.assertIn("lens_drift", drift_diagnostics)
+        self.assertIn("source_distribution_drift", drift_diagnostics)
+        self.assertIn("tag_distribution_drift", drift_diagnostics)
+        self.assertIn("volume_drift", drift_diagnostics)
+        self.assertIn("summary", drift_diagnostics)
         self.assertIn("lens_pca", stats)
         lens_pca = stats["lens_pca"]
         self.assertIn("status", lens_pca)
@@ -1113,6 +1123,77 @@ class RssDigestServiceTests(unittest.TestCase):
             topic_effects = topic_row["source_lens_effects"]
             self.assertEqual(topic_effects["multiple_testing"]["method"], "benjamini-hochberg")
             self.assertGreaterEqual(topic_effects["multiple_testing"]["n_tests"], 0)
+
+    def test_drift_diagnostics_detects_lens_source_and_tag_shift(self):
+        payload = {
+            "analysis": {
+                "lens_summary": {
+                    "lenses": [
+                        {"name": "Framing", "max_total": 20.0},
+                        {"name": "Tone", "max_total": 20.0},
+                    ]
+                }
+            },
+            "articles": [
+                {
+                    "id": "b1",
+                    "published": "2026-01-01T12:00:00Z",
+                    "source": {"name": "Source A"},
+                    "ai_tags": ["policy"],
+                    "scraped": {"body_text": "ok"},
+                    "score": {
+                        "percent": 50.0,
+                        "lens_scores": {"Framing": {"percent": 20.0}, "Tone": {"percent": 30.0}},
+                    },
+                },
+                {
+                    "id": "b2",
+                    "published": "2026-01-02T12:00:00Z",
+                    "source": {"name": "Source A"},
+                    "ai_tags": ["policy"],
+                    "scraped": {"body_text": "ok"},
+                    "score": {
+                        "percent": 55.0,
+                        "lens_scores": {"Framing": {"percent": 30.0}, "Tone": {"percent": 30.0}},
+                    },
+                },
+                {
+                    "id": "r1",
+                    "published": "2026-01-03T12:00:00Z",
+                    "source": {"name": "Source B"},
+                    "ai_tags": ["conflict"],
+                    "scraped": {"body_text": "ok"},
+                    "score": {
+                        "percent": 80.0,
+                        "lens_scores": {"Framing": {"percent": 80.0}, "Tone": {"percent": 35.0}},
+                    },
+                },
+                {
+                    "id": "r2",
+                    "published": "2026-01-04T12:00:00Z",
+                    "source": {"name": "Source B"},
+                    "ai_tags": ["conflict"],
+                    "scraped": {"body_text": "ok"},
+                    "score": {
+                        "percent": 82.0,
+                        "lens_scores": {"Framing": {"percent": 90.0}, "Tone": {"percent": 35.0}},
+                    },
+                },
+            ],
+        }
+
+        records = normalize_articles(payload)
+        stats = derive_stats(sort_records_desc(records), payload)
+        drift = stats["drift_diagnostics"]
+
+        self.assertEqual(drift["status"], "ok")
+        self.assertEqual(drift["summary"]["severity"], "high")
+        self.assertGreater(drift["summary"]["max_abs_lens_delta"], 50.0)
+        self.assertGreaterEqual(drift["source_distribution_drift"]["total_variation_distance"], 1.0)
+        self.assertGreaterEqual(drift["tag_distribution_drift"]["total_variation_distance"], 1.0)
+        self.assertEqual(drift["lens_drift"][0]["lens"], "Framing")
+        self.assertEqual(drift["windows"]["baseline"]["articles"], 2)
+        self.assertEqual(drift["windows"]["recent"]["articles"], 2)
 
     def test_last_good_fallback(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp:

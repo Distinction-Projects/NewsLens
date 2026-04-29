@@ -2017,6 +2017,198 @@ def _lens_time_series_from_records(
     }
 
 
+def _source_label_for_record(record: dict[str, Any]) -> str:
+    source = record.get("source")
+    source_name = None
+    if isinstance(source, dict):
+        source_name = source.get("name") or source.get("id")
+    return _clean_text(source_name) or "Unknown"
+
+
+def _distribution_rows(
+    baseline_counter: Counter[str],
+    recent_counter: Counter[str],
+    label_key: str,
+    *,
+    limit: int = 25,
+) -> tuple[list[dict[str, Any]], float]:
+    baseline_total = sum(int(value) for value in baseline_counter.values())
+    recent_total = sum(int(value) for value in recent_counter.values())
+    labels = set(baseline_counter.keys()) | set(recent_counter.keys())
+    rows: list[dict[str, Any]] = []
+    total_variation = 0.0
+    for label in labels:
+        baseline_count = int(baseline_counter.get(label, 0))
+        recent_count = int(recent_counter.get(label, 0))
+        baseline_share = (baseline_count / baseline_total) if baseline_total else 0.0
+        recent_share = (recent_count / recent_total) if recent_total else 0.0
+        share_delta = recent_share - baseline_share
+        total_variation += abs(share_delta)
+        rows.append(
+            {
+                label_key: label,
+                "baseline_count": baseline_count,
+                "recent_count": recent_count,
+                "baseline_share": baseline_share,
+                "recent_share": recent_share,
+                "share_delta": share_delta,
+                "abs_share_delta": abs(share_delta),
+            }
+        )
+    rows.sort(key=lambda row: (float(row.get("abs_share_delta") or 0.0), int(row.get("recent_count") or 0)), reverse=True)
+    return rows[:limit], total_variation / 2.0
+
+
+def _drift_diagnostics_from_records(
+    records: list[dict[str, Any]],
+    lens_maxima: OrderedDict[str, float],
+) -> dict[str, Any]:
+    dated_records: list[tuple[str, dict[str, Any]]] = []
+    for record in records:
+        published_dt = _record_datetime(record)
+        if published_dt is None:
+            continue
+        dated_records.append((published_dt.date().isoformat(), record))
+
+    dates = sorted({day for day, _record in dated_records})
+    if len(dates) < 2:
+        return {
+            "status": "unavailable",
+            "reason": "Need at least two publication dates to compute drift diagnostics.",
+            "basis": "first_half_vs_second_half_by_publication_date",
+            "windows": {},
+            "lens_drift": [],
+            "source_distribution_drift": {"total_variation_distance": None, "rows": []},
+            "tag_distribution_drift": {"total_variation_distance": None, "rows": []},
+            "volume_drift": {},
+            "summary": {"dated_articles": len(dated_records), "days": len(dates)},
+        }
+
+    split_index = max(1, len(dates) // 2)
+    baseline_dates = set(dates[:split_index])
+    recent_dates = set(dates[split_index:])
+    if not recent_dates:
+        recent_dates = {dates[-1]}
+        baseline_dates = set(dates[:-1])
+
+    baseline_lens_values: dict[str, list[float]] = defaultdict(list)
+    recent_lens_values: dict[str, list[float]] = defaultdict(list)
+    baseline_source_counter: Counter[str] = Counter()
+    recent_source_counter: Counter[str] = Counter()
+    baseline_tag_counter: Counter[str] = Counter()
+    recent_tag_counter: Counter[str] = Counter()
+    baseline_daily_counter: Counter[str] = Counter()
+    recent_daily_counter: Counter[str] = Counter()
+
+    for day_key, record in dated_records:
+        is_recent = day_key in recent_dates
+        source_counter = recent_source_counter if is_recent else baseline_source_counter
+        tag_counter = recent_tag_counter if is_recent else baseline_tag_counter
+        lens_values = recent_lens_values if is_recent else baseline_lens_values
+        daily_counter = recent_daily_counter if is_recent else baseline_daily_counter
+
+        source_counter[_source_label_for_record(record)] += 1
+        daily_counter[day_key] += 1
+        for tag in {tag.strip() for tag in _tag_values_for_record(record) if tag.strip()}:
+            tag_counter[tag] += 1
+        for lens_name, lens_value in _record_lens_percentages(record, lens_maxima).items():
+            if isinstance(lens_name, str) and isinstance(lens_value, (int, float)) and math.isfinite(float(lens_value)):
+                lens_values[lens_name].append(float(lens_value))
+
+    discovered_lenses = set(baseline_lens_values.keys()) | set(recent_lens_values.keys())
+    ordered_lenses = [lens_name for lens_name in lens_maxima.keys() if lens_name in discovered_lenses]
+    ordered_lenses.extend(sorted(discovered_lenses - set(ordered_lenses)))
+    lens_rows: list[dict[str, Any]] = []
+    for lens_name in ordered_lenses:
+        baseline_values = baseline_lens_values.get(lens_name, [])
+        recent_values = recent_lens_values.get(lens_name, [])
+        baseline_mean = statistics.fmean(baseline_values) if baseline_values else None
+        recent_mean = statistics.fmean(recent_values) if recent_values else None
+        delta = (
+            float(recent_mean) - float(baseline_mean)
+            if isinstance(baseline_mean, (int, float)) and isinstance(recent_mean, (int, float))
+            else None
+        )
+        lens_rows.append(
+            {
+                "lens": lens_name,
+                "baseline_mean": baseline_mean,
+                "recent_mean": recent_mean,
+                "delta": delta,
+                "abs_delta": abs(delta) if isinstance(delta, (int, float)) else None,
+                "baseline_count": len(baseline_values),
+                "recent_count": len(recent_values),
+            }
+        )
+    lens_rows.sort(key=lambda row: float(row.get("abs_delta") or 0.0), reverse=True)
+
+    source_rows, source_tvd = _distribution_rows(baseline_source_counter, recent_source_counter, "source")
+    tag_rows, tag_tvd = _distribution_rows(baseline_tag_counter, recent_tag_counter, "tag")
+    baseline_daily_values = [int(count) for count in baseline_daily_counter.values()]
+    recent_daily_values = [int(count) for count in recent_daily_counter.values()]
+    baseline_daily_mean = statistics.fmean(baseline_daily_values) if baseline_daily_values else None
+    recent_daily_mean = statistics.fmean(recent_daily_values) if recent_daily_values else None
+    volume_delta = (
+        float(recent_daily_mean) - float(baseline_daily_mean)
+        if isinstance(baseline_daily_mean, (int, float)) and isinstance(recent_daily_mean, (int, float))
+        else None
+    )
+    max_abs_lens_delta = max((float(row.get("abs_delta") or 0.0) for row in lens_rows), default=0.0)
+    drift_score = max(source_tvd, tag_tvd, min(max_abs_lens_delta / 100.0, 1.0))
+    if drift_score >= 0.25:
+        severity = "high"
+    elif drift_score >= 0.10:
+        severity = "moderate"
+    else:
+        severity = "low"
+
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "first_half_vs_second_half_by_publication_date",
+        "windows": {
+            "baseline": {
+                "start_date": min(baseline_dates) if baseline_dates else None,
+                "end_date": max(baseline_dates) if baseline_dates else None,
+                "days": len(baseline_dates),
+                "articles": sum(baseline_daily_counter.values()),
+            },
+            "recent": {
+                "start_date": min(recent_dates) if recent_dates else None,
+                "end_date": max(recent_dates) if recent_dates else None,
+                "days": len(recent_dates),
+                "articles": sum(recent_daily_counter.values()),
+            },
+        },
+        "lens_drift": lens_rows,
+        "source_distribution_drift": {
+            "total_variation_distance": source_tvd,
+            "rows": source_rows,
+        },
+        "tag_distribution_drift": {
+            "total_variation_distance": tag_tvd,
+            "rows": tag_rows,
+        },
+        "volume_drift": {
+            "baseline_daily_mean": baseline_daily_mean,
+            "recent_daily_mean": recent_daily_mean,
+            "delta_daily_mean": volume_delta,
+            "delta_ratio": (volume_delta / baseline_daily_mean) if baseline_daily_mean else None,
+        },
+        "summary": {
+            "dated_articles": len(dated_records),
+            "days": len(dates),
+            "baseline_articles": sum(baseline_daily_counter.values()),
+            "recent_articles": sum(recent_daily_counter.values()),
+            "max_abs_lens_delta": max_abs_lens_delta,
+            "source_total_variation_distance": source_tvd,
+            "tag_total_variation_distance": tag_tvd,
+            "drift_score": drift_score,
+            "severity": severity,
+        },
+    }
+
+
 def _lens_temporal_embedding_from_pca(pca_payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(pca_payload, dict):
         return {
@@ -3908,11 +4100,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     placeholder_zero_unscorable_articles = 0
 
     for record in records:
-        source = record.get("source")
-        source_name = None
-        if isinstance(source, dict):
-            source_name = source.get("name") or source.get("id")
-        source_label = _clean_text(source_name) or "Unknown"
+        source_label = _source_label_for_record(record)
         source_counter[source_label] += 1
 
         unique_tags = {tag.strip() for tag in _tag_values_for_record(record) if tag.strip()}
@@ -4045,6 +4233,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     lens_time_series = _lens_time_series_from_records(records, lens_maxima)
     lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
     lens_temporal_embedding_mds = _lens_temporal_embedding_from_mds(lens_mds)
+    drift_diagnostics = _drift_diagnostics_from_records(records, lens_maxima)
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -4132,6 +4321,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_time_series": lens_time_series,
         "lens_temporal_embedding": lens_temporal_embedding,
         "lens_temporal_embedding_mds": lens_temporal_embedding_mds,
+        "drift_diagnostics": drift_diagnostics,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "source_topic_control": source_topic_control,

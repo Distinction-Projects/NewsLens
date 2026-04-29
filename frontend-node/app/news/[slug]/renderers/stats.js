@@ -50,11 +50,13 @@ export async function render(searchParams) {
   const sourceTopicControl = asObject(derived.source_topic_control);
   const tagSlicedAnalysis = asObject(derived.tag_sliced_analysis);
   const eventControl = asObject(derived.event_control);
+  const driftDiagnostics = asObject(derived.drift_diagnostics);
   const sourceReliability = asObject(derived.source_reliability);
   const sourceReliabilityPooled = asObject(sourceReliability.pooled);
   const sourceReliabilityMetrics = asObject(sourceReliabilityPooled.metrics);
   const eventSummary = asObject(eventControl.summary);
   const eventCache = asObject(eventControl.cache);
+  const driftSummary = asObject(driftDiagnostics.summary);
   const topicSummary = asObject(sourceTopicControl.summary);
   const tagSliceSummary = asObject(tagSlicedAnalysis.summary);
   const analysisStatusRows = [
@@ -63,6 +65,7 @@ export async function render(searchParams) {
     { label: "Topic-controlled slices", status: topicSummary.analyzed_topic_count ? "ok" : "unavailable", reason: "" },
     { label: "Tag-controlled slices", status: tagSliceSummary.analyzed_tag_count ? "ok" : "unavailable", reason: "" },
     { label: "Event-controlled analysis", status: eventControl.status, reason: eventControl.reason || eventSummary.unavailable_reason },
+    { label: "Drift diagnostics", status: driftDiagnostics.status, reason: driftDiagnostics.reason },
     { label: "Lens PCA", status: derived.lens_pca?.status, reason: derived.lens_pca?.reason },
     { label: "Lens MDS", status: derived.lens_mds?.status, reason: derived.lens_mds?.reason },
     { label: "Lens time series", status: derived.lens_time_series?.status, reason: derived.lens_time_series?.reason }
@@ -116,6 +119,8 @@ export async function render(searchParams) {
           <StatCard label="Multi-Source Events" value={formatNumber(eventSummary.multi_source_event_count)} />
           <StatCard label="Event Embeddings" value={formatNumber(eventSummary.embedded_count)} />
           <StatCard label="Embedding Cache" value={`${formatNumber(eventCache.hits)} hits / ${formatNumber(eventCache.stored)} stored`} />
+          <StatCard label="Drift Severity" value={driftSummary.severity || "n/a"} />
+          <StatCard label="Drift Score" value={formatDecimal(driftSummary.drift_score, 3)} />
           <StatCard label="Reliability Tier" value={sourceReliabilityPooled.tier || "n/a"} />
         </div>
         <div className="chart-grid">
