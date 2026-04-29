@@ -15,7 +15,7 @@ import {
   selectedTopicFromQuery
 } from "../../../../lib/newsPageUtils";
 import { DataModeControls, EmptyState } from "../../../../components/news/NewsDashboardPrimitives";
-import { SourceDifferentiationBlock } from "../../../../components/news/SourceAnalysisBlocks";
+import { SourceDifferentiationBlock, SourceReliabilityBlock } from "../../../../components/news/SourceAnalysisBlocks";
 
 export async function render(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
@@ -116,6 +116,8 @@ export async function render(searchParams) {
           </>
         ) : null}
       </div>
+
+      <SourceReliabilityBlock reliability={sourceReliability} />
 
       {mode === "pooled" ? (
         <SourceDifferentiationBlock

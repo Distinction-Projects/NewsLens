@@ -167,19 +167,25 @@ function EventClustersSection({ events, limit }) {
         <table className="news-table compact">
           <thead>
             <tr>
+              <th>Event ID</th>
               <th>Representative Title</th>
               <th>Dates</th>
               <th>Articles</th>
               <th>Sources</th>
               <th>Top Topics</th>
+              <th>Top Tags</th>
+              <th>Article IDs</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((event) => {
               const sourceCounts = asObject(event.source_counts);
               const topicCounts = asObject(event.topic_counts);
+              const tagCounts = asObject(event.tag_counts);
+              const articleIds = asArray(event.article_ids).map((id) => String(id || "")).filter(Boolean);
               return (
                 <tr key={String(event.event_id || event.representative_title)}>
+                  <td>{event.event_id || "n/a"}</td>
                   <td>{truncateText(event.representative_title || "Untitled event", 90)}</td>
                   <td>
                     {event.date_start || "n/a"} to {event.date_end || "n/a"}
@@ -197,6 +203,13 @@ function EventClustersSection({ events, limit }) {
                       .map(([topic, count]) => `${topic} (${count})`)
                       .join(", ") || "n/a"}
                   </td>
+                  <td>
+                    {Object.entries(tagCounts)
+                      .slice(0, 5)
+                      .map(([tag, count]) => `${tag} (${count})`)
+                      .join(", ") || "n/a"}
+                  </td>
+                  <td>{articleIds.slice(0, 8).join(", ") || "n/a"}</td>
                 </tr>
               );
             })}

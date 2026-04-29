@@ -8,7 +8,149 @@ import {
   sourceCountsToRows,
   toNumber
 } from "../../lib/newsPageUtils";
-import { EmptyState, StatCard, StatusBlock } from "./NewsDashboardPrimitives";
+import { EmptyState, StatCard, StatusBlock, StatusPill } from "./NewsDashboardPrimitives";
+
+function ReliabilityMetricTable({ metrics }) {
+  const data = asObject(metrics);
+  return (
+    <table className="news-table compact">
+      <tbody>
+        <tr>
+          <th>Articles</th>
+          <td>{formatNumber(data.n_articles)}</td>
+        </tr>
+        <tr>
+          <th>Sources</th>
+          <td>{formatNumber(data.n_sources)}</td>
+        </tr>
+        <tr>
+          <th>Lenses</th>
+          <td>{formatNumber(data.n_lenses)}</td>
+        </tr>
+        <tr>
+          <th>Classification accuracy</th>
+          <td>{formatPercent(data.classification_accuracy)}</td>
+        </tr>
+        <tr>
+          <th>Baseline accuracy</th>
+          <td>{formatPercent(data.classification_baseline_accuracy)}</td>
+        </tr>
+        <tr>
+          <th>Classification lift</th>
+          <td>{formatPercent(data.classification_lift)}</td>
+        </tr>
+        <tr>
+          <th>Best q-value</th>
+          <td>{formatDecimal(data.best_q_value, 4)}</td>
+        </tr>
+        <tr>
+          <th>FDR-significant lenses</th>
+          <td>
+            {formatNumber(data.fdr_significant_lens_count)} / {formatNumber(data.total_lens_tests)}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+export function SourceReliabilityBlock({ reliability }) {
+  const data = asObject(reliability);
+  const pooled = asObject(data.pooled);
+  const pooledMetrics = asObject(pooled.metrics);
+  const topics = asArray(data.topics);
+  const summary = asObject(data.summary);
+  const flags = asArray(pooled.flags);
+  const topicRows = topics.map((row) => {
+    const assessment = asObject(row?.assessment);
+    const metrics = asObject(assessment.metrics);
+    return {
+      topic: String(row?.topic || "Unknown"),
+      status: String(assessment.status || "unavailable"),
+      tier: String(assessment.tier || "unavailable"),
+      score: toNumber(assessment.score),
+      articles: toNumber(metrics.n_articles) || 0,
+      sources: toNumber(metrics.n_sources) || 0,
+      lift: toNumber(metrics.classification_lift),
+      bestQ: toNumber(metrics.best_q_value),
+      flags: asArray(assessment.flags),
+      reason: String(assessment.reason || "")
+    };
+  });
+  return (
+    <div className="panel">
+      <h3>Source Reliability Assessment</h3>
+      <p className="muted">
+        Heuristic readout for whether source-difference claims have enough support. This is not a quality score; it summarizes
+        sample size, separability, FDR exposure, and controlled-slice availability.
+      </p>
+      <div className="stats-grid">
+        <StatCard label="Method" value={data.method || "n/a"} />
+        <StatCard label="Pooled Label" value={data.pooled_label || "topic-confounded"} />
+        <StatCard label="Pooled Tier" value={pooled.tier || "n/a"} />
+        <StatCard label="Pooled Score" value={formatDecimal(pooled.score, 2)} />
+        <StatCard label="Topics OK" value={`${formatNumber(summary.ok_topic_count)} / ${formatNumber(summary.topic_count)}`} />
+        <StatCard label="Pooled Flags" value={formatNumber(flags.length)} />
+      </div>
+      <div className="chart-grid">
+        <PlotlyChart
+          data={[
+            {
+              type: "bar",
+              x: ["Classifier", "Baseline", "Lift"],
+              y: [
+                (toNumber(pooledMetrics.classification_accuracy) || 0) * 100,
+                (toNumber(pooledMetrics.classification_baseline_accuracy) || 0) * 100,
+                (toNumber(pooledMetrics.classification_lift) || 0) * 100
+              ],
+              marker: { color: ["#7aa7ff", "#fd7e14", "#4fd1c5"] }
+            }
+          ]}
+          layout={{ title: "Pooled Classification Reliability", yaxis: { title: "Percent" } }}
+        />
+        <ReliabilityMetricTable metrics={pooledMetrics} />
+      </div>
+      {topicRows.length === 0 ? (
+        <EmptyState>No topic reliability rows available.</EmptyState>
+      ) : (
+        <table className="news-table compact">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Status</th>
+              <th>Tier</th>
+              <th>Score</th>
+              <th>Articles</th>
+              <th>Sources</th>
+              <th>Lift</th>
+              <th>Best q</th>
+              <th>Flags</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topicRows.map((row) => (
+              <tr key={row.topic}>
+                <td>{row.topic}</td>
+                <td>
+                  <StatusPill tone={row.status === "ok" ? "good" : "neutral"}>{row.status}</StatusPill>
+                </td>
+                <td>{row.tier}</td>
+                <td>{row.score !== null ? formatDecimal(row.score, 2) : "n/a"}</td>
+                <td>{formatNumber(row.articles)}</td>
+                <td>{formatNumber(row.sources)}</td>
+                <td>{formatPercent(row.lift)}</td>
+                <td>{formatDecimal(row.bestQ, 4)}</td>
+                <td>{row.flags.join(", ") || "none"}</td>
+                <td>{row.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 export function SourceDifferentiationBlock({ title, differentiation, confounded = false, reliability }) {
   const data = asObject(differentiation);

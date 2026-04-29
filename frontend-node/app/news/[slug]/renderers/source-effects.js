@@ -15,7 +15,7 @@ import {
   selectedTopicFromQuery
 } from "../../../../lib/newsPageUtils";
 import { DataModeControls, EmptyState } from "../../../../components/news/NewsDashboardPrimitives";
-import { SourceEffectsBlock } from "../../../../components/news/SourceAnalysisBlocks";
+import { SourceEffectsBlock, SourceReliabilityBlock } from "../../../../components/news/SourceAnalysisBlocks";
 import { normalizedSourceEffectsFilter } from "./shared";
 
 export async function render(searchParams) {
@@ -198,6 +198,8 @@ export async function render(searchParams) {
           </div>
         </form>
       </div>
+
+      <SourceReliabilityBlock reliability={sourceReliability} />
 
       {mode === "pooled" ? (
         <SourceEffectsBlock

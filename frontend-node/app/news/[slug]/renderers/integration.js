@@ -87,6 +87,16 @@ export async function render(searchParams) {
   const freshnessRow = rows[3];
 
   const digestMeta = asObject(digestRow?.payload?.meta);
+  const statsPayload = asObject(rows[2]?.payload);
+  const statsData = asObject(statsPayload.data);
+  const statsDerived = asObject(statsData.derived);
+  const upstreamSummary = asObject(statsDerived.upstream_summary);
+  const upstreamAnalysis = asObject(statsDerived.upstream_analysis);
+  const upstreamLensSummary = asObject(upstreamAnalysis.lens_summary);
+  const upstreamLensRows = asArray(upstreamLensSummary.lenses);
+  const upstreamSourceDifferentiation = asObject(upstreamAnalysis.source_differentiation);
+  const upstreamClassification = asObject(upstreamSourceDifferentiation.classification);
+  const upstreamMultivariate = asObject(upstreamSourceDifferentiation.multivariate);
   const digestItems = asArray(digestRow?.payload?.data);
   const latestRecord = asObject(latestRow?.payload?.data);
   const freshnessPayload = asObject(freshnessRow?.payload);
@@ -163,6 +173,85 @@ export async function render(searchParams) {
           <StatCard label="Latest Title" value={truncateText(latestRecord?.title || "unavailable", 72)} />
           <StatCard label="Freshness Status" value={freshnessIsFresh ? "fresh" : "stale"} />
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Upstream Analysis Contract</h3>
+        <p className="muted">
+          Confirms that the upstream RSS/scoring bundle contains enough lens and source-analysis material for the dashboard
+          contract, independent of page-level rendering.
+        </p>
+        <div className="stats-grid">
+          <StatCard label="Upstream Articles" value={formatNumber(upstreamSummary.articles)} />
+          <StatCard label="Digest Articles" value={formatNumber(upstreamSummary.digest_articles)} />
+          <StatCard label="History Added" value={formatNumber(upstreamSummary.history_articles_added)} />
+          <StatCard label="Scored Articles" value={formatNumber(upstreamSummary.scored_articles)} />
+          <StatCard label="Lens-Scored Articles" value={formatNumber(upstreamSummary.lens_scored_articles)} />
+          <StatCard label="Upstream Lenses" value={formatNumber(upstreamLensRows.length)} />
+          <StatCard label="Upstream Sources" value={formatNumber(upstreamSourceDifferentiation.n_sources)} />
+          <StatCard label="Upstream LOOCV Accuracy" value={formatPercent(upstreamClassification.accuracy)} />
+        </div>
+        <div className="chart-grid">
+          <PlotlyChart
+            data={[
+              {
+                type: "bar",
+                x: upstreamLensRows.map((row) => String(row.name || "Unknown")),
+                y: upstreamLensRows.map((row) => toNumber(row.items_with_scores) || 0),
+                marker: { color: "#4fd1c5" }
+              }
+            ]}
+            layout={{ title: "Upstream Lens Score Coverage", yaxis: { title: "Items with scores" } }}
+          />
+          <table className="news-table compact">
+            <tbody>
+              <tr>
+                <th>Source differentiation status</th>
+                <td>{String(upstreamSourceDifferentiation.status || "unavailable")}</td>
+              </tr>
+              <tr>
+                <th>Articles in source analysis</th>
+                <td>{formatNumber(upstreamSourceDifferentiation.n_articles)}</td>
+              </tr>
+              <tr>
+                <th>Multivariate F</th>
+                <td>{formatDecimal(upstreamMultivariate.f_stat, 4)}</td>
+              </tr>
+              <tr>
+                <th>Multivariate p_perm</th>
+                <td>{formatDecimal(upstreamMultivariate.p_perm, 4)}</td>
+              </tr>
+              <tr>
+                <th>Classifier baseline</th>
+                <td>{formatPercent(upstreamClassification.baseline_accuracy)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {upstreamLensRows.length === 0 ? (
+          <EmptyState>No upstream lens summary rows available.</EmptyState>
+        ) : (
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Lens</th>
+                <th>Rubrics</th>
+                <th>Max Total</th>
+                <th>Items With Scores</th>
+              </tr>
+            </thead>
+            <tbody>
+              {upstreamLensRows.map((row) => (
+                <tr key={String(row.name || "unknown-lens")}>
+                  <td>{row.name || "Unknown"}</td>
+                  <td>{formatNumber(row.rubric_count)}</td>
+                  <td>{formatDecimal(row.max_total, 1)}</td>
+                  <td>{formatNumber(row.items_with_scores)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="panel">
