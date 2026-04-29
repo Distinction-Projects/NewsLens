@@ -16,9 +16,11 @@ export async function render(searchParams) {
   const derived = getStatsDerived(payload);
   const pca = asObject(derived.lens_pca);
   const mds = asObject(derived.lens_mds);
+  const lensSeparation = asObject(derived.lens_separation);
   const explained = asArray(pca.explained_variance);
   const drivers = asArray(pca.variance_drivers);
   const centroids = asArray(pca.source_centroids);
+  const silhouetteRows = asArray(lensSeparation.silhouette_like_by_source);
   const explainedRows = explained
     .map((row) => ({
       component: String(row?.component || ""),
@@ -86,13 +88,17 @@ export async function render(searchParams) {
     <>
       <DataModeControls searchParams={searchParams} />
       <div className="panel">
-        <h3>PCA Status</h3>
+        <h3>Latent Space Status</h3>
         <StatusBlock status={String(pca.status || "unavailable")} reason={String(pca.reason || "")} />
         <div className="stats-grid">
           <StatCard label="Articles" value={formatNumber(pca.n_articles)} />
           <StatCard label="Lenses" value={formatNumber(pca.n_lenses)} />
           <StatCard label="Components" value={formatNumber(asArray(pca.components).length)} />
           <StatCard label="Coverage Mode" value={pca.coverage_mode || "n/a"} />
+          <StatCard label="MDS Stress" value={mdsStress !== null ? formatDecimal(mdsStress, 3) : "n/a"} />
+          <StatCard label="Source Separation" value={formatDecimal(lensSeparation.separation_ratio, 3)} />
+          <StatCard label="Silhouette-Like Mean" value={formatDecimal(lensSeparation.silhouette_like_mean, 3)} />
+          <StatCard label="Separation Basis" value={lensSeparation.basis || "n/a"} />
         </div>
       </div>
 
@@ -294,6 +300,46 @@ export async function render(searchParams) {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Source Separation Diagnostics</h3>
+        <StatusBlock status={String(lensSeparation.status || "unavailable")} reason={String(lensSeparation.reason || "")} />
+        {silhouetteRows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="chart-grid">
+            <PlotlyChart
+              data={[
+                {
+                  type: "bar",
+                  x: silhouetteRows.map((row) => String(row.source || "Unknown")),
+                  y: silhouetteRows.map((row) => toNumber(row.silhouette_like_mean) || 0),
+                  marker: { color: "#fd7e14" }
+                }
+              ]}
+              layout={{ title: "Silhouette-Like Separation by Source", yaxis: { title: "Mean" } }}
+            />
+            <table className="news-table compact">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Articles</th>
+                  <th>Silhouette-Like Mean</th>
+                </tr>
+              </thead>
+              <tbody>
+                {silhouetteRows.map((row) => (
+                  <tr key={String(row.source || "unknown")}>
+                    <td>{row.source || "Unknown"}</td>
+                    <td>{formatNumber(row.count)}</td>
+                    <td>{formatDecimal(row.silhouette_like_mean, 3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>
