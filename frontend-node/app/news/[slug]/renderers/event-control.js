@@ -5,12 +5,14 @@ import {
   formatDecimal,
   formatNumber,
   formatPercent,
+  getQueryParam,
   getStatsDerived,
   queryLimit,
   truncateText
 } from "../../../../lib/newsPageUtils";
 import PlotlyChart from "../../../../components/PlotlyChart";
 import { DataModeControls, EmptyState, StatCard, StatusBlock, StatusPill } from "../../../../components/news/NewsDashboardPrimitives";
+import { SourceDifferentiationBlock, SourceEffectsBlock } from "../../../../components/news/SourceAnalysisBlocks";
 
 function topRows(rows, limit) {
   return asArray(rows).slice(0, limit);
@@ -22,6 +24,8 @@ function JsonDownloadLinks() {
     ["event_clusters", "Clusters"],
     ["event_source_coverage", "Source coverage"],
     ["event_source_pair_coverage", "Pair coverage"],
+    ["same_event_source_differentiation_summary", "Same-event source differentiation"],
+    ["same_event_source_lens_effects", "Same-event source effects"],
     ["same_event_pairwise_source_lens_deltas", "Pairwise deltas"],
     ["same_event_variance_decomposition", "Variance decomposition"]
   ];
@@ -314,9 +318,21 @@ export async function render(searchParams) {
   const config = asObject(eventControl.config);
   const cache = asObject(eventControl.cache);
   const coverage = asObject(eventControl.event_coverage);
+  const sameEventSourceDifferentiation = asObject(eventControl.same_event_source_differentiation);
+  const sameEventSourceEffects = asObject(eventControl.same_event_source_lens_effects);
   const deltas = asObject(eventControl.same_event_pairwise_source_lens_deltas);
   const variance = asObject(eventControl.same_event_variance_decomposition);
   const limit = queryLimit(searchParams, "limit", 12, 5, 100);
+  const maxLenses = queryLimit(searchParams, "max_lenses", 10, 3, 50);
+  const qThresholdRaw = Number(getQueryParam(searchParams, "q_threshold"));
+  const qThreshold = Number.isFinite(qThresholdRaw) ? Math.max(0, Math.min(1, qThresholdRaw)) : 1;
+  const selectedLensValue = getQueryParam(searchParams, "lens");
+  const effectRows = asArray(sameEventSourceEffects.rows);
+  const availableLensOptions = effectRows.map((row) => String(row?.lens || "")).filter(Boolean);
+  const selectedLens =
+    selectedLensValue && availableLensOptions.includes(selectedLensValue)
+      ? selectedLensValue
+      : availableLensOptions[0] || "";
 
   return (
     <>
@@ -352,6 +368,39 @@ export async function render(searchParams) {
               </option>
             ))}
           </select>
+          <label className="muted" htmlFor="event-control-max-lenses">
+            Lenses shown
+          </label>
+          <select id="event-control-max-lenses" name="max_lenses" defaultValue={String(maxLenses)}>
+            {[5, 10, 15, 20, 50].map((value) => (
+              <option key={value} value={String(value)}>
+                {value}
+              </option>
+            ))}
+          </select>
+          <label className="muted" htmlFor="event-control-q-threshold">
+            Max q-value (FDR)
+          </label>
+          <select id="event-control-q-threshold" name="q_threshold" defaultValue={String(qThreshold)}>
+            <option value="1">All</option>
+            <option value="0.1">0.10</option>
+            <option value="0.05">0.05</option>
+            <option value="0.01">0.01</option>
+          </select>
+          <label className="muted" htmlFor="event-control-lens">
+            Lens detail
+          </label>
+          <select id="event-control-lens" name="lens" defaultValue={selectedLens} disabled={availableLensOptions.length === 0}>
+            {availableLensOptions.length === 0 ? (
+              <option value="">No lens rows</option>
+            ) : (
+              availableLensOptions.slice(0, 50).map((lens) => (
+                <option key={lens} value={lens}>
+                  {lens}
+                </option>
+              ))
+            )}
+          </select>
           <button type="submit" className="news-nav-link active-link">
             Apply
           </button>
@@ -361,6 +410,17 @@ export async function render(searchParams) {
       </div>
 
       <CoverageSection coverage={coverage} limit={limit} />
+      <SourceDifferentiationBlock
+        title="Same-Event Source Differentiation"
+        differentiation={sameEventSourceDifferentiation}
+      />
+      <SourceEffectsBlock
+        title="Same-Event Source Effects"
+        effects={sameEventSourceEffects}
+        maxLenses={maxLenses}
+        qThreshold={qThreshold}
+        selectedLens={selectedLens}
+      />
       <EventClustersSection events={eventControl.events} limit={limit} />
       <PairwiseDeltasSection deltas={deltas} limit={limit} />
       <VarianceSection variance={variance} limit={limit} />

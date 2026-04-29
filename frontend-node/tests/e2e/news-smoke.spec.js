@@ -183,9 +183,13 @@ test("event control renders status, diagnostics, and export links", async ({ pag
   await expect(page.getByRole("heading", { name: "Event-Control Status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Display Controls and Exports" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Event Coverage by Source" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Same-Event Source Differentiation" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Same-Event Source Effects" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Matched Event Clusters" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Summary JSON" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Same-event source effects JSON" })).toBeVisible();
   await expect(page.locator('select[name="limit"]')).toBeVisible();
+  await expect(page.locator('select[name="max_lenses"]')).toBeVisible();
 });
 
 test("chart-heavy pages render plot containers when API is available", async ({ page, baseURL }) => {
