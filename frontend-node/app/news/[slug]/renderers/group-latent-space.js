@@ -27,6 +27,17 @@ const GROUP_TYPES = [
   { key: "tag", label: "Tags" }
 ];
 
+const TAG_CLUSTER_COLORS = [
+  "#4fd1c5",
+  "#7aa7ff",
+  "#f0b36f",
+  "#c084fc",
+  "#8ee27c",
+  "#ff7f9a",
+  "#ffe07a",
+  "#6ee7f9"
+];
+
 function normalizeGroupType(searchParams) {
   const raw = getQueryParam(searchParams, "group_type").toLowerCase();
   return GROUP_TYPES.some((option) => option.key === raw) ? raw : "source";
@@ -108,10 +119,17 @@ function tagLensPcaChart(tagLensPca, selectedGroup) {
       ...row,
       x: toNumber(row?.pc1),
       y: toNumber(row?.pc2),
-      count: toNumber(row?.n_articles) || 0
+      count: toNumber(row?.n_articles) || 0,
+      cluster: toNumber(row?.cluster) || 0
     }))
     .filter((row) => row.x !== null && row.y !== null);
   const selectedKey = String(selectedGroup?.group_key || "");
+  const clusterColor = (row) => {
+    if (!row.cluster) {
+      return "#4fd1c5";
+    }
+    return TAG_CLUSTER_COLORS[(row.cluster - 1) % TAG_CLUSTER_COLORS.length];
+  };
   return {
     data: [
       {
@@ -122,12 +140,12 @@ function tagLensPcaChart(tagLensPca, selectedGroup) {
         y: rows.map((row) => row.y),
         text: rows.map((row) => String(row.tag || "Unknown")),
         textposition: "top center",
-        customdata: rows.map((row) => [row.n_articles, row.n_sources]),
+        customdata: rows.map((row) => [row.n_articles, row.n_sources, row.cluster_label, row.sample_status]),
         hovertemplate:
-          "%{text}<br>Articles: %{customdata[0]}<br>Sources: %{customdata[1]}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>",
+          "%{text}<br>Cluster: %{customdata[2]}<br>Articles: %{customdata[0]}<br>Sources: %{customdata[1]}<br>Sample: %{customdata[3]}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>",
         marker: {
           size: rows.map((row) => Math.max(8, Math.min(28, Math.sqrt(row.count || 1) * 4))),
-          color: rows.map((row) => (String(row.tag_key || "") === selectedKey ? "#f0b36f" : "#4fd1c5")),
+          color: rows.map((row) => (String(row.tag_key || "") === selectedKey ? "#f0b36f" : clusterColor(row))),
           opacity: rows.map((row) => (String(row.tag_key || "") === selectedKey ? 1 : 0.75)),
           line: {
             color: rows.map((row) => (String(row.tag_key || "") === selectedKey ? "#ffe3ba" : "#183b43")),
@@ -137,7 +155,7 @@ function tagLensPcaChart(tagLensPca, selectedGroup) {
       }
     ],
     layout: {
-      title: "Tag Mean Lens Profiles in PCA Space",
+      title: "Tag Mean Lens Profiles in PCA Space, Colored by Cluster",
       xaxis: { title: "PC1" },
       yaxis: { title: "PC2" }
     }
@@ -210,12 +228,96 @@ function CountTable({ title, rows }) {
   );
 }
 
+function ComponentExtremesTable({ rows }) {
+  const componentRows = asArray(rows).slice(0, 3);
+  if (componentRows.length === 0) {
+    return <EmptyState>No tag PCA component extremes available.</EmptyState>;
+  }
+  return (
+    <div className="table-scroll">
+      <table className="news-table compact">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Positive Tags</th>
+            <th>Negative Tags</th>
+          </tr>
+        </thead>
+        <tbody>
+          {componentRows.map((row) => {
+            const positiveTags = asArray(row.positive_tags)
+              .slice(0, 4)
+              .map((tag) => `${tag.tag || "Unknown"} (${formatDecimal(tag.score, 2)})`)
+              .join(", ");
+            const negativeTags = asArray(row.negative_tags)
+              .slice(0, 4)
+              .map((tag) => `${tag.tag || "Unknown"} (${formatDecimal(tag.score, 2)})`)
+              .join(", ");
+            return (
+              <tr key={String(row.component || "")}>
+                <td>{row.component || "Component"}</td>
+                <td>{positiveTags || "n/a"}</td>
+                <td>{negativeTags || "n/a"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TagClusterTable({ rows }) {
+  const clusterRows = asArray(rows);
+  if (clusterRows.length === 0) {
+    return <EmptyState>No tag PCA clusters available.</EmptyState>;
+  }
+  return (
+    <div className="table-scroll">
+      <table className="news-table compact">
+        <thead>
+          <tr>
+            <th>Cluster</th>
+            <th>Tags</th>
+            <th>Articles</th>
+            <th>Sources</th>
+            <th>Defining Lenses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {clusterRows.map((row) => {
+            const representativeTags = asArray(row.representative_tags)
+              .slice(0, 5)
+              .map((tag) => tag.tag || "Unknown")
+              .join(", ");
+            const definingLenses = asArray(row.defining_lenses)
+              .slice(0, 4)
+              .map((lens) => `${lens.lens || "Lens"} (${formatDecimal(lens.mean_percent, 1)})`)
+              .join(", ");
+            return (
+              <tr key={String(row.cluster_id || row.cluster || row.label)}>
+                <td>{row.label || `Cluster ${row.cluster || ""}`}</td>
+                <td>{representativeTags || "n/a"}</td>
+                <td>{formatNumber(row.n_articles)}</td>
+                <td>{formatNumber(row.n_sources)}</td>
+                <td>{definingLenses || "n/a"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export async function render(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
   const derived = getStatsDerived(payload);
   const groupLatent = asObject(derived.group_latent_space);
   const tagLensPca = asObject(derived.tag_lens_pca);
   const tagLensPcaSummary = asObject(tagLensPca.summary);
+  const tagLensPcaExtremes = asArray(tagLensPca.component_extremes);
+  const tagLensPcaClusters = asArray(tagLensPca.clusters);
   const groups = asObject(groupLatent.groups);
   const summary = asObject(groupLatent.summary);
   const config = asObject(groupLatent.config);
@@ -313,6 +415,9 @@ export async function render(searchParams) {
           <StatCard label="Tag Basis" value={asObject(tagLensPca.config).tag_basis || "ai_tags"} />
           <StatCard label="Included Tags" value={formatNumber(tagLensPcaSummary.included_tag_count)} />
           <StatCard label="Low-Sample Tags" value={formatNumber(tagLensPcaSummary.low_sample_tag_count)} />
+          <StatCard label="Tag Clusters" value={formatNumber(tagLensPcaSummary.cluster_count)} />
+          <StatCard label="PC1+PC2 Variance" value={formatDecimal((toNumber(tagLensPcaSummary.pc1_pc2_cumulative_variance_ratio) || 0) * 100, 1) + "%"} />
+          <StatCard label="Median Articles/Tag" value={formatDecimal(tagLensPcaSummary.median_articles_per_tag, 1)} />
           <StatCard label="Lenses" value={formatNumber(tagLensPca.n_lenses)} />
         </div>
         {tagProfileRows.length === 0 || tagProfileChart.data[0].x.length === 0 ? (
@@ -327,6 +432,7 @@ export async function render(searchParams) {
                     <th>Tag</th>
                     <th>Articles</th>
                     <th>Sources</th>
+                    <th>Cluster</th>
                     <th>PC1</th>
                     <th>PC2</th>
                   </tr>
@@ -337,12 +443,29 @@ export async function render(searchParams) {
                       <td>{row.tag || "Unknown"}</td>
                       <td>{formatNumber(row.n_articles)}</td>
                       <td>{formatNumber(row.n_sources)}</td>
+                      <td>{row.cluster_label || "n/a"}</td>
                       <td>{formatDecimal(row.pc1, 3)}</td>
                       <td>{formatDecimal(row.pc2, 3)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="subsection-block">
+              <h3>Component-Defining Tags</h3>
+              <p className="muted">
+                Positive and negative extremes show which tags define each PCA axis. These are tag-profile positions,
+                not popularity rankings.
+              </p>
+              <ComponentExtremesTable rows={tagLensPcaExtremes} />
+            </div>
+            <div className="subsection-block">
+              <h3>Tag PCA Clusters</h3>
+              <p className="muted">
+                Clusters group nearby tag profiles in PC1-PC3 space. Use them as exploratory neighborhoods, not
+                ground-truth topic labels.
+              </p>
+              <TagClusterTable rows={tagLensPcaClusters} />
             </div>
           </>
         )}

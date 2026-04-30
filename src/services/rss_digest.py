@@ -3734,6 +3734,8 @@ def _tag_lens_pca_from_records(
         "loadings": {"lenses": [], "components": [], "matrix": []},
         "component_summary": [],
         "variance_drivers": [],
+        "component_extremes": [],
+        "clusters": [],
         "tag_points": [],
         "tag_profiles": [],
         "summary": {
@@ -3741,6 +3743,14 @@ def _tag_lens_pca_from_records(
             "eligible_tag_count": 0,
             "low_sample_tag_count": 0,
             "included_tag_count": 0,
+            "near_minimum_tag_count": 0,
+            "cluster_count": 0,
+            "singleton_cluster_count": 0,
+            "clustering_threshold_pca": None,
+            "median_articles_per_tag": None,
+            "max_articles_per_tag": None,
+            "pc1_pc2_cumulative_variance_ratio": None,
+            "pc1_pc3_cumulative_variance_ratio": None,
         },
     }
     if (
@@ -3856,14 +3866,25 @@ def _tag_lens_pca_from_records(
             continue
         row_index = _coerce_int(raw_point.get("row_index"), default=-1, minimum=-1)
         meta_row = tag_meta_rows[row_index] if 0 <= row_index < len(tag_meta_rows) else {}
+        lens_means = meta_row.get("lens_means") if isinstance(meta_row.get("lens_means"), dict) else {}
+        lens_mean_rows = [
+            {"lens": str(lens_name), "mean_percent": float(value)}
+            for lens_name, value in lens_means.items()
+            if isinstance(value, (int, float)) and math.isfinite(float(value))
+        ]
+        lens_mean_rows.sort(key=lambda row: (-float(row.get("mean_percent") or 0.0), str(row.get("lens") or "").lower()))
+        n_articles = _coerce_int(meta_row.get("n_articles"), default=0, minimum=0)
         tag_points.append(
             {
                 "tag_key": meta_row.get("tag_key"),
                 "tag": meta_row.get("tag") or raw_point.get("title"),
-                "n_articles": meta_row.get("n_articles"),
+                "n_articles": n_articles,
                 "n_sources": meta_row.get("n_sources"),
                 "source_counts": meta_row.get("source_counts", {}),
-                "lens_means": meta_row.get("lens_means", {}),
+                "lens_means": lens_means,
+                "top_lenses": lens_mean_rows[:5],
+                "bottom_lenses": list(reversed(lens_mean_rows[-5:])),
+                "sample_status": "near_minimum" if n_articles < (min_articles_per_tag * 2) else "ok",
                 "date_start": meta_row.get("date_start"),
                 "date_end": meta_row.get("date_end"),
                 "pc1": raw_point.get("pc1"),
@@ -3890,6 +3911,220 @@ def _tag_lens_pca_from_records(
         distances.sort(key=lambda row: (float(row.get("distance_pca") or 0.0), str(row.get("tag") or "").lower()))
         point["nearest_tags"] = distances[:5]
 
+    clusters: list[dict[str, Any]] = []
+    clustering_threshold = None
+    if len(tag_points) >= 2:
+        nearest_distances: list[float] = []
+        for point in tag_points:
+            nearest_tags = point.get("nearest_tags") if isinstance(point.get("nearest_tags"), list) else []
+            if not nearest_tags or not isinstance(nearest_tags[0], dict):
+                continue
+            distance = nearest_tags[0].get("distance_pca")
+            if isinstance(distance, (int, float)) and math.isfinite(float(distance)):
+                nearest_distances.append(float(distance))
+        if nearest_distances:
+            clustering_threshold = max(float(statistics.median(nearest_distances)) * 1.5, 1e-9)
+            parents = list(range(len(tag_points)))
+
+            def _find(index: int) -> int:
+                while parents[index] != index:
+                    parents[index] = parents[parents[index]]
+                    index = parents[index]
+                return index
+
+            def _union(left: int, right: int) -> None:
+                left_root = _find(left)
+                right_root = _find(right)
+                if left_root != right_root:
+                    parents[right_root] = left_root
+
+            for left_index, left_point in enumerate(tag_points):
+                for right_index in range(left_index + 1, len(tag_points)):
+                    distance = _euclidean_distance(left_point, tag_points[right_index], ("pc1", "pc2", "pc3"))
+                    if distance is not None and distance <= clustering_threshold:
+                        _union(left_index, right_index)
+
+            cluster_members: dict[int, list[int]] = defaultdict(list)
+            for point_index in range(len(tag_points)):
+                cluster_members[_find(point_index)].append(point_index)
+
+            raw_clusters: list[dict[str, Any]] = []
+            for member_indexes in cluster_members.values():
+                member_points = [tag_points[index] for index in member_indexes]
+                centroid = {
+                    "pc1": _mean_or_none([float(point["pc1"]) for point in member_points if isinstance(point.get("pc1"), (int, float))]),
+                    "pc2": _mean_or_none([float(point["pc2"]) for point in member_points if isinstance(point.get("pc2"), (int, float))]),
+                    "pc3": _mean_or_none([float(point["pc3"]) for point in member_points if isinstance(point.get("pc3"), (int, float))]),
+                }
+                lens_means_by_lens: dict[str, list[float]] = defaultdict(list)
+                source_counts: Counter[str] = Counter()
+                article_total = 0
+                for point in member_points:
+                    article_total += int(point.get("n_articles") or 0)
+                    point_source_counts = point.get("source_counts") if isinstance(point.get("source_counts"), dict) else {}
+                    for source, count in point_source_counts.items():
+                        source_counts[str(source)] += int(count or 0)
+                    point_lens_means = point.get("lens_means") if isinstance(point.get("lens_means"), dict) else {}
+                    for lens_name, value in point_lens_means.items():
+                        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                            lens_means_by_lens[str(lens_name)].append(float(value))
+                lens_means = {
+                    lens_name: sum(values) / len(values)
+                    for lens_name, values in lens_means_by_lens.items()
+                    if values
+                }
+                defining_lenses = [
+                    {"lens": lens_name, "mean_percent": value}
+                    for lens_name, value in lens_means.items()
+                ]
+                defining_lenses.sort(key=lambda row: (-float(row.get("mean_percent") or 0.0), str(row.get("lens") or "").lower()))
+
+                def _distance_to_centroid(point: dict[str, Any]) -> float:
+                    total = 0.0
+                    for key in ("pc1", "pc2", "pc3"):
+                        point_value = point.get(key)
+                        centroid_value = centroid.get(key)
+                        if isinstance(point_value, (int, float)) and isinstance(centroid_value, (int, float)):
+                            total += (float(point_value) - float(centroid_value)) ** 2
+                    return math.sqrt(total)
+
+                representative_points = sorted(
+                    member_points,
+                    key=lambda point: (
+                        _distance_to_centroid(point),
+                        -int(point.get("n_articles") or 0),
+                        str(point.get("tag") or "").lower(),
+                    ),
+                )
+                raw_clusters.append(
+                    {
+                        "member_indexes": member_indexes,
+                        "representative_points": representative_points,
+                        "n_tags": len(member_points),
+                        "n_articles": article_total,
+                        "n_sources": len(source_counts),
+                        "source_counts": dict(source_counts.most_common()),
+                        "defining_lenses": defining_lenses[:5],
+                        **centroid,
+                    }
+                )
+
+            raw_clusters.sort(
+                key=lambda row: (
+                    -int(row.get("n_tags") or 0),
+                    -int(row.get("n_articles") or 0),
+                    str(row.get("representative_points", [{}])[0].get("tag") or "").lower(),
+                )
+            )
+            for cluster_index, raw_cluster in enumerate(raw_clusters, start=1):
+                representative_points = raw_cluster.get("representative_points") if isinstance(raw_cluster.get("representative_points"), list) else []
+                representative_tags = [
+                    {
+                        "tag_key": point.get("tag_key"),
+                        "tag": point.get("tag"),
+                        "n_articles": point.get("n_articles"),
+                    }
+                    for point in representative_points[:6]
+                ]
+                cluster_id = f"tag-cluster-{cluster_index}"
+                cluster_label = ", ".join(str(point.get("tag") or "Unknown") for point in representative_points[:3])
+                cluster_row = {
+                    "cluster_id": cluster_id,
+                    "cluster": cluster_index,
+                    "label": cluster_label or f"Tag Cluster {cluster_index}",
+                    "n_tags": raw_cluster.get("n_tags"),
+                    "n_articles": raw_cluster.get("n_articles"),
+                    "n_sources": raw_cluster.get("n_sources"),
+                    "source_counts": raw_cluster.get("source_counts", {}),
+                    "representative_tags": representative_tags,
+                    "defining_lenses": raw_cluster.get("defining_lenses", []),
+                    "pc1": raw_cluster.get("pc1"),
+                    "pc2": raw_cluster.get("pc2"),
+                    "pc3": raw_cluster.get("pc3"),
+                }
+                clusters.append(cluster_row)
+                for member_index in raw_cluster.get("member_indexes", []):
+                    point = tag_points[member_index]
+                    point["cluster_id"] = cluster_id
+                    point["cluster"] = cluster_index
+                    point["cluster_label"] = cluster_row["label"]
+                    point["cluster_distance_pca"] = _euclidean_distance(point, cluster_row, ("pc1", "pc2", "pc3"))
+
+    components = pca_payload.get("components", [])
+    component_extremes: list[dict[str, Any]] = []
+    if isinstance(components, list):
+        for component_index, component_label_raw in enumerate(components[:3]):
+            component_label = str(component_label_raw or f"PC{component_index + 1}")
+            component_key = f"pc{component_index + 1}"
+            scored_points = [
+                point
+                for point in tag_points
+                if isinstance(point.get(component_key), (int, float))
+            ]
+            positive_tags = sorted(
+                scored_points,
+                key=lambda row: float(row.get(component_key) or 0.0),
+                reverse=True,
+            )[:6]
+            negative_tags = sorted(
+                scored_points,
+                key=lambda row: float(row.get(component_key) or 0.0),
+            )[:6]
+
+            def _extreme_row(point: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    "tag_key": point.get("tag_key"),
+                    "tag": point.get("tag"),
+                    "score": point.get(component_key),
+                    "n_articles": point.get("n_articles"),
+                    "n_sources": point.get("n_sources"),
+                    "top_lenses": point.get("top_lenses", []),
+                }
+
+            component_extremes.append(
+                {
+                    "component": component_label,
+                    "positive_tags": [_extreme_row(point) for point in positive_tags],
+                    "negative_tags": [_extreme_row(point) for point in negative_tags],
+                }
+            )
+
+    explained_variance = pca_payload.get("explained_variance", [])
+    explained_rows = explained_variance if isinstance(explained_variance, list) else []
+    article_counts = sorted(
+        int(point.get("n_articles") or 0)
+        for point in tag_points
+        if isinstance(point.get("n_articles"), int) and int(point.get("n_articles") or 0) > 0
+    )
+    median_articles = None
+    if article_counts:
+        midpoint = len(article_counts) // 2
+        if len(article_counts) % 2:
+            median_articles = float(article_counts[midpoint])
+        else:
+            median_articles = (article_counts[midpoint - 1] + article_counts[midpoint]) / 2.0
+    summary = dict(base_payload["summary"])
+    summary.update(
+        {
+            "near_minimum_tag_count": sum(1 for point in tag_points if point.get("sample_status") == "near_minimum"),
+            "cluster_count": len(clusters),
+            "singleton_cluster_count": sum(1 for cluster in clusters if int(cluster.get("n_tags") or 0) == 1),
+            "clustering_threshold_pca": clustering_threshold,
+            "median_articles_per_tag": median_articles,
+            "max_articles_per_tag": max(article_counts) if article_counts else None,
+            "pc1_pc2_cumulative_variance_ratio": (
+                _coerce_float(explained_rows[1].get("cumulative_variance_ratio"))
+                if len(explained_rows) >= 2 and isinstance(explained_rows[1], dict)
+                else None
+            ),
+            "pc1_pc3_cumulative_variance_ratio": (
+                _coerce_float(explained_rows[2].get("cumulative_variance_ratio"))
+                if len(explained_rows) >= 3 and isinstance(explained_rows[2], dict)
+                else None
+            ),
+        }
+    )
+
     return {
         **base_payload,
         "status": "ok",
@@ -3902,7 +4137,10 @@ def _tag_lens_pca_from_records(
         "loadings": pca_payload.get("loadings", base_payload["loadings"]),
         "component_summary": pca_payload.get("component_summary", []),
         "variance_drivers": pca_payload.get("variance_drivers", []),
+        "component_extremes": component_extremes,
+        "clusters": clusters,
         "tag_points": tag_points,
+        "summary": summary,
     }
 
 

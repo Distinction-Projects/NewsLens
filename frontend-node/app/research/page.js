@@ -126,9 +126,29 @@ export default function ResearchPage() {
         <p className="section-kicker">Poster and Paper Materials</p>
         <h1>NewsLens Research Writeup Hub</h1>
         <p className="muted">
-          A single planning page for turning the NewsLens dashboard into a poster and paper. The copy here is designed
-          to be edited into formal prose while preserving the project&apos;s methodology, interpretive boundaries, and
-          future-work roadmap.
+          This project presents a proof of concept for a dynamic, exploratory framework for discourse analysis applied
+          to interpretive media studies. Rather than adjudicating truth claims or advancing normative prescriptions, the
+          system is designed to support exploratory inquiry into how meaning, rhetoric, and power are constructed and
+          circulated within large-scale media environments.
+        </p>
+        <p className="muted">
+          Discourse analysis has long been central to literary and media studies, relying primarily on qualitative and
+          interpretive methodologies. Over recent decades, increased computational accessibility has enabled the
+          incorporation of quantitative techniques, such as sentiment analysis and automated text classification, into
+          these domains. More recently, advances in natural language models and large language models have further
+          expanded the capacity to process, label, and organize large corpora of textual data at relatively low cost.
+        </p>
+        <p className="muted">
+          Building on emerging best practices in rubric-driven AI classification, this project proposes a dynamic
+          analytical tool that integrates interpretive frameworks with scalable computational methods. The system is not
+          intended to produce definitive conclusions or guide decision-making in a conventional data science sense.
+          Instead, it functions as an exploratory environment in which researchers can iteratively interrogate
+          relationships among discourse, framing, rhetoric, and institutional power.
+        </p>
+        <p className="muted">
+          By positioning computational analysis as a complement to interpretive inquiry, this work foregrounds the role
+          of data-driven exploration in supporting ontological and critical questions about media systems, artificial
+          intelligence, and the production of meaning within contemporary information ecosystems.
         </p>
       </section>
 
