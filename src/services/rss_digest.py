@@ -3473,13 +3473,17 @@ def _group_latent_space_from_records(
             "tag_basis": "ai_tags",
         },
         "groups": {"source": [], "topic": [], "tag": []},
+        "clusters": {"source": [], "topic": [], "tag": []},
         "summary": {
             "group_counts": {"source": 0, "topic": 0, "tag": 0},
             "analyzed_group_counts": {"source": 0, "topic": 0, "tag": 0},
             "low_sample_group_counts": {"source": 0, "topic": 0, "tag": 0},
+            "cluster_counts": {"source": 0, "topic": 0, "tag": 0},
+            "singleton_cluster_counts": {"source": 0, "topic": 0, "tag": 0},
             "total_groups": 0,
             "total_analyzed_groups": 0,
             "total_low_sample_groups": 0,
+            "total_clusters": 0,
         },
     }
     if (
@@ -3679,6 +3683,139 @@ def _group_latent_space_from_records(
             row["nearest_groups"] = distances[:5]
             row["farthest_groups"] = list(reversed(distances[-5:]))
 
+    group_clusters: dict[str, list[dict[str, Any]]] = {"source": [], "topic": [], "tag": []}
+    for group_type, rows in all_group_rows.items():
+        cluster_keys = ("pc1", "pc2", "pc3") if any(isinstance(row.get("pc3"), (int, float)) for row in rows) else ("pc1", "pc2")
+        clusterable_rows = [
+            row
+            for row in rows
+            if str(row.get("status") or "") == "ok"
+            and all(isinstance(row.get(key), (int, float)) for key in cluster_keys)
+        ]
+        nearest_distances = [
+            float(row["nearest_groups"][0]["distance_pca"])
+            for row in clusterable_rows
+            if isinstance(row.get("nearest_groups"), list)
+            and row["nearest_groups"]
+            and isinstance(row["nearest_groups"][0], dict)
+            and isinstance(row["nearest_groups"][0].get("distance_pca"), (int, float))
+        ]
+        if len(clusterable_rows) < 2 or not nearest_distances:
+            continue
+
+        clustering_threshold = max(float(statistics.median(nearest_distances)) * 1.5, 1e-9)
+        parents = list(range(len(clusterable_rows)))
+
+        def _find(index: int) -> int:
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]
+                index = parents[index]
+            return index
+
+        def _union(left: int, right: int) -> None:
+            left_root = _find(left)
+            right_root = _find(right)
+            if left_root != right_root:
+                parents[right_root] = left_root
+
+        for left_index, left_row in enumerate(clusterable_rows):
+            for right_index in range(left_index + 1, len(clusterable_rows)):
+                distance = _euclidean_distance(left_row, clusterable_rows[right_index], cluster_keys)
+                if distance is not None and distance <= clustering_threshold:
+                    _union(left_index, right_index)
+
+        cluster_members: dict[int, list[int]] = defaultdict(list)
+        for row_index in range(len(clusterable_rows)):
+            cluster_members[_find(row_index)].append(row_index)
+
+        raw_clusters: list[dict[str, Any]] = []
+        for member_indexes in cluster_members.values():
+            member_rows = [clusterable_rows[index] for index in member_indexes]
+            centroid = {
+                "pc1": _mean_or_none([float(row["pc1"]) for row in member_rows if isinstance(row.get("pc1"), (int, float))]),
+                "pc2": _mean_or_none([float(row["pc2"]) for row in member_rows if isinstance(row.get("pc2"), (int, float))]),
+                "pc3": _mean_or_none([float(row["pc3"]) for row in member_rows if isinstance(row.get("pc3"), (int, float))]),
+            }
+            article_total = sum(int(row.get("n_articles") or 0) for row in member_rows)
+            source_counts: Counter[str] = Counter()
+            lens_delta_rows: list[dict[str, Any]] = []
+            for row in member_rows:
+                for source, count in (row.get("source_counts") if isinstance(row.get("source_counts"), dict) else {}).items():
+                    source_counts[str(source)] += int(count or 0)
+                for lens_row in row.get("top_lens_deviations") if isinstance(row.get("top_lens_deviations"), list) else []:
+                    if isinstance(lens_row, dict) and isinstance(lens_row.get("delta"), (int, float)):
+                        lens_delta_rows.append(
+                            {
+                                "lens": lens_row.get("lens"),
+                                "delta": float(lens_row.get("delta") or 0.0),
+                                "abs_delta": abs(float(lens_row.get("delta") or 0.0)),
+                            }
+                        )
+            lens_delta_rows.sort(key=lambda row: (-float(row.get("abs_delta") or 0.0), str(row.get("lens") or "").lower()))
+
+            def _distance_to_centroid(row: dict[str, Any]) -> float:
+                return float(_euclidean_distance(row, centroid, cluster_keys) or 0.0)
+
+            representative_rows = sorted(
+                member_rows,
+                key=lambda row: (_distance_to_centroid(row), -int(row.get("n_articles") or 0), str(row.get("group") or "").lower()),
+            )
+            raw_clusters.append(
+                {
+                    "member_rows": representative_rows,
+                    "n_groups": len(member_rows),
+                    "n_articles": article_total,
+                    "n_sources": len(source_counts),
+                    "source_counts": dict(source_counts.most_common()),
+                    "defining_lens_deviations": lens_delta_rows[:5],
+                    "clustering_threshold_pca": clustering_threshold,
+                    "clustering_dimensions": list(cluster_keys),
+                    **centroid,
+                }
+            )
+
+        raw_clusters.sort(
+            key=lambda row: (
+                -int(row.get("n_groups") or 0),
+                -int(row.get("n_articles") or 0),
+                str(row.get("member_rows", [{}])[0].get("group") or "").lower(),
+            )
+        )
+        for cluster_index, raw_cluster in enumerate(raw_clusters, start=1):
+            representative_rows = raw_cluster.get("member_rows") if isinstance(raw_cluster.get("member_rows"), list) else []
+            cluster_id = f"{group_type}-cluster-{cluster_index}"
+            cluster_label = ", ".join(str(row.get("group") or "Unknown") for row in representative_rows[:3])
+            cluster_row = {
+                "cluster_id": cluster_id,
+                "cluster": cluster_index,
+                "group_type": group_type,
+                "label": cluster_label or f"{group_type.title()} Cluster {cluster_index}",
+                "n_groups": raw_cluster.get("n_groups"),
+                "n_articles": raw_cluster.get("n_articles"),
+                "n_sources": raw_cluster.get("n_sources"),
+                "source_counts": raw_cluster.get("source_counts", {}),
+                "representative_groups": [
+                    {
+                        "group_key": row.get("group_key"),
+                        "group": row.get("group"),
+                        "n_articles": row.get("n_articles"),
+                    }
+                    for row in representative_rows[:6]
+                ],
+                "defining_lens_deviations": raw_cluster.get("defining_lens_deviations", []),
+                "clustering_threshold_pca": raw_cluster.get("clustering_threshold_pca"),
+                "clustering_dimensions": raw_cluster.get("clustering_dimensions", []),
+                "pc1": raw_cluster.get("pc1"),
+                "pc2": raw_cluster.get("pc2"),
+                "pc3": raw_cluster.get("pc3"),
+            }
+            group_clusters[group_type].append(cluster_row)
+            for row in representative_rows:
+                row["cluster_id"] = cluster_id
+                row["cluster"] = cluster_index
+                row["cluster_label"] = cluster_row["label"]
+                row["cluster_distance_pca"] = _euclidean_distance(row, cluster_row, cluster_keys)
+
     group_counts = {group_type: len(rows) for group_type, rows in all_group_rows.items()}
     analyzed_counts = {
         group_type: sum(1 for row in rows if str(row.get("status") or "") == "ok")
@@ -3688,19 +3825,31 @@ def _group_latent_space_from_records(
         group_type: sum(1 for row in rows if str(row.get("status") or "") != "ok")
         for group_type, rows in all_group_rows.items()
     }
+    cluster_counts = {group_type: len(rows) for group_type, rows in group_clusters.items()}
+    singleton_cluster_counts = {
+        group_type: sum(1 for row in rows if int(row.get("n_groups") or 0) == 1)
+        for group_type, rows in group_clusters.items()
+    }
     base_payload["status"] = "ok"
     base_payload["reason"] = ""
     base_payload["groups"] = {
         group_type: rows[:max_groups_per_type]
         for group_type, rows in all_group_rows.items()
     }
+    base_payload["clusters"] = {
+        group_type: rows[:max_groups_per_type]
+        for group_type, rows in group_clusters.items()
+    }
     base_payload["summary"] = {
         "group_counts": group_counts,
         "analyzed_group_counts": analyzed_counts,
         "low_sample_group_counts": low_sample_counts,
+        "cluster_counts": cluster_counts,
+        "singleton_cluster_counts": singleton_cluster_counts,
         "total_groups": sum(group_counts.values()),
         "total_analyzed_groups": sum(analyzed_counts.values()),
         "total_low_sample_groups": sum(low_sample_counts.values()),
+        "total_clusters": sum(cluster_counts.values()),
     }
     return base_payload
 

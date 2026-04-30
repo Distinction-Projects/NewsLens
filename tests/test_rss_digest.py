@@ -699,6 +699,9 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertGreaterEqual(group_latent["summary"]["group_counts"]["topic"], 3)
         self.assertGreaterEqual(group_latent["summary"]["group_counts"]["tag"], 3)
         self.assertGreaterEqual(group_latent["summary"]["analyzed_group_counts"]["source"], 2)
+        self.assertIn("clusters", group_latent)
+        self.assertIn("source", group_latent["clusters"])
+        self.assertGreaterEqual(group_latent["summary"]["cluster_counts"]["source"], 1)
 
         by_source = {row["group"]: row for row in group_latent["groups"]["source"]}
         self.assertEqual(by_source["Source A"]["status"], "ok")
@@ -706,8 +709,13 @@ class RssDigestServiceTests(unittest.TestCase):
         self.assertEqual(by_source["Source A"]["n_articles"], 5)
         self.assertIsInstance(by_source["Source A"]["pc1"], float)
         self.assertIsInstance(by_source["Source A"]["dispersion_pca"], float)
+        self.assertIn("cluster_id", by_source["Source A"])
+        self.assertIn("cluster_label", by_source["Source A"])
         self.assertTrue(by_source["Source A"]["nearest_groups"])
         self.assertEqual(by_source["Source A"]["nearest_groups"][0]["group"], "Source B")
+        self.assertTrue(group_latent["clusters"]["source"])
+        self.assertIn("representative_groups", group_latent["clusters"]["source"][0])
+        self.assertIn("defining_lens_deviations", group_latent["clusters"]["source"][0])
 
         by_topic = {row["group"]: row for row in group_latent["groups"]["topic"]}
         self.assertEqual(by_topic["Policy"]["n_articles"], 6)

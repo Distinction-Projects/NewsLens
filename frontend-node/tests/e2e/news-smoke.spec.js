@@ -272,6 +272,7 @@ test("group latent space supports source topic and tag views", async ({ page, ba
   await expect(page.getByRole("heading", { name: "Group Latent-Space Status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Group View" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Group Centroid Maps" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sources PCA Clusters" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Tag Lens PCA" })).toBeVisible();
   const tagPcaUnavailable = page.getByText("No tag lens-profile PCA coordinates available.");
   if ((await tagPcaUnavailable.count()) === 0) {

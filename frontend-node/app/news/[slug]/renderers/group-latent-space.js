@@ -67,6 +67,7 @@ function numericRows(rows, xKey, yKey) {
       x: toNumber(row?.[xKey]),
       y: toNumber(row?.[yKey]),
       count: toNumber(row?.n_articles) || 0,
+      cluster: toNumber(row?.cluster) || 0,
       dispersion: toNumber(xKey.startsWith("pc") ? row?.dispersion_pca : row?.dispersion_mds)
     }))
     .filter((row) => row.x !== null && row.y !== null);
@@ -82,6 +83,12 @@ function topCountEntries(value, limit = 8) {
 function centroidChart(rows, selectedGroup, xKey, yKey, title) {
   const chartRows = numericRows(rows, xKey, yKey);
   const selectedKey = String(selectedGroup?.group_key || "");
+  const clusterColor = (row) => {
+    if (!row.cluster || !xKey.startsWith("pc")) {
+      return "#7aa7ff";
+    }
+    return TAG_CLUSTER_COLORS[(row.cluster - 1) % TAG_CLUSTER_COLORS.length];
+  };
   return {
     data: [
       {
@@ -91,12 +98,12 @@ function centroidChart(rows, selectedGroup, xKey, yKey, title) {
         x: chartRows.map((row) => row.x),
         y: chartRows.map((row) => row.y),
         text: chartRows.map((row) => String(row.group || "Unknown")),
-        customdata: chartRows.map((row) => [row.n_articles, row.status, row.dispersion]),
+        customdata: chartRows.map((row) => [row.n_articles, row.status, row.dispersion, row.cluster_label || "n/a"]),
         hovertemplate:
-          "%{text}<br>Articles: %{customdata[0]}<br>Status: %{customdata[1]}<br>Dispersion: %{customdata[2]:.3f}<br>x: %{x:.3f}<br>y: %{y:.3f}<extra></extra>",
+          "%{text}<br>Cluster: %{customdata[3]}<br>Articles: %{customdata[0]}<br>Status: %{customdata[1]}<br>Dispersion: %{customdata[2]:.3f}<br>x: %{x:.3f}<br>y: %{y:.3f}<extra></extra>",
         marker: {
           size: chartRows.map((row) => Math.max(8, Math.min(28, Math.sqrt(row.count || 1) * 4))),
-          color: chartRows.map((row) => (String(row.group_key || "") === selectedKey ? "#f0b36f" : "#7aa7ff")),
+          color: chartRows.map((row) => (String(row.group_key || "") === selectedKey ? "#f0b36f" : clusterColor(row))),
           opacity: chartRows.map((row) => (String(row.group_key || "") === selectedKey ? 1 : 0.72)),
           line: {
             color: chartRows.map((row) => (String(row.group_key || "") === selectedKey ? "#ffe3ba" : "#1f2f49")),
@@ -267,6 +274,49 @@ function ComponentExtremesTable({ rows }) {
   );
 }
 
+function GroupClusterTable({ rows, groupType }) {
+  const clusterRows = asArray(rows);
+  if (clusterRows.length === 0) {
+    return <EmptyState>No {groupType} centroid clusters available.</EmptyState>;
+  }
+  return (
+    <div className="table-scroll">
+      <table className="news-table compact">
+        <thead>
+          <tr>
+            <th>Cluster</th>
+            <th>Representative Groups</th>
+            <th>Groups</th>
+            <th>Articles</th>
+            <th>Defining Lens Deviations</th>
+          </tr>
+        </thead>
+        <tbody>
+          {clusterRows.map((row) => {
+            const representativeGroups = asArray(row.representative_groups)
+              .slice(0, 5)
+              .map((group) => group.group || "Unknown")
+              .join(", ");
+            const definingLenses = asArray(row.defining_lens_deviations)
+              .slice(0, 4)
+              .map((lens) => `${lens.lens || "Lens"} (${formatDecimal(lens.delta, 1)})`)
+              .join(", ");
+            return (
+              <tr key={String(row.cluster_id || row.cluster || row.label)}>
+                <td>{row.label || `Cluster ${row.cluster || ""}`}</td>
+                <td>{representativeGroups || "n/a"}</td>
+                <td>{formatNumber(row.n_groups)}</td>
+                <td>{formatNumber(row.n_articles)}</td>
+                <td>{definingLenses || "n/a"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function TagClusterTable({ rows }) {
   const clusterRows = asArray(rows);
   if (clusterRows.length === 0) {
@@ -319,10 +369,12 @@ export async function render(searchParams) {
   const tagLensPcaExtremes = asArray(tagLensPca.component_extremes);
   const tagLensPcaClusters = asArray(tagLensPca.clusters);
   const groups = asObject(groupLatent.groups);
+  const groupClusters = asObject(groupLatent.clusters);
   const summary = asObject(groupLatent.summary);
   const config = asObject(groupLatent.config);
   const groupType = normalizeGroupType(searchParams);
   const rows = asArray(groups[groupType]);
+  const activeGroupClusters = asArray(groupClusters[groupType]);
   const dataMode = normalizeDataMode(searchParams);
   const snapshotDateValue = selectedSnapshotDateValue(searchParams);
   const selectedGroup = selectedGroupFromQuery(searchParams, rows);
@@ -359,6 +411,7 @@ export async function render(searchParams) {
           <StatCard label="Topics" value={formatNumber(asObject(summary.group_counts).topic)} />
           <StatCard label="Tags" value={formatNumber(asObject(summary.group_counts).tag)} />
           <StatCard label="Analyzed Groups" value={formatNumber(summary.total_analyzed_groups)} />
+          <StatCard label="PCA Clusters" value={formatNumber(asObject(summary.cluster_counts)[groupType])} />
           <StatCard label="Min Articles" value={formatNumber(config.min_articles_per_group)} />
         </div>
       </div>
@@ -401,6 +454,13 @@ export async function render(searchParams) {
             <PlotlyChart data={mdsChart.data} layout={mdsChart.layout} />
           </div>
         )}
+        <div className="subsection-block">
+          <h3>{GROUP_TYPES.find((item) => item.key === groupType)?.label || "Group"} PCA Clusters</h3>
+          <p className="muted">
+            Clusters group nearby centroids in shared PC1-PC3 space for the active group type.
+          </p>
+          <GroupClusterTable rows={activeGroupClusters} groupType={groupType} />
+        </div>
       </div>
 
       <div className="panel">
@@ -561,6 +621,7 @@ export async function render(searchParams) {
                   <th>PC2</th>
                   <th>MDS1</th>
                   <th>MDS2</th>
+                  <th>Cluster</th>
                   <th>PCA Dispersion</th>
                 </tr>
               </thead>
@@ -575,6 +636,7 @@ export async function render(searchParams) {
                     <td>{formatDecimal(row.pc2, 3)}</td>
                     <td>{formatDecimal(row.mds1, 3)}</td>
                     <td>{formatDecimal(row.mds2, 3)}</td>
+                    <td>{row.cluster_label || "n/a"}</td>
                     <td>{formatDecimal(row.dispersion_pca, 3)}</td>
                   </tr>
                 ))}
