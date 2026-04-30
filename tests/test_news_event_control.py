@@ -91,6 +91,9 @@ class NewsEventControlTests(unittest.TestCase):
             self.assertEqual(payload["status"], "unavailable")
             self.assertIn("OPENAI_API_KEY", payload["reason"])
             self.assertEqual(payload["summary"]["unavailable_reason"], payload["reason"])
+            self.assertEqual(payload["cache"]["hits"], 0)
+            self.assertEqual(payload["cache"]["misses"], 0)
+            self.assertEqual(payload["cache"]["stored"], 0)
         finally:
             if previous_key is not None:
                 os.environ["OPENAI_API_KEY"] = previous_key

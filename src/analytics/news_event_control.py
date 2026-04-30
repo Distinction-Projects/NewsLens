@@ -327,6 +327,8 @@ def _embed_with_cache(
 ) -> tuple[dict[int, list[float]], dict[str, int], str | None]:
     if not config.enabled:
         return {}, {"enabled": 0, "hits": 0, "misses": 0, "stored": 0}, "Event embeddings are disabled."
+    if provider is None and not os.getenv("OPENAI_API_KEY"):
+        return {}, {"enabled": 1, "hits": 0, "misses": 0, "stored": 0}, "OPENAI_API_KEY is not configured."
 
     active_provider = provider or OpenAIEmbeddingProvider()
     cache = SQLiteEmbeddingCache(config.cache_path)

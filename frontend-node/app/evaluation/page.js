@@ -128,12 +128,24 @@ export default async function EvaluationPage({ searchParams }) {
   const classMetrics = activeModel ? classMetricsChart(activeModel, labels) : null;
 
   return (
-    <main>
-      <h1>Model Evaluation</h1>
-      <p className="muted">Evaluate sentiment model performance across supported corpora.</p>
+    <main className="evaluation-page">
+      <section className="panel evaluation-hero">
+        <p className="section-kicker">Benchmark Surface</p>
+        <h1>Model Evaluation</h1>
+        <p className="muted">
+          Compare supported sentiment models across available corpora, inspect confusion structure, and review class-level
+          behavior before using them in the public dashboard.
+        </p>
+      </section>
 
       <div className="panel">
-        <h2>Corpus</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Dataset</p>
+            <h2>Corpus</h2>
+          </div>
+          <p className="muted compact-copy">Switch between evaluation corpora without leaving the page or changing chart semantics.</p>
+        </div>
         <div className="news-nav-grid">
           {DATASET_OPTIONS.map((option) => {
             const active = option.key === selectedDataset;
@@ -158,7 +170,13 @@ export default async function EvaluationPage({ searchParams }) {
       ) : null}
 
       <div className="panel">
-        <h2>Model</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Selection</p>
+            <h2>Model</h2>
+          </div>
+          <p className="muted compact-copy">Choose a single model to drive the confusion matrix and per-class visual diagnostics.</p>
+        </div>
         {models.length === 0 ? (
           <p className="muted">No model metrics found.</p>
         ) : (
@@ -180,7 +198,13 @@ export default async function EvaluationPage({ searchParams }) {
       </div>
 
       <div className="panel">
-        <h2>Summary</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Snapshot</p>
+            <h2>Summary</h2>
+          </div>
+          <p className="muted compact-copy">Key model quality metrics for the currently selected corpus and evaluation target.</p>
+        </div>
         <p className="muted">
           Dataset: <code>{data.display_name || selectedDataset}</code>
         </p>
@@ -219,7 +243,13 @@ export default async function EvaluationPage({ searchParams }) {
 
       {confusion && classMetrics ? (
         <div className="panel">
-          <h2>Evaluation Visuals</h2>
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Visuals</p>
+              <h2>Evaluation Visuals</h2>
+            </div>
+            <p className="muted compact-copy">Read prediction concentration and per-class tradeoffs side-by-side for the active model.</p>
+          </div>
           <div className="chart-grid">
             <PlotlyChart data={confusion.data} layout={confusion.layout} />
             <PlotlyChart data={classMetrics.data} layout={classMetrics.layout} />
@@ -228,7 +258,13 @@ export default async function EvaluationPage({ searchParams }) {
       ) : null}
 
       <div className="panel">
-        <h2>All Model Details</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Reference Table</p>
+            <h2>All Model Details</h2>
+          </div>
+          <p className="muted compact-copy">A full comparison table for the loaded corpus, including confusion matrix shape.</p>
+        </div>
         {models.length === 0 ? (
           <p className="muted">No model metrics found.</p>
         ) : (

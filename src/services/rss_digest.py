@@ -429,10 +429,23 @@ def sort_records_desc(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 _TAG_COUNT_DISTRIBUTION_LABELS = ("0", "1", "2", "3", "4", "5+")
-_SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=200, minimum=0)
+_SOURCE_EFFECT_PERMUTATIONS = _coerce_int(os.getenv("RSS_SOURCE_EFFECT_PERMUTATIONS"), default=20, minimum=0)
+_SOURCE_DIFF_SLICE_PERMUTATIONS = _coerce_int(
+    os.getenv("RSS_SOURCE_DIFF_SLICE_PERMUTATIONS"),
+    default=25,
+    minimum=0,
+)
 _SOURCE_EFFECT_RANDOM_SEED = 17
 _PCA_MAX_COMPONENTS = _coerce_int(os.getenv("RSS_PCA_MAX_COMPONENTS"), default=6, minimum=1)
 _MDS_MAX_DIMENSIONS = _coerce_int(os.getenv("RSS_MDS_MAX_DIMENSIONS"), default=3, minimum=1)
+_GROUP_LATENT_MIN_ARTICLES = _coerce_int(os.getenv("NEWS_GROUP_LATENT_MIN_ARTICLES"), default=5, minimum=1)
+_GROUP_LATENT_MAX_GROUPS = _coerce_int(os.getenv("NEWS_GROUP_LATENT_MAX_GROUPS"), default=50, minimum=1)
+_TAG_LENS_PCA_MIN_ARTICLES = _coerce_int(os.getenv("NEWS_TAG_LENS_PCA_MIN_ARTICLES"), default=5, minimum=1)
+_TAG_LENS_PCA_MAX_TAGS = _coerce_int(os.getenv("NEWS_TAG_LENS_PCA_MAX_TAGS"), default=75, minimum=2)
+_TAG_MOMENTUM_HALF_LIFE_DAYS = _coerce_int(os.getenv("NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS"), default=3, minimum=1)
+_TAG_MOMENTUM_RECENT_WINDOW_DAYS = _coerce_int(os.getenv("NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS"), default=3, minimum=1)
+_TAG_MOMENTUM_BASELINE_WINDOW_DAYS = _coerce_int(os.getenv("NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS"), default=14, minimum=1)
+_TAG_MOMENTUM_MAX_TAGS = _coerce_int(os.getenv("NEWS_TAG_MOMENTUM_MAX_TAGS"), default=50, minimum=1)
 
 
 def _tag_count_distribution_label(tag_count: int) -> str:
@@ -1403,6 +1416,7 @@ def _lens_pca_from_records(
         article_points.append(
             {
                 "id": _clean_text(meta_row.get("id")),
+                "row_index": row_index,
                 "title": title,
                 "source": point_source,
                 "published_at": _clean_text(meta_row.get("published_at")),
@@ -1641,6 +1655,7 @@ def _lens_mds_from_records(
         article_points.append(
             {
                 "id": _clean_text(meta_row.get("id")),
+                "row_index": row_index,
                 "title": title,
                 "source": point_source,
                 "published_at": _clean_text(meta_row.get("published_at")),
@@ -2205,6 +2220,183 @@ def _drift_diagnostics_from_records(
             "tag_total_variation_distance": tag_tvd,
             "drift_score": drift_score,
             "severity": severity,
+        },
+    }
+
+
+def _tag_momentum_from_records(
+    records: list[dict[str, Any]],
+    *,
+    half_life_days: int = _TAG_MOMENTUM_HALF_LIFE_DAYS,
+    recent_window_days: int = _TAG_MOMENTUM_RECENT_WINDOW_DAYS,
+    baseline_window_days: int = _TAG_MOMENTUM_BASELINE_WINDOW_DAYS,
+    max_tags: int = _TAG_MOMENTUM_MAX_TAGS,
+) -> dict[str, Any]:
+    dated_records: list[tuple[dict[str, Any], datetime]] = []
+    for record in records:
+        published_dt = _record_datetime(record)
+        if published_dt is not None:
+            dated_records.append((record, published_dt))
+
+    config = {
+        "half_life_days": half_life_days,
+        "recent_window_days": recent_window_days,
+        "baseline_window_days": baseline_window_days,
+        "max_tags": max_tags,
+    }
+    if not dated_records:
+        return {
+            "status": "unavailable",
+            "reason": "No dated articles available for tag momentum.",
+            "basis": "exponential_decay_recent_vs_baseline",
+            "config": config,
+            "rows": [],
+            "daily_tag_counts": [],
+            "summary": {
+                "reference_date": None,
+                "dated_articles": 0,
+                "recent_articles": 0,
+                "baseline_articles": 0,
+                "tag_count": 0,
+                "returned_tag_count": 0,
+            },
+        }
+
+    reference_dt = max(dt for _record, dt in dated_records)
+    half_life_seconds = max(half_life_days * 86400.0, 1.0)
+    recent_seconds = recent_window_days * 86400.0
+    baseline_seconds = baseline_window_days * 86400.0
+    recent_article_count = 0
+    baseline_article_count = 0
+    tag_rows: dict[str, dict[str, Any]] = {}
+    daily_counter: Counter[tuple[str, str]] = Counter()
+
+    for record, published_dt in dated_records:
+        age_seconds = max((reference_dt - published_dt).total_seconds(), 0.0)
+        is_recent = age_seconds <= recent_seconds
+        is_baseline = recent_seconds < age_seconds <= baseline_seconds
+        if is_recent:
+            recent_article_count += 1
+        if is_baseline:
+            baseline_article_count += 1
+
+        decay_weight = 0.5 ** (age_seconds / half_life_seconds)
+        published_day = published_dt.date().isoformat()
+        source_label = _source_label_for_record(record)
+        for tag in {tag.strip() for tag in _tag_values_for_record(record) if tag.strip()}:
+            row = tag_rows.setdefault(
+                tag,
+                {
+                    "tag": tag,
+                    "total_count": 0,
+                    "recent_count": 0,
+                    "baseline_count": 0,
+                    "decayed_score": 0.0,
+                    "first_seen": published_day,
+                    "latest_seen": published_day,
+                    "source_counts": Counter(),
+                    "recent_source_counts": Counter(),
+                    "baseline_source_counts": Counter(),
+                },
+            )
+            row["total_count"] += 1
+            row["decayed_score"] += decay_weight
+            row["source_counts"][source_label] += 1
+            if is_recent:
+                row["recent_count"] += 1
+                row["recent_source_counts"][source_label] += 1
+            if is_baseline:
+                row["baseline_count"] += 1
+                row["baseline_source_counts"][source_label] += 1
+            if published_day < row["first_seen"]:
+                row["first_seen"] = published_day
+            if published_day > row["latest_seen"]:
+                row["latest_seen"] = published_day
+            daily_counter[(published_day, tag)] += 1
+
+    rows: list[dict[str, Any]] = []
+    for tag, row in tag_rows.items():
+        recent_count = int(row["recent_count"])
+        baseline_count = int(row["baseline_count"])
+        recent_share = (recent_count / recent_article_count) if recent_article_count else 0.0
+        baseline_share = (baseline_count / baseline_article_count) if baseline_article_count else 0.0
+        lift_ratio = (recent_share / baseline_share) if baseline_share > 0 else None
+        if baseline_count == 0 and recent_count > 0:
+            trend = "new"
+            lift_bonus = 1.5
+        elif isinstance(lift_ratio, (int, float)) and lift_ratio >= 2.0:
+            trend = "accelerating"
+            lift_bonus = min(math.log2(max(lift_ratio, 1.0)), 3.0)
+        elif recent_count > 0:
+            trend = "active"
+            lift_bonus = max(math.log2(max(lift_ratio or 1.0, 1.0)), 0.0)
+        else:
+            trend = "cooling"
+            lift_bonus = 0.0
+
+        days_since_latest = None
+        latest_dt = parse_datetime(row["latest_seen"])
+        if latest_dt is not None:
+            days_since_latest = max((reference_dt.date() - latest_dt.date()).days, 0)
+        decayed_score = float(row["decayed_score"])
+        recent_source_counts = row["recent_source_counts"] if isinstance(row["recent_source_counts"], Counter) else Counter()
+        baseline_source_counts = row["baseline_source_counts"] if isinstance(row["baseline_source_counts"], Counter) else Counter()
+        source_counts = row["source_counts"] if isinstance(row["source_counts"], Counter) else Counter()
+        top_recent_sources = [
+            {"source": source, "count": count}
+            for source, count in recent_source_counts.most_common(5)
+        ]
+        recent_top_source_count = top_recent_sources[0]["count"] if top_recent_sources else 0
+        rows.append(
+            {
+                "tag": tag,
+                "total_count": int(row["total_count"]),
+                "recent_count": recent_count,
+                "baseline_count": baseline_count,
+                "source_count": len(source_counts),
+                "recent_source_count": len(recent_source_counts),
+                "baseline_source_count": len(baseline_source_counts),
+                "top_recent_sources": top_recent_sources,
+                "recent_top_source_share": (recent_top_source_count / recent_count) if recent_count else None,
+                "recent_share": recent_share,
+                "baseline_share": baseline_share,
+                "lift_ratio": lift_ratio,
+                "decayed_score": decayed_score,
+                "momentum_score": decayed_score * (1.0 + lift_bonus),
+                "trend": trend,
+                "first_seen": row["first_seen"],
+                "latest_seen": row["latest_seen"],
+                "days_since_latest": days_since_latest,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            -float(row.get("momentum_score") or 0.0),
+            -int(row.get("recent_count") or 0),
+            str(row.get("tag") or "").lower(),
+        )
+    )
+    daily_rows = [
+        {"date": date_label, "tag": tag, "count": count}
+        for (date_label, tag), count in sorted(daily_counter.items(), key=lambda item: (item[0][0], item[0][1].lower()))
+    ]
+    return {
+        "status": "ok",
+        "reason": "",
+        "basis": "exponential_decay_recent_vs_baseline",
+        "config": config,
+        "rows": rows[:max_tags],
+        "daily_tag_counts": daily_rows,
+        "summary": {
+            "reference_date": reference_dt.date().isoformat(),
+            "dated_articles": len(dated_records),
+            "recent_articles": recent_article_count,
+            "baseline_articles": baseline_article_count,
+            "tag_count": len(rows),
+            "returned_tag_count": min(len(rows), max_tags),
+            "new_tag_count": sum(1 for row in rows if row.get("trend") == "new"),
+            "accelerating_tag_count": sum(1 for row in rows if row.get("trend") == "accelerating"),
         },
     }
 
@@ -3205,6 +3397,515 @@ def _topic_memberships_from_record(
     return ["__untagged__"]
 
 
+def _tag_memberships_from_record(
+    record: dict[str, Any],
+    tag_display_labels: dict[str, str],
+) -> list[str]:
+    tag_values = _unique_case_insensitive(_values_to_strings(record.get("ai_tags")))
+    tag_keys: list[str] = []
+    for tag_value in tag_values:
+        tag_text = tag_value.strip()
+        if not tag_text:
+            continue
+        tag_key = tag_text.lower()
+        if tag_key not in tag_display_labels:
+            tag_display_labels[tag_key] = tag_text
+        tag_keys.append(tag_key)
+
+    if tag_keys:
+        return tag_keys
+
+    tag_display_labels.setdefault("__untagged__", "Untagged")
+    return ["__untagged__"]
+
+
+def _mean_or_none(values: list[float]) -> float | None:
+    return (sum(values) / len(values)) if values else None
+
+
+def _euclidean_distance(row_a: dict[str, Any], row_b: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    total = 0.0
+    used = 0
+    for key in keys:
+        value_a = _coerce_float(row_a.get(key))
+        value_b = _coerce_float(row_b.get(key))
+        if value_a is None or value_b is None:
+            continue
+        total += (value_a - value_b) * (value_a - value_b)
+        used += 1
+    if used == 0:
+        return None
+    return math.sqrt(total)
+
+
+def _centroid_dispersion(points: list[dict[str, Any]], centroid: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    distances = [
+        distance
+        for distance in (_euclidean_distance(point, centroid, keys) for point in points)
+        if isinstance(distance, (int, float))
+    ]
+    return _mean_or_none([float(distance) for distance in distances])
+
+
+def _group_latent_space_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    topic_keys_for_lens_rows: list[list[str]],
+    topic_display_labels: dict[str, str],
+    tag_keys_for_lens_rows: list[list[str]],
+    tag_display_labels: dict[str, str],
+    article_meta_rows: list[dict[str, Any]],
+    lens_pca: dict[str, Any],
+    lens_mds: dict[str, Any],
+    preferred_lenses: list[str] | None = None,
+    min_articles_per_group: int = _GROUP_LATENT_MIN_ARTICLES,
+    max_groups_per_type: int = _GROUP_LATENT_MAX_GROUPS,
+) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
+        "status": "unavailable",
+        "reason": "",
+        "basis": "global_lens_pca_mds",
+        "config": {
+            "min_articles_per_group": min_articles_per_group,
+            "max_groups_per_type": max_groups_per_type,
+            "group_types": ["source", "topic", "tag"],
+            "topic_basis": "topic_tags",
+            "tag_basis": "ai_tags",
+        },
+        "groups": {"source": [], "topic": [], "tag": []},
+        "summary": {
+            "group_counts": {"source": 0, "topic": 0, "tag": 0},
+            "analyzed_group_counts": {"source": 0, "topic": 0, "tag": 0},
+            "low_sample_group_counts": {"source": 0, "topic": 0, "tag": 0},
+            "total_groups": 0,
+            "total_analyzed_groups": 0,
+            "total_low_sample_groups": 0,
+        },
+    }
+    if (
+        not article_lens_percentages
+        or len(article_lens_percentages) != len(source_labels)
+        or len(article_lens_percentages) != len(topic_keys_for_lens_rows)
+        or len(article_lens_percentages) != len(tag_keys_for_lens_rows)
+        or len(article_lens_percentages) != len(article_meta_rows)
+    ):
+        base_payload["reason"] = "Need aligned article lens, source, topic, tag, and metadata rows."
+        return base_payload
+
+    if not isinstance(lens_pca, dict) or str(lens_pca.get("status") or "") != "ok":
+        base_payload["reason"] = "Global PCA is unavailable; group latent space cannot be computed."
+        return base_payload
+
+    pca_points = lens_pca.get("article_points") if isinstance(lens_pca.get("article_points"), list) else []
+    if not pca_points:
+        base_payload["reason"] = "Global PCA has no article points."
+        return base_payload
+
+    mds_points = lens_mds.get("article_points") if isinstance(lens_mds, dict) and isinstance(lens_mds.get("article_points"), list) else []
+    pca_by_index: dict[int, dict[str, Any]] = {}
+    for offset, point in enumerate(pca_points):
+        if not isinstance(point, dict):
+            continue
+        row_index_raw = point.get("row_index")
+        try:
+            row_index = int(row_index_raw)
+        except (TypeError, ValueError):
+            row_index = offset
+        pca_by_index[row_index] = point
+
+    mds_by_index: dict[int, dict[str, Any]] = {}
+    for offset, point in enumerate(mds_points):
+        if not isinstance(point, dict):
+            continue
+        row_index_raw = point.get("row_index")
+        try:
+            row_index = int(row_index_raw)
+        except (TypeError, ValueError):
+            row_index = offset
+        mds_by_index[row_index] = point
+
+    discovered_lenses = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    lens_names = _ordered_lenses(preferred_lenses or [], discovered_lenses)
+    corpus_lens_means: dict[str, float] = {}
+    for lens_name in lens_names:
+        values = [
+            float(row[lens_name])
+            for row in article_lens_percentages
+            if isinstance(row.get(lens_name), (int, float)) and math.isfinite(float(row[lens_name]))
+        ]
+        if values:
+            corpus_lens_means[lens_name] = sum(values) / len(values)
+
+    source_display_labels: dict[str, str] = {}
+    buckets: dict[str, dict[str, list[int]]] = {
+        "source": defaultdict(list),
+        "topic": defaultdict(list),
+        "tag": defaultdict(list),
+    }
+    for row_index, source_label in enumerate(source_labels):
+        source_text = str(source_label or "Unknown").strip() or "Unknown"
+        source_key = source_text.lower()
+        source_display_labels.setdefault(source_key, source_text)
+        buckets["source"][source_key].append(row_index)
+
+        topic_keys = topic_keys_for_lens_rows[row_index] if row_index < len(topic_keys_for_lens_rows) else []
+        for topic_key in list(dict.fromkeys(topic_keys or ["__untagged__"])):
+            normalized_key = str(topic_key or "__untagged__").strip().lower() or "__untagged__"
+            buckets["topic"][normalized_key].append(row_index)
+
+        tag_keys = tag_keys_for_lens_rows[row_index] if row_index < len(tag_keys_for_lens_rows) else []
+        for tag_key in list(dict.fromkeys(tag_keys or ["__untagged__"])):
+            normalized_key = str(tag_key or "__untagged__").strip().lower() or "__untagged__"
+            buckets["tag"][normalized_key].append(row_index)
+
+    display_maps = {
+        "source": source_display_labels,
+        "topic": {**topic_display_labels, "__untagged__": "Untagged"},
+        "tag": {**tag_display_labels, "__untagged__": "Untagged"},
+    }
+
+    def build_group_row(group_type: str, group_key: str, indexes: list[int]) -> dict[str, Any]:
+        unique_indexes = sorted(set(indexes))
+        pca_group_points = [pca_by_index[index] for index in unique_indexes if index in pca_by_index]
+        mds_group_points = [mds_by_index[index] for index in unique_indexes if index in mds_by_index]
+        source_counts = Counter(source_labels[index] for index in unique_indexes if index < len(source_labels))
+        topic_counts: Counter[str] = Counter()
+        tag_counts: Counter[str] = Counter()
+        published_dates: list[str] = []
+        lens_deviation_rows: list[dict[str, Any]] = []
+
+        for index in unique_indexes:
+            if index < len(topic_keys_for_lens_rows):
+                for topic_key in topic_keys_for_lens_rows[index] or ["__untagged__"]:
+                    topic_counts[display_maps["topic"].get(topic_key, topic_key)] += 1
+            if index < len(tag_keys_for_lens_rows):
+                for tag_key in tag_keys_for_lens_rows[index] or ["__untagged__"]:
+                    tag_counts[display_maps["tag"].get(tag_key, tag_key)] += 1
+            if index < len(article_meta_rows):
+                parsed = parse_datetime(article_meta_rows[index].get("published_at"))
+                if parsed is not None:
+                    published_dates.append(parsed.date().isoformat())
+
+        for lens_name in lens_names:
+            values = [
+                float(article_lens_percentages[index][lens_name])
+                for index in unique_indexes
+                if index < len(article_lens_percentages)
+                and isinstance(article_lens_percentages[index].get(lens_name), (int, float))
+                and math.isfinite(float(article_lens_percentages[index][lens_name]))
+            ]
+            corpus_mean = corpus_lens_means.get(lens_name)
+            if not values or corpus_mean is None:
+                continue
+            group_mean = sum(values) / len(values)
+            delta = group_mean - corpus_mean
+            lens_deviation_rows.append(
+                {
+                    "lens": lens_name,
+                    "mean_percent": group_mean,
+                    "corpus_mean_percent": corpus_mean,
+                    "delta": delta,
+                    "abs_delta": abs(delta),
+                    "n": len(values),
+                }
+            )
+        lens_deviation_rows.sort(key=lambda row: (-float(row.get("abs_delta") or 0.0), str(row.get("lens", "")).lower()))
+
+        pca_centroid = {
+            "pc1": _mean_or_none([float(point["pc1"]) for point in pca_group_points if isinstance(point.get("pc1"), (int, float))]),
+            "pc2": _mean_or_none([float(point["pc2"]) for point in pca_group_points if isinstance(point.get("pc2"), (int, float))]),
+            "pc3": _mean_or_none([float(point["pc3"]) for point in pca_group_points if isinstance(point.get("pc3"), (int, float))]),
+        }
+        mds_centroid = {
+            "mds1": _mean_or_none([float(point["mds1"]) for point in mds_group_points if isinstance(point.get("mds1"), (int, float))]),
+            "mds2": _mean_or_none([float(point["mds2"]) for point in mds_group_points if isinstance(point.get("mds2"), (int, float))]),
+            "mds3": _mean_or_none([float(point["mds3"]) for point in mds_group_points if isinstance(point.get("mds3"), (int, float))]),
+        }
+        status = "ok" if len(unique_indexes) >= min_articles_per_group and pca_group_points else "low_sample"
+        reason = "" if status == "ok" else f"Need at least {min_articles_per_group} articles with PCA coordinates."
+        display_label = display_maps[group_type].get(group_key, group_key)
+        return {
+            "group_type": group_type,
+            "group": display_label,
+            "group_key": group_key,
+            "status": status,
+            "reason": reason,
+            "n_articles": len(unique_indexes),
+            "n_pca_articles": len(pca_group_points),
+            "n_mds_articles": len(mds_group_points),
+            "n_sources": len(source_counts),
+            "date_start": min(published_dates) if published_dates else None,
+            "date_end": max(published_dates) if published_dates else None,
+            **pca_centroid,
+            **mds_centroid,
+            "dispersion_pca": _centroid_dispersion(pca_group_points, pca_centroid, ("pc1", "pc2", "pc3")),
+            "dispersion_mds": _centroid_dispersion(mds_group_points, mds_centroid, ("mds1", "mds2", "mds3")),
+            "source_counts": dict(source_counts.most_common()),
+            "topic_counts": dict(topic_counts.most_common()),
+            "tag_counts": dict(tag_counts.most_common()),
+            "top_lens_deviations": lens_deviation_rows[:8],
+            "nearest_groups": [],
+            "farthest_groups": [],
+        }
+
+    all_group_rows: dict[str, list[dict[str, Any]]] = {}
+    for group_type, group_buckets in buckets.items():
+        rows = [build_group_row(group_type, group_key, indexes) for group_key, indexes in group_buckets.items()]
+        rows.sort(key=lambda row: (-int(row.get("n_articles") or 0), str(row.get("group", "")).lower()))
+        all_group_rows[group_type] = rows
+
+    for group_type, rows in all_group_rows.items():
+        for row in rows:
+            distances: list[dict[str, Any]] = []
+            for other in rows:
+                if other is row:
+                    continue
+                distance = _euclidean_distance(row, other, ("pc1", "pc2", "pc3"))
+                if distance is None:
+                    continue
+                distances.append(
+                    {
+                        "group": other.get("group"),
+                        "group_key": other.get("group_key"),
+                        "distance_pca": distance,
+                    }
+                )
+            distances.sort(key=lambda item: (float(item.get("distance_pca") or 0.0), str(item.get("group", "")).lower()))
+            row["nearest_groups"] = distances[:5]
+            row["farthest_groups"] = list(reversed(distances[-5:]))
+
+    group_counts = {group_type: len(rows) for group_type, rows in all_group_rows.items()}
+    analyzed_counts = {
+        group_type: sum(1 for row in rows if str(row.get("status") or "") == "ok")
+        for group_type, rows in all_group_rows.items()
+    }
+    low_sample_counts = {
+        group_type: sum(1 for row in rows if str(row.get("status") or "") != "ok")
+        for group_type, rows in all_group_rows.items()
+    }
+    base_payload["status"] = "ok"
+    base_payload["reason"] = ""
+    base_payload["groups"] = {
+        group_type: rows[:max_groups_per_type]
+        for group_type, rows in all_group_rows.items()
+    }
+    base_payload["summary"] = {
+        "group_counts": group_counts,
+        "analyzed_group_counts": analyzed_counts,
+        "low_sample_group_counts": low_sample_counts,
+        "total_groups": sum(group_counts.values()),
+        "total_analyzed_groups": sum(analyzed_counts.values()),
+        "total_low_sample_groups": sum(low_sample_counts.values()),
+    }
+    return base_payload
+
+
+def _tag_lens_pca_from_records(
+    article_lens_percentages: list[dict[str, float]],
+    source_labels: list[str],
+    tag_keys_for_lens_rows: list[list[str]],
+    tag_display_labels: dict[str, str],
+    article_meta_rows: list[dict[str, Any]],
+    preferred_lenses: list[str] | None = None,
+    *,
+    min_articles_per_tag: int = _TAG_LENS_PCA_MIN_ARTICLES,
+    max_tags: int = _TAG_LENS_PCA_MAX_TAGS,
+) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
+        "status": "unavailable",
+        "reason": "",
+        "basis": "tag_mean_lens_profile_pca",
+        "config": {
+            "min_articles_per_tag": min_articles_per_tag,
+            "max_tags": max_tags,
+            "tag_basis": "ai_tags",
+            "multi_tag_policy": "duplicate_per_tag",
+        },
+        "n_tags": 0,
+        "n_lenses": 0,
+        "lenses": [],
+        "components": [],
+        "explained_variance": [],
+        "loadings": {"lenses": [], "components": [], "matrix": []},
+        "component_summary": [],
+        "variance_drivers": [],
+        "tag_points": [],
+        "tag_profiles": [],
+        "summary": {
+            "total_tag_count": 0,
+            "eligible_tag_count": 0,
+            "low_sample_tag_count": 0,
+            "included_tag_count": 0,
+        },
+    }
+    if (
+        not article_lens_percentages
+        or len(article_lens_percentages) != len(tag_keys_for_lens_rows)
+        or len(article_lens_percentages) != len(source_labels)
+    ):
+        base_payload["reason"] = "Need aligned article lens rows, tag memberships, and source labels."
+        return base_payload
+
+    tag_indexes: dict[str, list[int]] = defaultdict(list)
+    for row_index, tag_keys in enumerate(tag_keys_for_lens_rows):
+        for tag_key in tag_keys:
+            tag_indexes[str(tag_key)].append(row_index)
+
+    discovered_lenses = {
+        lens_name
+        for row in article_lens_percentages
+        for lens_name, value in row.items()
+        if isinstance(lens_name, str) and isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+    if preferred_lenses:
+        lens_names = [lens_name for lens_name in preferred_lenses if lens_name in discovered_lenses]
+        lens_names.extend(sorted(discovered_lenses - set(lens_names)))
+    else:
+        lens_names = sorted(discovered_lenses)
+
+    base_payload["summary"]["total_tag_count"] = len(tag_indexes)
+    base_payload["lenses"] = lens_names
+    base_payload["n_lenses"] = len(lens_names)
+    if not lens_names:
+        base_payload["reason"] = "No finite lens scores available for tag PCA."
+        return base_payload
+
+    profiles: list[dict[str, float]] = []
+    labels: list[str] = []
+    tag_meta_rows: list[dict[str, Any]] = []
+    low_sample_count = 0
+    for tag_key, indexes in sorted(
+        tag_indexes.items(),
+        key=lambda item: (-len(item[1]), tag_display_labels.get(item[0], item[0]).lower()),
+    ):
+        tag_label = tag_display_labels.get(tag_key, tag_key)
+        n_articles = len(indexes)
+        if n_articles < min_articles_per_tag:
+            low_sample_count += 1
+            continue
+        lens_means: dict[str, float] = {}
+        for lens_name in lens_names:
+            values = [
+                float(article_lens_percentages[index][lens_name])
+                for index in indexes
+                if isinstance(article_lens_percentages[index].get(lens_name), (int, float))
+                and math.isfinite(float(article_lens_percentages[index][lens_name]))
+            ]
+            if values:
+                lens_means[lens_name] = sum(values) / len(values)
+        if not lens_means:
+            continue
+        source_counts = Counter(source_labels[index] for index in indexes)
+        date_values = [
+            _clean_text(article_meta_rows[index].get("published_at"))
+            for index in indexes
+            if index < len(article_meta_rows) and isinstance(article_meta_rows[index], dict)
+        ]
+        date_values = [value for value in date_values if value]
+        profiles.append(lens_means)
+        labels.append(tag_label)
+        tag_meta_rows.append(
+            {
+                "id": tag_key,
+                "title": tag_label,
+                "source": tag_label,
+                "published_at": max(date_values) if date_values else None,
+                "tag_key": tag_key,
+                "tag": tag_label,
+                "n_articles": n_articles,
+                "n_sources": len(source_counts),
+                "source_counts": dict(source_counts.most_common()),
+                "lens_means": lens_means,
+                "date_start": min(date_values) if date_values else None,
+                "date_end": max(date_values) if date_values else None,
+            }
+        )
+        if len(profiles) >= max_tags:
+            break
+
+    base_payload["summary"]["low_sample_tag_count"] = low_sample_count
+    base_payload["summary"]["eligible_tag_count"] = len(profiles)
+    base_payload["summary"]["included_tag_count"] = len(profiles)
+    base_payload["tag_profiles"] = tag_meta_rows
+    if len(profiles) < 2:
+        base_payload["reason"] = "Need at least 2 tags meeting the minimum article threshold for tag PCA."
+        return base_payload
+
+    pca_payload = _lens_pca_from_records(
+        profiles,
+        labels,
+        article_meta_rows=tag_meta_rows,
+        preferred_lenses=lens_names,
+        max_components=_PCA_MAX_COMPONENTS,
+    )
+    if str(pca_payload.get("status") or "") != "ok":
+        base_payload["reason"] = str(pca_payload.get("reason") or "Tag PCA unavailable.")
+        base_payload["explained_variance"] = pca_payload.get("explained_variance", [])
+        base_payload["loadings"] = pca_payload.get("loadings", base_payload["loadings"])
+        return base_payload
+
+    raw_points = pca_payload.get("article_points") if isinstance(pca_payload.get("article_points"), list) else []
+    tag_points: list[dict[str, Any]] = []
+    for raw_point in raw_points:
+        if not isinstance(raw_point, dict):
+            continue
+        row_index = _coerce_int(raw_point.get("row_index"), default=-1, minimum=-1)
+        meta_row = tag_meta_rows[row_index] if 0 <= row_index < len(tag_meta_rows) else {}
+        tag_points.append(
+            {
+                "tag_key": meta_row.get("tag_key"),
+                "tag": meta_row.get("tag") or raw_point.get("title"),
+                "n_articles": meta_row.get("n_articles"),
+                "n_sources": meta_row.get("n_sources"),
+                "source_counts": meta_row.get("source_counts", {}),
+                "lens_means": meta_row.get("lens_means", {}),
+                "date_start": meta_row.get("date_start"),
+                "date_end": meta_row.get("date_end"),
+                "pc1": raw_point.get("pc1"),
+                "pc2": raw_point.get("pc2"),
+                "pc3": raw_point.get("pc3"),
+            }
+        )
+
+    for point in tag_points:
+        distances: list[dict[str, Any]] = []
+        for other in tag_points:
+            if other is point:
+                continue
+            distance = _euclidean_distance(point, other, ("pc1", "pc2", "pc3"))
+            if distance is None:
+                continue
+            distances.append(
+                {
+                    "tag_key": other.get("tag_key"),
+                    "tag": other.get("tag"),
+                    "distance_pca": distance,
+                }
+            )
+        distances.sort(key=lambda row: (float(row.get("distance_pca") or 0.0), str(row.get("tag") or "").lower()))
+        point["nearest_tags"] = distances[:5]
+
+    return {
+        **base_payload,
+        "status": "ok",
+        "reason": "",
+        "n_tags": len(tag_points),
+        "n_lenses": pca_payload.get("n_lenses", len(lens_names)),
+        "lenses": pca_payload.get("lenses", lens_names),
+        "components": pca_payload.get("components", []),
+        "explained_variance": pca_payload.get("explained_variance", []),
+        "loadings": pca_payload.get("loadings", base_payload["loadings"]),
+        "component_summary": pca_payload.get("component_summary", []),
+        "variance_drivers": pca_payload.get("variance_drivers", []),
+        "tag_points": tag_points,
+    }
+
+
 def _source_topic_control_from_records(
     article_lens_percentages: list[dict[str, float]],
     source_labels: list[str],
@@ -3213,6 +3914,7 @@ def _source_topic_control_from_records(
     pooled_source_differentiation: dict[str, Any],
     pooled_source_lens_effects: dict[str, Any],
     preferred_lenses: list[str] | None = None,
+    source_differentiation_permutations: int = _SOURCE_DIFF_SLICE_PERMUTATIONS,
 ) -> dict[str, Any]:
     base_payload: dict[str, Any] = {
         "topic_basis": "topic_tags",
@@ -3288,6 +3990,7 @@ def _source_topic_control_from_records(
             topic_rows_data,
             topic_source_labels,
             preferred_lenses=preferred_lenses,
+            permutations=source_differentiation_permutations,
         )
 
         differentiation_ok = (
@@ -3398,6 +4101,7 @@ def _tag_sliced_analysis_from_records(
     pooled_source_lens_effects: dict[str, Any],
     preferred_lenses: list[str] | None = None,
     top_n: int = 20,
+    source_differentiation_permutations: int = _SOURCE_DIFF_SLICE_PERMUTATIONS,
 ) -> dict[str, Any]:
     base_payload: dict[str, Any] = {
         "tag_basis": "topic_tags",
@@ -3490,6 +4194,7 @@ def _tag_sliced_analysis_from_records(
             tag_rows_data,
             tag_source_labels,
             preferred_lenses=preferred_lenses,
+            permutations=source_differentiation_permutations,
         )
 
         differentiation_ok = (
@@ -4348,6 +5053,8 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     source_labels_for_lens_rows: list[str] = []
     topic_keys_for_lens_rows: list[list[str]] = []
     topic_display_labels: dict[str, str] = {}
+    tag_keys_for_lens_rows: list[list[str]] = []
+    tag_display_labels: dict[str, str] = {}
     article_meta_for_lens_rows: list[dict[str, Any]] = []
     article_records_for_lens_rows: list[dict[str, Any]] = []
 
@@ -4400,13 +5107,16 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         lens_percentages = _record_lens_percentages(record, lens_maxima)
         if lens_percentages:
             topic_keys = _topic_memberships_from_record(record, topic_display_labels)
+            tag_keys = _tag_memberships_from_record(record, tag_display_labels)
             strongest_lens, strongest_percent = max(lens_percentages.items(), key=lambda item: item[1])
             article_lens_percentages.append(lens_percentages)
             source_labels_for_lens_rows.append(source_label)
             topic_keys_for_lens_rows.append(topic_keys)
+            tag_keys_for_lens_rows.append(tag_keys)
             article_records_for_lens_rows.append(record)
             article_meta_for_lens_rows.append(
                 {
+                    "row_index": len(article_lens_percentages) - 1,
                     "id": _clean_text(record.get("id")),
                     "title": _clean_text(record.get("title")),
                     "source": source_label,
@@ -4501,6 +5211,7 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
     lens_temporal_embedding = _lens_temporal_embedding_from_pca(lens_pca)
     lens_temporal_embedding_mds = _lens_temporal_embedding_from_mds(lens_mds)
     drift_diagnostics = _drift_diagnostics_from_records(records, lens_maxima)
+    tag_momentum = _tag_momentum_from_records(records)
     source_lens_effects = _source_lens_effects_from_records(
         article_lens_percentages,
         source_labels_for_lens_rows,
@@ -4528,6 +5239,26 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         article_meta_for_lens_rows,
         pooled_source_differentiation=source_differentiation,
         pooled_source_lens_effects=source_lens_effects,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    group_latent_space = _group_latent_space_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        topic_keys_for_lens_rows,
+        topic_display_labels,
+        tag_keys_for_lens_rows,
+        tag_display_labels,
+        article_meta_for_lens_rows,
+        lens_pca,
+        lens_mds,
+        preferred_lenses=list(lens_maxima.keys()),
+    )
+    tag_lens_pca = _tag_lens_pca_from_records(
+        article_lens_percentages,
+        source_labels_for_lens_rows,
+        tag_keys_for_lens_rows,
+        tag_display_labels,
+        article_meta_for_lens_rows,
         preferred_lenses=list(lens_maxima.keys()),
     )
     event_control = _event_control_from_records(
@@ -4592,10 +5323,13 @@ def derive_stats(records: list[dict[str, Any]], payload: Any) -> dict[str, Any]:
         "lens_temporal_embedding": lens_temporal_embedding,
         "lens_temporal_embedding_mds": lens_temporal_embedding_mds,
         "drift_diagnostics": drift_diagnostics,
+        "tag_momentum": tag_momentum,
         "source_lens_effects": source_lens_effects,
         "source_differentiation": source_differentiation,
         "source_topic_control": source_topic_control,
         "tag_sliced_analysis": tag_sliced_analysis,
+        "group_latent_space": group_latent_space,
+        "tag_lens_pca": tag_lens_pca,
         "event_control": event_control,
         "source_reliability": source_reliability,
         "lens_views": lens_views,

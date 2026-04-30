@@ -63,6 +63,19 @@ export function DataModeControls({ searchParams, extraParams = {} }) {
   );
 }
 
+export function SectionHeader({ title, summary = "", kicker = "", headingLevel = "h3" }) {
+  const HeadingTag = headingLevel;
+  return (
+    <div className="panel-heading">
+      <div>
+        {kicker ? <p className="section-kicker">{kicker}</p> : null}
+        <HeadingTag>{title}</HeadingTag>
+      </div>
+      {summary ? <p className="muted compact-copy">{summary}</p> : null}
+    </div>
+  );
+}
+
 export function StatCard({ label, value, detail }) {
   return (
     <div className="stat-card">

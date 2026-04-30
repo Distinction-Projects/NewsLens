@@ -14,7 +14,7 @@ import {
   selectedTagSliceFromQuery,
   selectedTopicFromQuery
 } from "../../../../lib/newsPageUtils";
-import { DataModeControls, EmptyState } from "../../../../components/news/NewsDashboardPrimitives";
+import { DataModeControls, EmptyState, SectionHeader } from "../../../../components/news/NewsDashboardPrimitives";
 import { SourceEffectsBlock, SourceReliabilityBlock } from "../../../../components/news/SourceAnalysisBlocks";
 import { normalizedSourceEffectsFilter } from "./shared";
 
@@ -66,7 +66,11 @@ export async function render(searchParams) {
         }}
       />
       <div className="panel">
-        <h3>Analysis Mode</h3>
+        <SectionHeader
+          kicker="Scope"
+          title="Analysis Mode"
+          summary="Switch between pooled, within-topic, and within-tag source comparisons without changing the underlying data mode."
+        />
         <div className="top-nav-links">
           <a
             className={`news-nav-link ${mode === "pooled" ? "active-link" : ""}`}
@@ -151,7 +155,11 @@ export async function render(searchParams) {
         ) : null}
       </div>
       <div className="panel">
-        <h3>Effect Filters</h3>
+        <SectionHeader
+          kicker="Controls"
+          title="Effect Filters"
+          summary="Control lens count, FDR threshold, and the detailed lens used for the source-mean comparison chart."
+        />
         <form method="get" className="inline-form-grid">
           <input type="hidden" name="data_mode" value={dataMode} />
           <input type="hidden" name="snapshot" value={snapshotDateValue} />
@@ -231,13 +239,21 @@ export async function render(searchParams) {
         />
       ) : (
         <div className="panel">
-          <h3>{mode === "within-tag" ? "Within-Tag Source Effects" : "Within-Topic Source Effects"}</h3>
+          <SectionHeader
+            kicker="Slice View"
+            title={mode === "within-tag" ? "Within-Tag Source Effects" : "Within-Topic Source Effects"}
+            summary="This slice is empty or currently unavailable under the selected constraints."
+          />
           <EmptyState />
         </div>
       )}
 
       <div className="panel">
-        <h3>Topic Slice Overview</h3>
+        <SectionHeader
+          kicker="Reference Table"
+          title="Topic Slice Overview"
+          summary="Quick scan of per-topic availability and the strongest lens effect present in each topic slice."
+        />
         {mode === "within-topic" && selectedTopic && isTopicUnavailable ? (
           <p className="muted">
             Selected topic is unavailable: {selectedTopicReason || "Insufficient data for this topic slice."}
@@ -276,7 +292,11 @@ export async function render(searchParams) {
         )}
       </div>
       <div className="panel">
-        <h3>Tag Slice Overview</h3>
+        <SectionHeader
+          kicker="Reference Table"
+          title="Tag Slice Overview"
+          summary="Quick scan of per-tag availability and the strongest lens effect present in each tag slice."
+        />
         {mode === "within-tag" && selectedTagSlice && isTagUnavailable ? (
           <p className="muted">
             Selected tag is unavailable: {selectedTagReason || "Insufficient data for this tag slice."}

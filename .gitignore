@@ -12,6 +12,7 @@ NewsLens.code-workspace
 !.env.example
 .tmp/
 data/cache/*.sqlite
+data/processed/
 node_modules/
 .next/
 dist/

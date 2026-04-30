@@ -178,8 +178,11 @@ Build the stats snapshot before restarting production services:
 
 ```bash
 RSS_SOURCE_EFFECT_PERMUTATIONS=20 \
+RSS_SOURCE_DIFF_SLICE_PERMUTATIONS=25 \
 python -m src.analytics.build_news_snapshot --output data/processed/news_analytics_snapshot.json
 ```
+
+`RSS_SOURCE_EFFECT_PERMUTATIONS` controls pooled source tests. `RSS_SOURCE_DIFF_SLICE_PERMUTATIONS` controls repeated within-topic/within-tag source-differentiation tests, which should usually stay lower for reliable deploy-time snapshot builds.
 
 If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing or invalid, `/api/news/stats` returns `503` instead of falling back to request-time analytics.
 
@@ -194,6 +197,22 @@ NEWS_EVENT_DATE_WINDOW_DAYS=3
 NEWS_EVENT_EMBEDDING_CACHE_PATH=data/cache/news_event_embeddings.sqlite
 NEWS_EVENT_EMBEDDING_BATCH_SIZE=128
 OPENAI_API_KEY=...
+```
+
+Tag lens PCA is included under `derived.tag_lens_pca`. It treats `ai_tags` as observations and mean lens scores as features, making it useful for comparing tag-level framing profiles independently from article-level centroid overlays.
+
+```bash
+NEWS_TAG_LENS_PCA_MIN_ARTICLES=5
+NEWS_TAG_LENS_PCA_MAX_TAGS=75
+```
+
+Tag momentum is included under `derived.tag_momentum`. It ranks tags using an exponential time-decay score plus recent-vs-baseline lift, which powers the "Tags Blowing Up" and "Tag Momentum Over Time" views.
+
+```bash
+NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS=3
+NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS=3
+NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS=14
+NEWS_TAG_MOMENTUM_MAX_TAGS=50
 ```
 
 News read endpoints also emit conservative HTTP cache headers by default:

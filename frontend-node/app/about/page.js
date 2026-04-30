@@ -1,11 +1,22 @@
 export default function AboutPage() {
   return (
-    <main>
-      <h1>About This Project</h1>
-      <p className="muted">Background, methodology, and current implementation direction for NewsLens.</p>
+    <main className="about-page">
+      <section className="about-hero panel">
+        <p className="section-kicker">About NewsLens</p>
+        <h1>About This Project</h1>
+        <p className="muted">
+          NewsLens combines local sentiment-model evaluation with a public, read-only news analysis dashboard built
+          around auditable backend-derived metrics.
+        </p>
+      </section>
 
       <section className="panel">
-        <h2>Project Profile</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Project Profile</p>
+            <h2>Researcher and Product Context</h2>
+          </div>
+        </div>
         <h3>James Vescovo</h3>
         <p className="muted">Computer Science Student at the University of Denver (Expected Graduation: May 2026)</p>
         <p>
@@ -22,6 +33,7 @@ export default function AboutPage() {
       </section>
 
       <section className="panel">
+        <p className="section-kicker">Timeline</p>
         <h2>Project History</h2>
         <div className="timeline-list">
           <article className="timeline-item">
@@ -75,6 +87,7 @@ export default function AboutPage() {
       </section>
 
       <section className="panel">
+        <p className="section-kicker">Stack</p>
         <h2>Technical Stack</h2>
         <div className="about-grid">
           <article className="about-card">
@@ -109,16 +122,30 @@ export default function AboutPage() {
       </section>
 
       <section className="panel">
+        <p className="section-kicker">Method</p>
         <h2>Project Method</h2>
-        <ul>
-          <li>Collect and normalize records from curated RSS feeds.</li>
-          <li>Attach AI summaries, tags, and rubric scores from the upstream scoring pipeline.</li>
-          <li>Derive source, lens, and topic analytics in backend services.</li>
-          <li>Expose model-evaluation and news-analysis surfaces in one product.</li>
-        </ul>
+        <div className="about-method-grid">
+          <article className="about-method-step">
+            <strong>1. Collect</strong>
+            <span>Collect and normalize records from curated RSS feeds.</span>
+          </article>
+          <article className="about-method-step">
+            <strong>2. Enrich</strong>
+            <span>Attach AI summaries, tags, and rubric scores from the upstream scoring pipeline.</span>
+          </article>
+          <article className="about-method-step">
+            <strong>3. Derive</strong>
+            <span>Derive source, lens, topic, tag, drift, and event-controlled analytics in backend services.</span>
+          </article>
+          <article className="about-method-step">
+            <strong>4. Surface</strong>
+            <span>Expose model-evaluation and news-analysis views in one public-facing product.</span>
+          </article>
+        </div>
       </section>
 
       <section className="panel">
+        <p className="section-kicker">Contact</p>
         <h2>Connect</h2>
         <div className="link-row">
           <a href="https://github.com/JamesVescovo24" target="_blank" rel="noreferrer">

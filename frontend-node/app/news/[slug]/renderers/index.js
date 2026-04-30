@@ -2,6 +2,7 @@ import { render as renderDataQuality } from "./data-quality";
 import { render as renderDigest } from "./digest";
 import { render as renderEventControl } from "./event-control";
 import { render as renderIntegration } from "./integration";
+import { render as renderGroupLatentSpace } from "./group-latent-space";
 import { render as renderLensBySource } from "./lens-by-source";
 import { render as renderLensCorrelations } from "./lens-correlations";
 import { render as renderLensExplorer } from "./lens-explorer";
@@ -26,6 +27,7 @@ const RENDERERS = {
   "data-quality": renderDataQuality,
   digest: renderDigest,
   "event-control": renderEventControl,
+  "group-latent-space": renderGroupLatentSpace,
   integration: renderIntegration,
   "lens-by-source": renderLensBySource,
   "lens-correlations": renderLensCorrelations,

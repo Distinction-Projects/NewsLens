@@ -133,6 +133,9 @@ class FastApiNewsEndpointTests(unittest.TestCase):
         self.assertIn("derived", payload["data"])
         self.assertIn("source_topic_control", payload["data"]["derived"])
         self.assertIn("tag_sliced_analysis", payload["data"]["derived"])
+        self.assertIn("tag_momentum", payload["data"]["derived"])
+        self.assertIn("group_latent_space", payload["data"]["derived"])
+        self.assertIn("tag_lens_pca", payload["data"]["derived"])
         self.assertIn("event_control", payload["data"]["derived"])
 
         snapshot = self.client.get(f"/api/news/stats?snapshot_date={self.snapshot_date}")

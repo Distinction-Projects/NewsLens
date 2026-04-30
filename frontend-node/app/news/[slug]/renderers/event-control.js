@@ -11,7 +11,14 @@ import {
   truncateText
 } from "../../../../lib/newsPageUtils";
 import PlotlyChart from "../../../../components/PlotlyChart";
-import { DataModeControls, EmptyState, StatCard, StatusBlock, StatusPill } from "../../../../components/news/NewsDashboardPrimitives";
+import {
+  DataModeControls,
+  EmptyState,
+  SectionHeader,
+  StatCard,
+  StatusBlock,
+  StatusPill
+} from "../../../../components/news/NewsDashboardPrimitives";
 import { SourceDifferentiationBlock, SourceEffectsBlock } from "../../../../components/news/SourceAnalysisBlocks";
 
 function topRows(rows, limit) {
@@ -353,12 +360,12 @@ export async function render(searchParams) {
     <>
       <DataModeControls searchParams={searchParams} extraParams={{ limit }} />
       <div className="panel">
-        <h3>Event-Control Status</h3>
+        <SectionHeader
+          kicker="Overview"
+          title="Event-Control Status"
+          summary="Event control clusters articles by embedding similarity and publish-date proximity, then restricts source comparisons to matched same-story coverage."
+        />
         <StatusBlock status={eventControl.status} reason={eventControl.reason} />
-        <p className="muted">
-          Event control clusters articles by embedding similarity and publish-date proximity, then restricts source comparisons to
-          matched same-story coverage.
-        </p>
         <div className="stats-grid">
           <StatCard label="Articles Considered" value={formatNumber(summary.total_articles_considered)} />
           <StatCard label="Embedded Articles" value={formatNumber(summary.embedded_count)} />
@@ -373,7 +380,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>Display Controls and Exports</h3>
+        <SectionHeader
+          kicker="Controls"
+          title="Display Controls and Exports"
+          summary="Tune table scope and lens counts, then pull the matching backend JSON artifacts directly."
+        />
         <form method="get" className="inline-form-grid">
           <label className="muted" htmlFor="event-control-limit">
             Rows shown per table
@@ -422,7 +433,6 @@ export async function render(searchParams) {
             Apply
           </button>
         </form>
-        <p className="muted">Direct backend exports for event-control diagnostics.</p>
         <JsonDownloadLinks />
       </div>
 

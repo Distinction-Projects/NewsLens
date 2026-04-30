@@ -8,7 +8,7 @@ import {
   sourceCountsToRows,
   toNumber
 } from "../../lib/newsPageUtils";
-import { EmptyState, StatCard, StatusBlock, StatusPill } from "./NewsDashboardPrimitives";
+import { EmptyState, SectionHeader, StatCard, StatusBlock, StatusPill } from "./NewsDashboardPrimitives";
 
 function ReliabilityMetricTable({ metrics }) {
   const data = asObject(metrics);
@@ -97,11 +97,11 @@ export function SourceReliabilityBlock({ reliability }) {
   });
   return (
     <div className="panel">
-      <h3>Source Reliability Assessment</h3>
-      <p className="muted">
-        Heuristic readout for whether source-difference claims have enough support. This is not a quality score; it summarizes
-        sample size, separability, FDR exposure, and controlled-slice availability.
-      </p>
+      <SectionHeader
+        kicker="Reliability"
+        title="Source Reliability Assessment"
+        summary="Heuristic readout for whether source-difference claims have enough support. This is not a quality score; it summarizes sample size, separability, FDR exposure, and controlled-slice availability."
+      />
       <div className="stats-grid">
         <StatCard label="Method" value={data.method || "n/a"} />
         <StatCard label="Pooled Label" value={data.pooled_label || "topic-confounded"} />
@@ -131,7 +131,12 @@ export function SourceReliabilityBlock({ reliability }) {
         />
         <ReliabilityMetricTable metrics={pooledMetrics} />
       </div>
-      <h4>Topic Reliability</h4>
+      <SectionHeader
+        kicker="Topic Slices"
+        title="Topic Reliability"
+        summary="Per-topic support levels for within-topic source comparisons."
+        headingLevel="h4"
+      />
       {topicRows.length === 0 ? (
         <EmptyState>No topic reliability rows available.</EmptyState>
       ) : (
@@ -170,7 +175,12 @@ export function SourceReliabilityBlock({ reliability }) {
           </tbody>
         </table>
       )}
-      <h4>Tag Reliability</h4>
+      <SectionHeader
+        kicker="Tag Slices"
+        title="Tag Reliability"
+        summary="Per-tag support levels for within-tag source comparisons."
+        headingLevel="h4"
+      />
       {tagRows.length === 0 ? (
         <EmptyState>No tag reliability rows available.</EmptyState>
       ) : (
@@ -226,7 +236,11 @@ export function SourceDifferentiationBlock({ title, differentiation, confounded 
   const showAccuracyChart = accuracy !== null || baselineAccuracy !== null;
   return (
     <div className="panel">
-      <h3>{title}</h3>
+      <SectionHeader
+        kicker="Source Comparison"
+        title={title}
+        summary="Multivariate separation and held-out classification strength for the currently selected slice."
+      />
       {confounded ? <p className="muted">Label: topic-confounded</p> : null}
       <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
       <p className="muted">
@@ -378,7 +392,11 @@ export function SourceEffectsBlock({ title, effects, confounded = false, maxLens
   const thresholdLabel = qThreshold >= 1.0 ? "All" : formatDecimal(qThreshold, 2);
   return (
     <div className="panel">
-      <h3>{title}</h3>
+      <SectionHeader
+        kicker="Lens Effects"
+        title={title}
+        summary="Lens-level source differences ranked by effect size, with FDR-aware filtering and source mean context."
+      />
       {confounded ? <p className="muted">Label: topic-confounded</p> : null}
       <StatusBlock status={String(data.status || "unavailable")} reason={String(data.reason || "")} />
       <p className="muted">

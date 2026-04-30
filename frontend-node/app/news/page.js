@@ -16,25 +16,61 @@ export default function NewsIndexPage() {
 
   return (
     <>
+      <div className="panel news-index-hero">
+        <p className="section-kicker">News Surface</p>
+        <h2>Analytics entry point for source, lens, and workflow diagnostics</h2>
+        <p className="muted">
+          This section reads from the FastAPI news contract and exposes both exploratory analysis views and operational
+          workflow checks.
+        </p>
+        <div className="stats-grid news-index-stats">
+          <div className="stat-card">
+            <small>Live Routes</small>
+            <strong>{livePages.length}</strong>
+          </div>
+          <div className="stat-card">
+            <small>Stats-Backed Views</small>
+            <strong>{statsBackedPages.length}</strong>
+          </div>
+          <div className="stat-card">
+            <small>Workflow Views</small>
+            <strong>{digestBackedPages.length + 1}</strong>
+          </div>
+        </div>
+      </div>
+
       <div className="panel">
-        <h2>Implementation Status</h2>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Coverage</p>
+            <h2>Implementation Status</h2>
+          </div>
+        </div>
         <p className="muted">
           {livePages.length} of {NEWS_PAGES.length} news pages are live in Next.js and read from the FastAPI contract.
         </p>
       </div>
 
       <div className="panel">
-        <h2>Live News Pages</h2>
-        <ul>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Navigation</p>
+            <h2>Live News Pages</h2>
+          </div>
+          <p className="muted compact-copy">Use these as the primary entry points for the research surface.</p>
+        </div>
+        <div className="news-index-card-grid">
           {livePages.map((page) => (
-            <li key={page.slug}>
-              <Link href={`/news/${page.slug}`}>{page.title}</Link>
-            </li>
+            <Link key={page.slug} href={`/news/${page.slug}`} className="news-index-card">
+              <strong>{page.title}</strong>
+              <span>/news/{page.slug}</span>
+            </Link>
           ))}
-        </ul>
+        </div>
       </div>
 
       <div className="panel">
+        <p className="section-kicker">Contract Boundary</p>
         <h2>Route Coverage</h2>
         <p className="muted">
           All listed `/news/*` routes render live content from the FastAPI news contract.
@@ -42,6 +78,7 @@ export default function NewsIndexPage() {
       </div>
 
       <div className="panel">
+        <p className="section-kicker">System Flow</p>
         <h2>News Workflow Diagram</h2>
         <p className="muted">
           End-to-end flow from the upstream RSS contract to the Next.js `/news/*` pages.

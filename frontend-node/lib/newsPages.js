@@ -42,6 +42,12 @@ export const NEWS_PAGES = [
       "View latent lens components that explain the largest variance in the dataset."
   },
   {
+    slug: "group-latent-space",
+    title: "News Group Latent Space",
+    summary:
+      "Map sources, topics, and tags into the shared lens PCA/MDS space to compare centroid position, dispersion, and nearest neighbors."
+  },
+  {
     slug: "source-differentiation",
     title: "News Source Differentiation",
     summary:

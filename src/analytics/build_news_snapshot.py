@@ -110,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     drift_summary = drift_diagnostics.get("summary") if isinstance(drift_diagnostics, dict) else {}
     latent_stability = derived.get("latent_space_stability") if isinstance(derived, dict) else {}
     latent_summary = latent_stability.get("summary") if isinstance(latent_stability, dict) else {}
+    group_latent = derived.get("group_latent_space") if isinstance(derived, dict) else {}
+    group_summary = group_latent.get("summary") if isinstance(group_latent, dict) else {}
+    tag_lens_pca = derived.get("tag_lens_pca") if isinstance(derived, dict) else {}
+    tag_lens_pca_summary = tag_lens_pca.get("summary") if isinstance(tag_lens_pca, dict) else {}
+    tag_momentum = derived.get("tag_momentum") if isinstance(derived, dict) else {}
+    tag_momentum_summary = tag_momentum.get("summary") if isinstance(tag_momentum, dict) else {}
     print(
         json.dumps(
             {
@@ -139,6 +145,32 @@ def main(argv: list[str] | None = None) -> int:
                     if isinstance(latent_summary, dict)
                     else None,
                     "component_count": latent_summary.get("component_count") if isinstance(latent_summary, dict) else None,
+                },
+                "group_latent_space": {
+                    "status": group_latent.get("status") if isinstance(group_latent, dict) else None,
+                    "total_groups": group_summary.get("total_groups") if isinstance(group_summary, dict) else None,
+                    "total_analyzed_groups": group_summary.get("total_analyzed_groups")
+                    if isinstance(group_summary, dict)
+                    else None,
+                },
+                "tag_lens_pca": {
+                    "status": tag_lens_pca.get("status") if isinstance(tag_lens_pca, dict) else None,
+                    "included_tag_count": tag_lens_pca_summary.get("included_tag_count")
+                    if isinstance(tag_lens_pca_summary, dict)
+                    else None,
+                    "n_lenses": tag_lens_pca.get("n_lenses") if isinstance(tag_lens_pca, dict) else None,
+                },
+                "tag_momentum": {
+                    "status": tag_momentum.get("status") if isinstance(tag_momentum, dict) else None,
+                    "reference_date": tag_momentum_summary.get("reference_date")
+                    if isinstance(tag_momentum_summary, dict)
+                    else None,
+                    "new_tag_count": tag_momentum_summary.get("new_tag_count")
+                    if isinstance(tag_momentum_summary, dict)
+                    else None,
+                    "accelerating_tag_count": tag_momentum_summary.get("accelerating_tag_count")
+                    if isinstance(tag_momentum_summary, dict)
+                    else None,
                 },
             },
             sort_keys=True,

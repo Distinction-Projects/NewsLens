@@ -11,6 +11,37 @@ const DEFAULT_CONFIG = {
   responsive: true
 };
 
+function normalizedTitle(titleValue) {
+  if (typeof titleValue === "string") {
+    return {
+      text: titleValue,
+      x: 0.02,
+      xanchor: "left",
+      y: 0.97,
+      yanchor: "top",
+      pad: { b: 18 }
+    };
+  }
+  if (titleValue && typeof titleValue === "object") {
+    return {
+      x: 0.02,
+      xanchor: "left",
+      y: 0.97,
+      yanchor: "top",
+      pad: { b: 18 },
+      ...titleValue
+    };
+  }
+  return {
+    text: "Visualization",
+    x: 0.02,
+    xanchor: "left",
+    y: 0.97,
+    yanchor: "top",
+    pad: { b: 18 }
+  };
+}
+
 export default function PlotlyChart({ data = [], layout = {}, config = {}, className = "" }) {
   const titleValue = layout?.title;
   const hasTitle =
@@ -32,10 +63,10 @@ export default function PlotlyChart({ data = [], layout = {}, config = {}, class
           paper_bgcolor: "#0f1724",
           plot_bgcolor: "#0f1724",
           font: { color: "#d8e5ff" },
-          margin: { l: 48, r: 24, t: 36, b: 48 },
+          margin: { l: 56, r: 28, t: 82, b: 56 },
           autosize: true,
           ...layout,
-          title: hasTitle ? layout.title : "Visualization"
+          title: hasTitle ? normalizedTitle(layout.title) : normalizedTitle(null)
         }}
         config={{ ...DEFAULT_CONFIG, ...config }}
         style={{ width: "100%", height: "100%" }}

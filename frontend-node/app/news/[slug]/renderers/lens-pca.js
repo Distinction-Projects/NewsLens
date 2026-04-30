@@ -9,7 +9,7 @@ import {
   toNumber
 } from "../../../../lib/newsPageUtils";
 import PlotlyChart from "../../../../components/PlotlyChart";
-import { DataModeControls, EmptyState, StatCard, StatusBlock } from "../../../../components/news/NewsDashboardPrimitives";
+import { DataModeControls, EmptyState, SectionHeader, StatCard, StatusBlock } from "../../../../components/news/NewsDashboardPrimitives";
 
 export async function render(searchParams) {
   const payload = await fetchStatsForMode(searchParams);
@@ -88,7 +88,11 @@ export async function render(searchParams) {
     <>
       <DataModeControls searchParams={searchParams} />
       <div className="panel">
-        <h3>Latent Space Status</h3>
+        <SectionHeader
+          kicker="Overview"
+          title="Latent Space Status"
+          summary="Coverage and fit diagnostics for the PCA, MDS, and source-separation views."
+        />
         <StatusBlock status={String(pca.status || "unavailable")} reason={String(pca.reason || "")} />
         <div className="stats-grid">
           <StatCard label="Articles" value={formatNumber(pca.n_articles)} />
@@ -103,7 +107,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>PCA Visuals</h3>
+        <SectionHeader
+          kicker="Charts"
+          title="PCA Visuals"
+          summary="Variance allocation plus article-level geometry in both PCA and distance-preserving MDS space."
+        />
         {explainedRows.length === 0 &&
         centroidRows.length === 0 &&
         pcaArticleRows.length === 0 &&
@@ -220,7 +228,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>Explained Variance</h3>
+        <SectionHeader
+          kicker="Reference Table"
+          title="Explained Variance"
+          summary="Eigenvalue contribution and cumulative variance captured by each component."
+        />
         {explained.length === 0 ? (
           <EmptyState />
         ) : (
@@ -248,7 +260,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>Variance Drivers</h3>
+        <SectionHeader
+          kicker="Loadings"
+          title="Variance Drivers"
+          summary="The lenses contributing most strongly to the first two principal components."
+        />
         {drivers.length === 0 ? (
           <EmptyState />
         ) : (
@@ -276,7 +292,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>Source Centroids</h3>
+        <SectionHeader
+          kicker="Source Geometry"
+          title="Source Centroids"
+          summary="Average source positions inside the leading component space."
+        />
         {centroids.length === 0 ? (
           <EmptyState />
         ) : (
@@ -304,7 +324,11 @@ export async function render(searchParams) {
       </div>
 
       <div className="panel">
-        <h3>Source Separation Diagnostics</h3>
+        <SectionHeader
+          kicker="Diagnostics"
+          title="Source Separation Diagnostics"
+          summary="Silhouette-like source separation measures for the latent representation."
+        />
         <StatusBlock status={String(lensSeparation.status || "unavailable")} reason={String(lensSeparation.reason || "")} />
         {silhouetteRows.length === 0 ? (
           <EmptyState />

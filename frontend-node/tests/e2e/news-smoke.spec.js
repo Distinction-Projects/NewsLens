@@ -11,6 +11,7 @@ const NEWS_ROUTE_EXPECTATIONS = [
   { path: "/news/source-differentiation", heading: "News Source Differentiation" },
   { path: "/news/source-effects", heading: "News Source Effects" },
   { path: "/news/event-control", heading: "News Event Control" },
+  { path: "/news/group-latent-space", heading: "News Group Latent Space" },
   { path: "/news/score-lab", heading: "News Score Lab" },
   { path: "/news/lens-explorer", heading: "News Lens Explorer" },
   { path: "/news/lens-by-source", heading: "News Lens by Source" },
@@ -50,8 +51,10 @@ test("news shell routes render", async ({ page, baseURL }) => {
   test.setTimeout(90_000);
 
   await gotoWithRetry(page, `${baseURL}/news`);
-  await expect(page.getByRole("heading", { name: "News", exact: true })).toBeVisible();
-  const digestNavLink = page.locator('nav.news-nav-grid a[href="/news/digest"]').first();
+  await expect(
+    page.getByRole("heading", { name: "Analytics entry point for source, lens, and workflow diagnostics" })
+  ).toBeVisible();
+  const digestNavLink = page.locator('.news-index-card-grid a[href="/news/digest"]').first();
   await expect(digestNavLink).toBeVisible();
   await expect(digestNavLink).toHaveAttribute("href", "/news/digest");
   await gotoWithRetry(page, `${baseURL}/news/digest`);
@@ -199,6 +202,39 @@ test("event control renders status, diagnostics, and export links", async ({ pag
   await expect(page.locator('select[name="max_lenses"]')).toBeVisible();
 });
 
+test("tags page renders decayed momentum diagnostics", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/tags`);
+  await expect(page.getByRole("heading", { name: "News Tags" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Tags Blowing Up" })).toBeVisible();
+  await expect(page.getByText("Reference Date")).toBeVisible();
+  await expect(page.getByText("Recent Articles")).toBeVisible();
+  await expect(page.getByText("Baseline Articles")).toBeVisible();
+  if ((await page.getByText("No data available.").count()) === 0) {
+    await expect(page.getByText("Top Recent Source")).toBeVisible();
+  }
+});
+
+test("trends page renders tag momentum over time", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/trends`);
+  await expect(page.getByRole("heading", { name: "News Trends" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Tag Momentum Over Time" })).toBeVisible();
+  await expect(page.getByText("Daily counts for the highest momentum tags")).toBeVisible();
+});
+
 test("chart-heavy pages render plot containers when API is available", async ({ page, baseURL }) => {
   const chartPages = [
     { path: "/news/lens-matrix", heading: "News Lens Matrix" },
@@ -221,6 +257,30 @@ test("chart-heavy pages render plot containers when API is available", async ({ 
 
     await expect(page.locator(".plotly-chart").first()).toBeVisible();
   }
+});
+
+test("group latent space supports source topic and tag views", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/group-latent-space`);
+  await expect(page.getByRole("heading", { name: "News Group Latent Space" })).toBeVisible();
+
+  const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+  if ((await apiErrorHeading.count()) > 0) {
+    await expect(apiErrorHeading).toBeVisible();
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Group Latent-Space Status" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Group View" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Group Centroid Maps" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tag Lens PCA" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Group Centroids" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sources", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Topics", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Tags", exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Tags", exact: true }).click();
+  await expect(page).toHaveURL(/group_type=tag/);
+  await expect(page.getByRole("heading", { name: "Group Latent-Space Status" })).toBeVisible();
 });
 
 test("lens stability exposes ranking controls and chart output", async ({ page, baseURL }) => {
@@ -279,4 +339,9 @@ test("text and about routes render expected sections", async ({ page, baseURL })
   await expect(page.getByRole("heading", { name: "Technical Stack" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Connect" })).toBeVisible();
   await expect(page.getByRole("link", { name: "GitHub" })).toBeVisible();
+
+  await gotoWithRetry(page, `${baseURL}/research`);
+  await expect(page.getByRole("heading", { name: "NewsLens Research Writeup Hub" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Poster Content Outline" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Paper Content Outline" })).toBeVisible();
 });

@@ -42,6 +42,7 @@ jobs:
       NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS: 20000
       NEXT_PUBLIC_SITE_URL: https://lab.spectralresidue.com
       RSS_SOURCE_EFFECT_PERMUTATIONS: 20
+      RSS_SOURCE_DIFF_SLICE_PERMUTATIONS: 25
       RSS_CACHE_TTL_SECONDS: 21600
     steps:
       - name: Checkout
@@ -93,6 +94,12 @@ jobs:
             printf 'NEWS_EVENT_DATE_WINDOW_DAYS=%s\n' "${NEWS_EVENT_DATE_WINDOW_DAYS:-3}"
             printf 'NEWS_EVENT_EMBEDDING_CACHE_PATH=%s\n' "${NEWS_EVENT_EMBEDDING_CACHE_PATH:-/srv/newslens/app/data/cache/news_event_embeddings.sqlite}"
             printf 'NEWS_EVENT_EMBEDDING_BATCH_SIZE=%s\n' "${NEWS_EVENT_EMBEDDING_BATCH_SIZE:-128}"
+            printf 'NEWS_TAG_LENS_PCA_MIN_ARTICLES=%s\n' "${NEWS_TAG_LENS_PCA_MIN_ARTICLES:-5}"
+            printf 'NEWS_TAG_LENS_PCA_MAX_TAGS=%s\n' "${NEWS_TAG_LENS_PCA_MAX_TAGS:-75}"
+            printf 'NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS=%s\n' "${NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS:-3}"
+            printf 'NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS=%s\n' "${NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS:-3}"
+            printf 'NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS=%s\n' "${NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS:-14}"
+            printf 'NEWS_TAG_MOMENTUM_MAX_TAGS=%s\n' "${NEWS_TAG_MOMENTUM_MAX_TAGS:-50}"
             printf 'NEWS_HTTP_CACHE_SECONDS=%s\n' "${NEWS_HTTP_CACHE_SECONDS:-300}"
             printf 'NEWS_STATS_HTTP_CACHE_SECONDS=%s\n' "${NEWS_STATS_HTTP_CACHE_SECONDS:-300}"
             printf 'NEWS_HTTP_STALE_SECONDS=%s\n' "${NEWS_HTTP_STALE_SECONDS:-3600}"
@@ -102,6 +109,7 @@ jobs:
             printf 'NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS=%s\n' "${NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS:-20000}"
             printf 'NEXT_PUBLIC_SITE_URL=%s\n' "${NEXT_PUBLIC_SITE_URL:-https://lab.spectralresidue.com}"
             printf 'RSS_SOURCE_EFFECT_PERMUTATIONS=%s\n' "${RSS_SOURCE_EFFECT_PERMUTATIONS:-20}"
+            printf 'RSS_SOURCE_DIFF_SLICE_PERMUTATIONS=%s\n' "${RSS_SOURCE_DIFF_SLICE_PERMUTATIONS:-25}"
             printf 'RSS_CACHE_TTL_SECONDS=%s\n' "${RSS_CACHE_TTL_SECONDS:-21600}"
             if [ -n "${DATABASE_URL:-}" ]; then
               printf 'DATABASE_URL=%s\n' "${DATABASE_URL}"
@@ -215,7 +223,14 @@ jobs:
             NEWS_EVENT_DATE_WINDOW_DAYS="$(grep -E '^NEWS_EVENT_DATE_WINDOW_DAYS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             NEWS_EVENT_EMBEDDING_CACHE_PATH="$(grep -E '^NEWS_EVENT_EMBEDDING_CACHE_PATH=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             NEWS_EVENT_EMBEDDING_BATCH_SIZE="$(grep -E '^NEWS_EVENT_EMBEDDING_BATCH_SIZE=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_LENS_PCA_MIN_ARTICLES="$(grep -E '^NEWS_TAG_LENS_PCA_MIN_ARTICLES=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_LENS_PCA_MAX_TAGS="$(grep -E '^NEWS_TAG_LENS_PCA_MAX_TAGS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS="$(grep -E '^NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS="$(grep -E '^NEWS_TAG_MOMENTUM_RECENT_WINDOW_DAYS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS="$(grep -E '^NEWS_TAG_MOMENTUM_BASELINE_WINDOW_DAYS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            NEWS_TAG_MOMENTUM_MAX_TAGS="$(grep -E '^NEWS_TAG_MOMENTUM_MAX_TAGS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             RSS_SOURCE_EFFECT_PERMUTATIONS="$(grep -E '^RSS_SOURCE_EFFECT_PERMUTATIONS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
+            RSS_SOURCE_DIFF_SLICE_PERMUTATIONS="$(grep -E '^RSS_SOURCE_DIFF_SLICE_PERMUTATIONS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             RSS_CACHE_TTL_SECONDS="$(grep -E '^RSS_CACHE_TTL_SECONDS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             /srv/newslens/venv/bin/python -m src.analytics.build_news_snapshot --output "$STATS_SNAPSHOT_PATH"
 
