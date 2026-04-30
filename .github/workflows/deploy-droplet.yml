@@ -253,6 +253,7 @@ jobs:
 
           run_as_app_user_timeout 600 npm --prefix /srv/newslens/app/frontend-node ci
           run_as_app_user_timeout 120 npm --prefix /srv/newslens/app/frontend-node run check:news-renderers
+          run_as_app_user rm -rf /srv/newslens/app/frontend-node/.next
           run_as_app_user_timeout 900 env NEXT_PUBLIC_NEWS_API_BASE_URL=http://127.0.0.1:9000 \
             NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS="$(grep -E '^NEXT_PUBLIC_NEWS_FETCH_REVALIDATE_SECONDS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
             NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS="$(grep -E '^NEXT_PUBLIC_NEWS_FETCH_TIMEOUT_MS=' /etc/newslens/newslens.env | head -1 | cut -d= -f2-)" \
