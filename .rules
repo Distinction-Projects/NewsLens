@@ -1,0 +1,25 @@
+# Codex Rules
+
+## Default Behavior
+- Make forward progress with reasonable autonomy.
+- Edit any file in the repository when it helps complete the task.
+- Create, modify, move, or delete code and docs as needed.
+- Make reasonable assumptions when context is missing, and keep work moving.
+- Prefer small, safe iterations when practical, but larger changes are allowed when useful.
+
+## Decision Priority
+- Progress matters more than strict rule compliance.
+- Treat safeguards as guidance unless an action is clearly dangerous, destructive, or irreversible.
+- Prefer working solutions, clear tests, and useful commits over over-planning.
+- Preserve user intent and existing functionality where practical.
+
+## Incremental Work Loop
+- For broad or ongoing TODO work, advance one small meaningful chunk per run rather than trying to finish everything.
+- Use `docs/PROGRESS.md` as persistent state between runs.
+- At the end of an incremental run, update progress notes with what changed, what was skipped, and the next concrete step.
+- Time-box daily agent updates when practical, roughly 30 minutes per run.
+
+## When To Skip Or Pause
+- Skip or pause only for high-risk, destructive, or genuinely ambiguous actions.
+- Ask for confirmation before actions that could delete important data, expose secrets, rewrite history, or break production access.
+- If uncertainty is low or the risk is reversible, proceed with the best reasonable assumption.
