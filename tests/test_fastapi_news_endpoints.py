@@ -2124,7 +2124,7 @@ class FastApiNewsEndpointTests(unittest.TestCase):
     def test_stats_precomputed_mode_serves_snapshot_and_missing_falls_back(self):
         snapshot_payload = {
             "status": "ok",
-            "meta": {"source_url": "file://precomputed.json", "source_mode": "current"},
+            "meta": {"source_url": "file://precomputed.json", "source_mode": "current", "generated_at": NOW_UTC_ISO},
             "data": {
                 "derived": {
                     "total_articles": 1,
@@ -2168,12 +2168,33 @@ class FastApiNewsEndpointTests(unittest.TestCase):
             self.assertEqual(payload["data"]["derived"]["total_articles"], 1)
             self.assertEqual(payload["meta"]["stats_backend"], "precomputed")
 
+            refreshed = self.client.get("/api/news/stats?refresh=1")
+            self.assertEqual(refreshed.status_code, 200)
+            self.assertEqual(refreshed.headers.get("cache-control"), "no-store")
+            refreshed_payload = refreshed.json()
+            self.assertEqual(refreshed_payload["status"], "ok")
+            self.assertNotEqual(refreshed_payload["meta"].get("stats_backend"), "precomputed")
+            self.assertIsInstance(refreshed_payload["data"]["derived"], dict)
+
             exported = self.client.get("/api/news/export?artifact=event_control_summary&format=json")
             self.assertEqual(exported.status_code, 200)
             export_payload = exported.json()
             self.assertEqual(export_payload["meta"]["stats_backend"], "precomputed")
             self.assertEqual(export_payload["rows"][0]["event_count"], 1)
             self.assertEqual(export_payload["rows"][0]["cache_hits"], 3)
+
+            stale_payload = dict(snapshot_payload)
+            stale_payload["meta"] = dict(snapshot_payload["meta"])
+            stale_payload["meta"]["generated_at"] = "2026-01-01T00:00:00Z"
+            precomputed_path.write_text(json.dumps(stale_payload), encoding="utf-8")
+            stale = self.client.get("/api/news/stats")
+            self.assertEqual(stale.status_code, 200)
+            self.assertEqual(stale.headers.get("cache-control"), "no-store")
+            stale_payload_response = stale.json()
+            self.assertEqual(stale_payload_response["status"], "ok")
+            self.assertEqual(stale_payload_response["meta"]["stats_backend"], "dynamic")
+            self.assertEqual(stale_payload_response["meta"]["stats_backend_fallback"], "precomputed_unavailable")
+            self.assertIn("snapshot is stale", stale_payload_response["meta"]["precomputed_stats_error"])
 
             os.environ["NEWS_STATS_SNAPSHOT_PATH"] = str(self.temp_dir / "missing_precomputed_stats.json")
             missing = self.client.get("/api/news/stats")
