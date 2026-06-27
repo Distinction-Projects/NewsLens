@@ -167,26 +167,31 @@ export async function render(searchParams) {
             layout={{ title: "Pooled Source Reliability Signals", yaxis: { title: "Value" } }}
           />
         </div>
-        <table className="news-table compact">
-          <thead>
-            <tr>
-              <th>Layer</th>
-              <th>Status</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analysisStatusRows.map((row) => (
-              <tr key={row.label}>
-                <td>{row.label}</td>
-                <td>
-                  <StatusPill status={String(row.status || "unavailable")} />
-                </td>
-                <td>{row.reason || ""}</td>
+        <div className="table-scroll">
+          <table className="news-table compact">
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Status</th>
+                <th>Reason</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {analysisStatusRows.map((row) => {
+                const status = String(row.status || "unavailable");
+                return (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
+                    <td>
+                      <StatusPill tone={status === "ok" ? "good" : "neutral"}>{status}</StatusPill>
+                    </td>
+                    <td>{row.reason || "n/a"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="panel">
@@ -238,26 +243,28 @@ export async function render(searchParams) {
             layout={{ title: "Daily Articles (UTC)", yaxis: { title: "Articles" } }}
           />
         </div>
-        <table className="news-table compact">
-          <tbody>
-            <tr>
-              <th>Scored</th>
-              <td>{formatNumber(scoreStatus.scored)}</td>
-            </tr>
-            <tr>
-              <th>Positive</th>
-              <td>{formatNumber(scoreStatus.positive)}</td>
-            </tr>
-            <tr>
-              <th>Zero</th>
-              <td>{formatNumber(scoreStatus.zero)}</td>
-            </tr>
-            <tr>
-              <th>Unscorable</th>
-              <td>{formatNumber(scoreStatus.unscorable)}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="news-table compact">
+            <tbody>
+              <tr>
+                <th>Scored</th>
+                <td>{formatNumber(scoreStatus.scored)}</td>
+              </tr>
+              <tr>
+                <th>Positive</th>
+                <td>{formatNumber(scoreStatus.positive)}</td>
+              </tr>
+              <tr>
+                <th>Zero</th>
+                <td>{formatNumber(scoreStatus.zero)}</td>
+              </tr>
+              <tr>
+                <th>Unscorable</th>
+                <td>{formatNumber(scoreStatus.unscorable)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
