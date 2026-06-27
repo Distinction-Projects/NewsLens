@@ -65,54 +65,58 @@ export async function render(searchParams) {
         {fieldCoverage.length === 0 ? (
           <EmptyState />
         ) : (
-          <table className="news-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Present</th>
-                <th>Missing</th>
-                <th>Coverage</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fieldCoverage.map((row) => (
-                <tr key={String(row.field)}>
-                  <td>{row.field}</td>
-                  <td>{formatNumber(row.present)}</td>
-                  <td>{formatNumber(row.missing)}</td>
-                  <td>
-                    {formatAlreadyPercent(row.coverage_percent)}
-                    <MiniBar value={row.coverage_percent} max={100} />
-                  </td>
+          <div className="table-scroll">
+            <table className="news-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Present</th>
+                  <th>Missing</th>
+                  <th>Coverage</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {fieldCoverage.map((row) => (
+                  <tr key={String(row.field)}>
+                    <td>{row.field}</td>
+                    <td>{formatNumber(row.present)}</td>
+                    <td>{formatNumber(row.missing)}</td>
+                    <td>
+                      {formatAlreadyPercent(row.coverage_percent)}
+                      <MiniBar value={row.coverage_percent} max={100} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       <div className="panel">
         <h3>Known Issue Counts</h3>
-        <table className="news-table compact">
-          <tbody>
-            <tr>
-              <th>Missing AI Summary</th>
-              <td>{formatNumber(summary.missing_ai_summary)}</td>
-            </tr>
-            <tr>
-              <th>Missing Published Date</th>
-              <td>{formatNumber(summary.missing_published)}</td>
-            </tr>
-            <tr>
-              <th>Missing Source</th>
-              <td>{formatNumber(summary.missing_source)}</td>
-            </tr>
-            <tr>
-              <th>Placeholder Zero Unscorable</th>
-              <td>{formatNumber(scoreStatus.placeholder_zero_unscorable)}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="news-table compact">
+            <tbody>
+              <tr>
+                <th>Missing AI Summary</th>
+                <td>{formatNumber(summary.missing_ai_summary)}</td>
+              </tr>
+              <tr>
+                <th>Missing Published Date</th>
+                <td>{formatNumber(summary.missing_published)}</td>
+              </tr>
+              <tr>
+                <th>Missing Source</th>
+                <td>{formatNumber(summary.missing_source)}</td>
+              </tr>
+              <tr>
+                <th>Placeholder Zero Unscorable</th>
+                <td>{formatNumber(scoreStatus.placeholder_zero_unscorable)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
