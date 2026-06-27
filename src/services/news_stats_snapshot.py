@@ -4,10 +4,11 @@ import json
 import os
 import threading
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.services.rss_digest import strip_excluded_tags_from_payload
+from src.services.rss_digest import parse_datetime, strip_excluded_tags_from_payload
 
 
 DEFAULT_NEWS_STATS_SNAPSHOT_PATH = "data/processed/news_analytics_snapshot.json"
@@ -48,7 +49,35 @@ def _validate_stats_envelope(payload: Any) -> dict[str, Any]:
     return payload
 
 
-def load_precomputed_stats_response(path: Path | None = None) -> dict[str, Any]:
+def _content_generated_at(payload: dict[str, Any]) -> datetime | None:
+    meta = payload.get("meta")
+    meta_obj = meta if isinstance(meta, dict) else {}
+    for key in ("generated_at", "digest_generated_at"):
+        parsed = parse_datetime(meta_obj.get(key))
+        if parsed is not None:
+            return parsed
+
+    snapshot = payload.get("snapshot")
+    snapshot_obj = snapshot if isinstance(snapshot, dict) else {}
+    return parse_datetime(snapshot_obj.get("generated_at"))
+
+
+def _reject_stale_snapshot(payload: dict[str, Any], *, max_age_seconds: int | None) -> None:
+    if max_age_seconds is None or max_age_seconds <= 0:
+        return
+
+    generated_at = _content_generated_at(payload)
+    if generated_at is None:
+        raise PrecomputedStatsError("Precomputed stats snapshot freshness timestamp is missing.")
+
+    age_seconds = int((datetime.now(timezone.utc) - generated_at).total_seconds())
+    if age_seconds > max_age_seconds:
+        raise PrecomputedStatsError(
+            f"Precomputed stats snapshot is stale: age_seconds={age_seconds}, max_age_seconds={max_age_seconds}"
+        )
+
+
+def load_precomputed_stats_response(path: Path | None = None, *, max_age_seconds: int | None = None) -> dict[str, Any]:
     snapshot_path = path or stats_snapshot_path()
     try:
         stat = snapshot_path.stat()
@@ -72,6 +101,7 @@ def load_precomputed_stats_response(path: Path | None = None) -> dict[str, Any]:
 
     validated = deepcopy(_validate_stats_envelope(payload))
     validated = strip_excluded_tags_from_payload(validated)
+    _reject_stale_snapshot(validated, max_age_seconds=max_age_seconds)
     meta = validated.get("meta")
     if not isinstance(meta, dict):
         meta = {}

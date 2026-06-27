@@ -185,7 +185,8 @@ python -m src.analytics.build_news_snapshot --output data/processed/news_analyti
 
 `RSS_SOURCE_EFFECT_PERMUTATIONS` controls pooled source tests. `RSS_SOURCE_DIFF_SLICE_PERMUTATIONS` controls repeated within-topic/within-tag source-differentiation tests, which should usually stay lower for reliable deploy-time snapshot builds.
 
-If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing or invalid, `/api/news/stats` and `/api/news/export` fall back to request-time analytics with `Cache-Control: no-store` and `meta.stats_backend_fallback=precomputed_unavailable`.
+If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing, invalid, older than `RSS_MAX_AGE_SECONDS`, or bypassed with `refresh=1`, `/api/news/stats` and `/api/news/export` fall back to request-time analytics with `Cache-Control: no-store` and `meta.stats_backend_fallback=precomputed_unavailable` when a precomputed snapshot was rejected.
+The droplet deploy workflow also runs daily so the production snapshot is rebuilt even when no application code changes.
 
 Event-controlled source analysis is included under `derived.event_control`. It uses embeddings to cluster likely same-story articles, then reruns source differentiation only within multi-source event clusters. Missing embedding credentials do not break stats generation; the event-control block returns `status: unavailable`.
 
@@ -208,6 +209,39 @@ NEWS_TAG_LENS_PCA_MAX_TAGS=75
 ```
 
 Tag momentum is included under `derived.tag_momentum`. It ranks tags using an exponential time-decay score plus recent-vs-baseline lift, which powers the "Tags Blowing Up" and "Tag Momentum Over Time" views.
+
+### Poster figure export
+
+Generate poster-ready vector figures from the backend stats payload:
+
+```bash
+python -m src.analytics.export_poster_figures \
+  --stats-url http://64.23.250.112/api/news/stats \
+  --output-dir data/exports/poster_figures
+```
+
+The command writes individual SVG/PDF figures plus `poster_figures.pdf`, `manifest.json`, and a caption README. Generated files are local artifacts under `data/exports/` and are not committed by default.
+
+For a curated humanities/discourse-analysis poster pack with fewer larger figures and poster copy:
+
+```bash
+python -m src.analytics.export_poster_figures \
+  --stats-url http://64.23.250.112/api/news/stats \
+  --preset poster-narrative \
+  --output-dir data/exports/newslens_narrative_poster_materials
+```
+
+This writes selected SVG/PDF figures, a combined vector PDF, `manifest.json`, `README.md`, and `poster_sections.md` with core claim text, section headings, and suggested figure order for a 36" x 24" poster.
+
+For a compact matrix comparing only Al Jazeera, NPR, and Fox News:
+
+```bash
+python -m src.analytics.export_poster_figures \
+  --stats-url http://64.23.250.112/api/news/stats \
+  --preset source-trio-matrix
+```
+
+This writes one smaller source-by-lens matrix under `data/exports/source_trio_matrix`.
 
 ```bash
 NEWS_TAG_MOMENTUM_HALF_LIFE_DAYS=3

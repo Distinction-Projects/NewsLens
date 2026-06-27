@@ -13,6 +13,7 @@ NewsLens.code-workspace
 .tmp/
 data/cache/*.sqlite
 data/processed/
+data/exports/
 node_modules/
 .next/
 dist/

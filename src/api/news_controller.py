@@ -914,11 +914,11 @@ class NewsController:
 
         try:
             snapshot_date_value = parse_snapshot_date(snapshot_date)
-            if snapshot_date_value is None and stats_backend_mode() == "precomputed":
+            if snapshot_date_value is None and stats_backend_mode() == "precomputed" and not force_refresh:
                 try:
                     return _response_json(
                         200,
-                        load_precomputed_stats_response(),
+                        load_precomputed_stats_response(max_age_seconds=self.client.max_age_seconds),
                         headers=_read_cache_headers(
                             force_refresh=force_refresh,
                             snapshot_date=None,
@@ -1048,9 +1048,9 @@ class NewsController:
                 bucket_label,
             )
             snapshot_date_value = parse_snapshot_date(snapshot_date)
-            if snapshot_date_value is None and stats_backend_mode() == "precomputed":
+            if snapshot_date_value is None and stats_backend_mode() == "precomputed" and not force_refresh:
                 try:
-                    payload = load_precomputed_stats_response()
+                    payload = load_precomputed_stats_response(max_age_seconds=self.client.max_age_seconds)
                 except PrecomputedStatsError as exc:
                     precomputed_error = exc
                     payload = self.client.get_payload(force_refresh=force_refresh, snapshot_date=snapshot_date_value)
