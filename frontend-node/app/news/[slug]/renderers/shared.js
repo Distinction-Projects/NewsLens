@@ -85,32 +85,34 @@ export async function fetchEndpointStatus(label, path, options = {}) {
 
 export function EndpointTable({ rows }) {
   return (
-    <table className="news-table">
-      <thead>
-        <tr>
-          <th>Check</th>
-          <th>Endpoint</th>
-          <th>Status</th>
-          <th>Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.path}>
-            <td>{row.label}</td>
-            <td>
-              <code>{row.path}</code>
-            </td>
-            <td>
-              <StatusPill tone={row.ok ? "good" : "bad"}>
-                {row.statusCode ? `HTTP ${row.statusCode}` : row.status}
-              </StatusPill>
-            </td>
-            <td>{truncateText(row.detail)}</td>
+    <div className="table-scroll">
+      <table className="news-table">
+        <thead>
+          <tr>
+            <th>Check</th>
+            <th>Endpoint</th>
+            <th>Status</th>
+            <th>Detail</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.path}>
+              <td>{row.label}</td>
+              <td>
+                <code>{row.path}</code>
+              </td>
+              <td>
+                <StatusPill tone={row.ok ? "good" : "bad"}>
+                  {row.statusCode ? `HTTP ${row.statusCode}` : row.status}
+                </StatusPill>
+              </td>
+              <td>{truncateText(row.detail)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
