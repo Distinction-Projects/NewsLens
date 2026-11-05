@@ -228,6 +228,7 @@ export async function render(searchParams) {
         {rows.length === 0 ? (
           <p className="muted">No articles available.</p>
         ) : (
+          <div className="table-scroll" role="region" aria-label="Article results" tabIndex={0}>
           <table className="news-table">
             <thead>
               <tr>
@@ -254,6 +255,7 @@ export async function render(searchParams) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </>

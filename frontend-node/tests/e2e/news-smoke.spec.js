@@ -53,7 +53,7 @@ test("news shell routes render", async ({ page, baseURL }) => {
 
   await gotoWithRetry(page, `${baseURL}/news`);
   await expect(
-    page.getByRole("heading", { name: "Analytics entry point for source, lens, and workflow diagnostics" })
+    page.getByRole("heading", { name: "Explore the news" })
   ).toBeVisible();
   const digestNavLink = page.locator('.news-index-card-grid a[href="/news/digest"]').first();
   await expect(digestNavLink).toBeVisible();
@@ -64,10 +64,62 @@ test("news shell routes render", async ({ page, baseURL }) => {
   for (const { path, heading } of NEWS_ROUTE_EXPECTATIONS) {
     await gotoWithRetry(page, `${baseURL}${path}`);
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-    await expect(page.getByText("Live FastAPI data")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "News navigation" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeVisible();
     await expect(page.locator("details.news-page-intro summary").first()).toContainText("What this page does");
     await expect(page.getByRole("heading", { name: "Migration In Progress" })).toHaveCount(0);
   }
+});
+
+test("news navigation keeps all views reachable without hiding the page content", async ({ page, baseURL }) => {
+  await gotoWithRetry(page, `${baseURL}/news/digest`);
+  const menu = page.locator("details.news-browse-menu");
+  await expect(menu).not.toHaveAttribute("open");
+  await expect(page.getByRole("heading", { name: "News Digest", level: 1 })).toBeInViewport();
+  await expect(page.locator('.news-quick-links a[aria-current="page"]')).toHaveAttribute("href", "/news/digest");
+  if (process.env.PLAYWRIGHT_START_FASTAPI) {
+    await expect(page.locator('.news-freshness time')).toBeVisible();
+    await expect(page.getByText("Feed update date unavailable")).toHaveCount(0);
+  }
+
+  await menu.locator("summary").click();
+  await expect(menu).toHaveAttribute("open", "");
+  const hrefs = await menu.locator("a").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  expect(hrefs.sort()).toEqual(NEWS_ROUTE_EXPECTATIONS.map((route) => route.path).sort());
+  await menu.getByRole("link", { name: "News Source Effects", exact: true }).click();
+  await expect(page).toHaveURL(/\/news\/source-effects$/);
+  await expect(page.getByRole("heading", { name: "News Source Effects", level: 1 })).toBeInViewport();
+  await expect(page.locator("details.news-browse-menu")).not.toHaveAttribute("open");
+});
+
+test("home and news navigation fit a narrow screen", async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoWithRetry(page, `${baseURL}/`);
+  await expect(page.getByRole("link", { name: "Browse articles", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Browse articles", exact: true }).click();
+  await expect(page).toHaveURL(/\/news\/digest$/);
+  await expect(page.getByRole("heading", { name: "News Digest", level: 1 })).toBeInViewport();
+
+  for (const path of ["/", "/news", "/news/digest"]) {
+    await gotoWithRetry(page, `${baseURL}${path}`);
+    const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+    expect(hasOverflow, `${path} should fit the mobile viewport`).toBe(false);
+  }
+  const tagInput = page.getByRole("textbox", { name: "Tag", exact: true });
+  const tagLabel = page.locator('label[for="digest-tag-filter"]');
+  const labelBounds = await tagLabel.boundingBox();
+  const inputBounds = await tagInput.boundingBox();
+  const formBounds = await page.locator('form:has(#digest-tag-filter)').boundingBox();
+  expect(inputBounds.y).toBeGreaterThanOrEqual(labelBounds.y + labelBounds.height);
+  expect(inputBounds.x + inputBounds.width).toBeLessThanOrEqual(formBounds.x + formBounds.width + 1);
+  await tagInput.fill("Research");
+  await page.locator('form:has(#digest-tag-filter)').getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page).toHaveURL(/tag=Research/);
+  await expect(page.getByRole("textbox", { name: "Tag", exact: true })).toHaveValue("Research");
+  const menu = page.locator("details.news-browse-menu");
+  await menu.locator("summary").click();
+  await expect(menu.getByRole("link", { name: "News Raw JSON", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false);
 });
 
 test("news scraped route shows raw payload explorer controls", async ({ page, baseURL }) => {
@@ -236,7 +288,8 @@ test("trends page renders tag momentum over time", async ({ page, baseURL }) => 
   await expect(page.getByText("Daily counts for the highest momentum tags")).toBeVisible();
 });
 
-test("chart-heavy pages render plot containers when API is available", async ({ page, baseURL }) => {
+test("chart-heavy pages render completed Plotly charts when API is available", async ({ page, baseURL }) => {
+  test.setTimeout(60_000);
   const chartPages = [
     { path: "/news/lens-matrix", heading: "News Lens Matrix" },
     { path: "/news/lens-correlations", heading: "News Lens Correlations" },
@@ -251,12 +304,16 @@ test("chart-heavy pages render plot containers when API is available", async ({ 
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
 
     const apiErrorHeading = page.getByRole("heading", { name: "API Error" });
+    if (process.env.PLAYWRIGHT_START_FASTAPI) {
+      await expect(apiErrorHeading).toHaveCount(0);
+    }
     if ((await apiErrorHeading.count()) > 0) {
       await expect(apiErrorHeading).toBeVisible();
       continue;
     }
 
-    await expect(page.locator(".plotly-chart").first()).toBeVisible();
+    await expect(page.locator(".plotly-chart .js-plotly-plot").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".plotly-chart .main-svg").first()).toBeVisible();
   }
 });
 

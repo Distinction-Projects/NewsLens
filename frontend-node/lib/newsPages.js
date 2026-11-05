@@ -154,3 +154,46 @@ export const NEWS_PAGES = [
 export function getNewsPage(slug) {
   return NEWS_PAGES.find((entry) => entry.slug === slug) || null;
 }
+
+export const NEWS_PAGE_GROUPS = [
+  {
+    id: "explore",
+    title: "Read and explore",
+    summary: "Browse articles, explore tags, and follow changes over time.",
+    slugs: ["digest", "stats", "tags", "trends", "group-latent-space", "snapshot-compare"]
+  },
+  {
+    id: "compare",
+    title: "Compare sources",
+    summary: "Compare coverage and lens values across sources, topics, and shared events.",
+    slugs: ["sources", "source-influence", "source-differentiation", "source-effects", "event-control", "source-tag-matrix"]
+  },
+  {
+    id: "lenses",
+    title: "Explore lenses",
+    summary: "Look at individual lenses and the relationships between them.",
+    slugs: ["lenses", "lens-explorer", "lens-by-source", "lens-matrix", "lens-correlations", "lens-pca", "lens-stability"]
+  },
+  {
+    id: "tools",
+    title: "Data and diagnostics",
+    summary: "Check updates, data quality, and the records behind the charts.",
+    slugs: ["workflow-status", "data-quality", "score-lab", "scraped", "raw-json", "integration"]
+  }
+];
+
+const NEWS_PAGE_LABELS = {
+  digest: "Articles",
+  stats: "Overview",
+  "source-influence": "Source background",
+  "group-latent-space": "Topic and tag maps",
+  "event-control": "Shared events",
+  "source-tag-matrix": "Source and tag matrix",
+  "snapshot-compare": "Compare snapshots",
+  "workflow-status": "Update status",
+  scraped: "Scraped articles"
+};
+
+export function newsPageLabel(page) {
+  return NEWS_PAGE_LABELS[page.slug] || page.title.replace(/^News /, "");
+}

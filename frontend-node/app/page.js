@@ -5,31 +5,31 @@ export default function HomePage() {
     {
       href: "/evaluation",
       title: "Model Evaluation",
-      description: "Compare sentiment model performance across corpora and inspect benchmark tradeoffs.",
+      description: "Compare sentiment models across datasets.",
       eyebrow: "Models"
     },
     {
       href: "/text",
       title: "Text Analysis",
-      description: "Run focused sentiment checks on short passages without leaving the dashboard.",
+      description: "Try sentiment analysis on a passage of your own.",
       eyebrow: "Sandbox"
     },
     {
       href: "/about",
       title: "About",
-      description: "Review the project method, data pipeline, and research boundaries.",
+      description: "Learn how the project works.",
       eyebrow: "Method"
     },
     {
       href: "/research",
       title: "Poster and Paper",
-      description: "Use a publication-ready outline for the poster, paper, figures, and claim boundaries.",
+      description: "Read the research and explore the figures.",
       eyebrow: "Writeup"
     },
     {
       href: "/news",
       title: "News Analytics",
-      description: "Explore source, topic, lens, workflow, and reliability diagnostics.",
+      description: "Browse articles and compare topics, sources, and lenses.",
       eyebrow: "News"
     }
   ];
@@ -37,17 +37,17 @@ export default function HomePage() {
   return (
     <main className="home-page">
       <section className="home-hero">
-        <p className="home-kicker">Public research surface</p>
-        <h1>NewsLens Research Dashboard</h1>
+        <p className="home-kicker">NewsLens</p>
+        <h1>A closer look at the news.</h1>
         <p className="muted">
-          Explore sentiment-model evaluation and AI-assisted news analysis through a public, read-only dashboard.
+          Explore articles, compare how sources cover a topic, and follow changes over time.
         </p>
         <div className="home-hero-actions">
-          <Link href="/news" className="news-nav-link active-link">
-            Open News Analytics
+          <Link href="/news/digest" className="news-nav-link active-link">
+            Browse articles
           </Link>
-          <Link href="/evaluation" className="news-nav-link">
-            View Model Evaluation
+          <Link href="/news" className="news-nav-link">
+            Explore the views
           </Link>
         </div>
       </section>
@@ -56,10 +56,9 @@ export default function HomePage() {
         <div className="panel">
           <div className="panel-heading">
             <div>
-              <p className="section-kicker">Workspace Index</p>
-              <h2>Core Workspaces</h2>
+              <p className="section-kicker">Explore</p>
+              <h2>Choose where to start</h2>
             </div>
-            <p className="muted compact-copy">Four entry points, each optimized for a different kind of analysis.</p>
           </div>
           <div className="home-card-grid">
             {workspaces.map((workspace) => (
@@ -74,24 +73,23 @@ export default function HomePage() {
 
         <div className="panel home-focus-panel">
           <p className="section-kicker">Research Focus</p>
-          <h2>Exploratory, auditable, and bounded</h2>
+          <h2>One story, several lenses</h2>
           <p>
-            NewsLens is designed for exploratory analysis. It supports transparent comparisons of model behavior,
-            source-level framing patterns, topic-controlled differences, and data quality signals without treating
-            automated scores as final judgments.
+            Lenses ask different questions about an article: who has a voice, who is treated as an authority,
+            or how emotion shapes the story. Use them to compare readings and return to the articles.
           </p>
           <div className="focus-points">
             <div className="focus-point">
-              <strong>Comparative</strong>
-              <span>Track how outlets, lenses, tags, and events differ under shared measurement rules.</span>
+              <strong>Choose a topic</strong>
+              <span>Use tags to focus on the coverage you want to explore.</span>
             </div>
             <div className="focus-point">
-              <strong>Transparent</strong>
-              <span>Keep derived metrics visible so users can audit what supports each visual claim.</span>
+              <strong>Compare sources</strong>
+              <span>Look at differences within a topic or a shared event.</span>
             </div>
             <div className="focus-point">
-              <strong>Controlled</strong>
-              <span>Favor topic, tag, and same-event views over pooled summaries when interpretation matters.</span>
+              <strong>Read for yourself</strong>
+              <span>Follow the annotations back to the articles.</span>
             </div>
           </div>
         </div>

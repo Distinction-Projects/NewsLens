@@ -186,7 +186,7 @@ python -m src.analytics.build_news_snapshot --output data/processed/news_analyti
 `RSS_SOURCE_EFFECT_PERMUTATIONS` controls pooled source tests. `RSS_SOURCE_DIFF_SLICE_PERMUTATIONS` controls repeated within-topic/within-tag source-differentiation tests, which should usually stay lower for reliable deploy-time snapshot builds.
 
 If `NEWS_STATS_BACKEND=precomputed` and the snapshot is missing, invalid, older than `RSS_MAX_AGE_SECONDS`, or bypassed with `refresh=1`, `/api/news/stats` and `/api/news/export` fall back to request-time analytics with `Cache-Control: no-store` and `meta.stats_backend_fallback=precomputed_unavailable` when a precomputed snapshot was rejected.
-The droplet deploy workflow also runs daily so the production snapshot is rebuilt even when no application code changes.
+The droplet deploy workflow also runs daily at 14:17 UTC, after the upstream RSS job at 13:10 UTC, so the production snapshot is rebuilt even when no application code changes. Deployment preserves `data/cache/` and `data/processed/` during synchronization and requires fresh upstream data and a working precomputed stats response before passing its smoke check.
 
 Event-controlled source analysis is included under `derived.event_control`. It uses embeddings to cluster likely same-story articles, then reruns source differentiation only within multi-source event clusters. Missing embedding credentials do not break stats generation; the event-control block returns `status: unavailable`.
 
@@ -483,10 +483,13 @@ This repo includes an automated deploy workflow at:
 
 It runs on push to `main` (and supports manual runs via `workflow_dispatch`) and does:
 
-- rsync current repo contents to `/srv/newslens/app`
+- rsync current repo contents to `/srv/newslens/app`, preserving runtime caches and snapshots
 - install/update Python requirements in `/srv/newslens/venv`
-- restart `newslens` with `systemd`
-- run a smoke check against `http://127.0.0.1:8000/news/source-effects`
+- apply database migrations/imports when the Postgres backend is selected
+- build the analytics snapshot and Next.js frontend before restarting FastAPI and Next.js
+- verify public routes, fresh upstream data, and precomputed stats without dynamic fallback
+
+Scheduled workflows can be disabled by GitHub after repository inactivity. If updates stop, check both this workflow and `RSS_Feeds/.github/workflows/daily_rss_openai.yml`; restore upstream publication first, then redeploy NewsLens. A successful HTTP response alone is not proof that data is current: check `/health/news-freshness` and `/api/news/stats` metadata.
 
 Required repository secrets:
 

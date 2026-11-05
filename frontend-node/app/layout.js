@@ -22,8 +22,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
+        <a className="skip-link" href="#main-content">Skip to content</a>
         <header className="top-nav-wrap">
-          <nav className="top-nav">
+          <nav className="top-nav" aria-label="Main navigation">
             <Link href="/" className="top-nav-brand">
               <span className="top-nav-mark" aria-hidden="true">
                 NL
@@ -34,15 +35,15 @@ export default function RootLayout({ children }) {
               </span>
             </Link>
             <div className="top-nav-links">
-              <Link href="/evaluation">Evaluation</Link>
-              <Link href="/text">Text</Link>
+              <Link href="/news">News</Link>
               <Link href="/research">Research</Link>
               <Link href="/about">About</Link>
-              <Link href="/news">News</Link>
+              <Link href="/evaluation">Evaluation</Link>
+              <Link href="/text">Text</Link>
             </div>
           </nav>
         </header>
-        <div className="app-shell">
+        <div className="app-shell" id="main-content" tabIndex={-1}>
           <div className="app-shell-glow app-shell-glow-left" aria-hidden="true" />
           <div className="app-shell-glow app-shell-glow-right" aria-hidden="true" />
           {children}
