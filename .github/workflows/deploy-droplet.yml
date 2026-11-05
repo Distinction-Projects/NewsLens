@@ -5,7 +5,8 @@ on:
     branches:
       - main
   schedule:
-    - cron: "17 10 * * *"
+    # Refresh analytics after the 13:10 UTC RSS publication job.
+    - cron: "17 14 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -77,6 +78,8 @@ jobs:
             --exclude 'test-results' \
             --exclude 'playwright-report' \
             --exclude '.tmp' \
+            --exclude 'data/cache/' \
+            --exclude 'data/processed/' \
             -e "ssh -p ${DEPLOY_PORT:-22}" \
             ./ "${DEPLOY_USER}@${DEPLOY_HOST}:/srv/newslens/app/"
 
@@ -314,6 +317,14 @@ jobs:
 
           with urllib.request.urlopen("http://127.0.0.1:9000/api/news/stats", timeout=120) as response:
               payload = json.loads(response.read().decode("utf-8"))
+
+          meta = payload.get("meta", {})
+          if meta.get("stats_backend") != "precomputed" or meta.get("stats_backend_fallback"):
+              raise SystemExit("production stats must use the generated snapshot without dynamic fallback")
+          with urllib.request.urlopen("http://127.0.0.1:9000/health/news-freshness", timeout=20) as response:
+              freshness = json.loads(response.read().decode("utf-8"))
+          if freshness.get("is_fresh") is not True:
+              raise SystemExit("upstream publication is stale")
 
           derived = payload.get("data", {}).get("derived", {})
           required = ["source_topic_control", "tag_sliced_analysis", "event_control"]

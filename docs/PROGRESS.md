@@ -16,16 +16,20 @@ Use this file as persistent state for daily incremental agent runs.
 - Backlog source: `docs/BACKLOG.md`.
 
 ## Last Run
-- Date: 2026-05-12
-- Status: hardened production stats reads against missing precomputed snapshot artifacts.
-- Changes: changed [`/Users/alexstevens/Documents/GitHub/NewsLens/src/api/news_controller.py`](/Users/alexstevens/Documents/GitHub/NewsLens/src/api/news_controller.py) so `NEWS_STATS_BACKEND=precomputed` still serves the snapshot when available, but `/api/news/stats` and `/api/news/export` now fall back to request-time analytics with `Cache-Control: no-store` and `meta.stats_backend_fallback=precomputed_unavailable` when the snapshot file is missing or invalid. Updated [`/Users/alexstevens/Documents/GitHub/NewsLens/tests/test_fastapi_news_endpoints.py`](/Users/alexstevens/Documents/GitHub/NewsLens/tests/test_fastapi_news_endpoints.py) and [`/Users/alexstevens/Documents/GitHub/NewsLens/README.md`](/Users/alexstevens/Documents/GitHub/NewsLens/README.md) for the new fail-open contract.
-- Validation:
-  - `.venv/bin/python -m py_compile src/api/news_controller.py tests/test_fastapi_news_endpoints.py`
-  - `.venv/bin/python -m unittest tests.test_fastapi_news_endpoints.FastApiNewsEndpointTests.test_stats_precomputed_mode_serves_snapshot_and_missing_falls_back -v`
-  - `npm run build` was attempted in `frontend-node`, but the local Homebrew Node binary failed before app build startup because it references missing `/opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib`; only `libllhttp.9.4.1.dylib` is installed locally.
+- Date: 2026-11-05
+- Status: publication recovery in progress; upstream fix merged and capped refresh running, app deployment pending.
+- Replaced the repeated news hero/directory with compact navigation and grouped views. Simplified the homepage/news index, added feed-date/staleness visibility, and fixed mobile filter/table layout. Routes and analytics remain unchanged.
+- Added freshness unit tests and navigation/filter/mobile coverage. Chart smoke tests now check rendered Plotly SVGs, not just empty containers.
+- Initial live data dated to July 20. Both scheduled workflows had been disabled for inactivity. The September RSS run failed because two feed transport failures blocked publication. RSS PR #24 fixes limited-outage handling while keeping content gates strict; the daily workflow is enabled again.
+- Recovery run: https://github.com/Distinction-Projects/RSS_Feeds/actions/runs/42125796583 (24 sources, one item/feed, at most four scoring items, no forced rescore).
+- Deployment now preserves runtime cache/snapshot directories, runs daily after upstream publication, and checks freshness plus actual precomputed stats metadata.
+- Validation: 8 freshness tests pass; all 25 renderer modules checked; Next production build passes; Playwright smoke suite passes 14 tests, and fixture-backed mode passes 13 with the redundant route sweep skipped. Desktop/mobile screenshots inspected. `git diff --check` passes.
+- Release checks: all 467 backend tests and 103 RSS offline tests pass; upstream GitHub smoke checks, typing, lint and format checks pass. Next build and 13 fixture browser checks rerun successfully.
+- Focused review prompt and evidence: `docs/SITE_REVIEW_AND_ASTRA_HANDOFF.md`. No Astra escalation required for this implementation pass.
+- The older Homebrew build-startup problem is not currently reproduced; the installed Node toolchain builds successfully.
 
 ## Next Concrete Step
-- Repair or reinstall the local Node/Homebrew toolchain, rerun `npm run build`, then deploy this API fallback if the production droplet still lacks `/srv/newslens/app/data/processed/news_analytics_snapshot.json`.
+- Confirm fresh RSS publication, enable the droplet workflow, deploy the app release, then verify live freshness, precomputed stats and representative desktop/mobile charts. Do not interpret local checks or a started job as a completed live release.
 
 ## Notes For Future Agents
 - Prefer additive `derived.*` backend fields for reusable analysis.

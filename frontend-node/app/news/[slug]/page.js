@@ -22,18 +22,19 @@ export default async function NewsDetailPage({ params, searchParams }) {
   return (
     <>
       <div className="page-title-row">
-        <h2>{page.title}</h2>
-        <p className="muted">Live FastAPI data</p>
+        <h1>{page.title}</h1>
       </div>
       <PageIntro summary={page.summary} />
 
       {errorMessage ? (
         <div className="panel">
           <h3>API Error</h3>
-          <p className="muted">{errorMessage}</p>
-          <p>
-            Ensure FastAPI is running: <code>uvicorn src.api.fastapi_app:app --reload --port 9000</code>
-          </p>
+          <p className="muted">This view could not load its data. Please try again shortly, or browse another view.</p>
+          <a className="news-nav-link" href="">Try again</a>
+          <details className="news-error-details">
+            <summary>Technical details</summary>
+            <p className="muted">{errorMessage}</p>
+          </details>
         </div>
       ) : (
         body
