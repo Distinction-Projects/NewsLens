@@ -36,15 +36,18 @@ Checked November 5, 2026. The findings below describe the state before recovery;
 
 - RSS publication policy is implemented and merged: https://github.com/Distinction-Projects/RSS_Feeds/pull/24 (main commit `9408b6e7bb0c0fc8641fad0e7ae840b782179ba7`).
 - Limited feed transport failures are warnings only when at least 80% of audited feeds succeed and eligible articles exist. Content gates still block publication. Full outages and empty collections fail.
-- The RSS workflow is enabled again. A recovery run is in progress with 24 sources, one item per feed, at most four scored articles, cache reuse, and no forced rescore: https://github.com/Distinction-Projects/RSS_Feeds/actions/runs/42125796583.
-- The app release preserves runtime caches/snapshots, moves scheduled deployment after RSS publication, and rejects stale/dynamic-fallback stats in its smoke checks. Live deployment verification is still pending.
-- App backend: 467 tests pass. RSS: 103 offline tests and serialization/quality/publication checks pass; CI lint, format, typing and smoke checks pass. Next build, freshness tests, renderer guard and fixture browser checks pass.
+- Both production workflows are active again. The capped RSS recovery completed successfully with 24 sources, one item per feed, four scored articles, and no forced rescore: https://github.com/Distinction-Projects/RSS_Feeds/actions/runs/42125796583. It collected 23 articles, of which 22 were publishable. The broader audit had 60/63 successful feeds; three transport outages remained visible as warnings.
+- GitHub scoring caches had expired. https://github.com/Distinction-Projects/RSS_Feeds/pull/25 (main commit `40a0f90c84829704b2a45a289f59ff393e012762`) restores 172 existing article aggregates from their previous publication alongside four new annotations. The publisher now retains those aggregates for unchanged text, with original publication-date provenance. It does not invent question-level responses or revive excluded articles.
+- The public upstream artifact is generated `2026-11-05T23:01:33Z`, with 3,186 rolling-window articles and 176 scored articles. NewsLens filters 51 unscraped records from normalized input; keep corpus, filtered and scored denominators distinct.
+- App PR #4 is merged at `eb777a52d166aa0e56407db363dea2bc23eee718`. Deployment passed: https://github.com/Distinction-Projects/NewsLens/actions/runs/42127166780. It preserves runtime caches/snapshots, schedules deployment after RSS publication, and rejects stale/dynamic-fallback stats in smoke checks.
+- Live verification passes: 13 public UI routes return 200, the four API/health checks return valid JSON, freshness is healthy, and stats use `precomputed` without fallback. Browser checks confirm actual PCA, source-effects, trends and topic/tag-map charts, plus mobile news navigation and digest filters without page overflow.
+- App backend: 467 tests pass. RSS: 108 offline tests and serialization/quality/publication checks pass; CI lint, format, typing and smoke checks pass. Next build, freshness tests, renderer guard and fixture browser checks pass.
 
 ## Next Work, In Order
 
-1. Verify the bounded RSS recovery run publishes a new upstream artifact.
-2. Deploy the tested UI and regenerate the production stats snapshot; require precomputed backend metadata without fallback.
-3. Recheck live freshness, article/lens coverage, representative tag/source charts, and mobile navigation after deployment.
+1. Review the first full scheduled RSS run and following deployment. Today's end-to-end proof used a smaller recovery cap, not the normal 72-source/eight-score workload.
+2. Plan durable persistence for question-level scoring/audit records outside expiring Actions caches; aggregate continuity is now protected, but raw responses are a separate concern.
+3. Continue small usability improvements with explicit scored-sample coverage. No bulk rescore, database cutover or further high-reasoning review is required for the completed release.
 
 ## When Astra Is Useful
 
